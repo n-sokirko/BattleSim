@@ -10,6 +10,9 @@ ROOT = pathlib.Path(__file__).parent
 SRC = ROOT / "models"
 OUT = ROOT / "pack"
 OUT.mkdir(exist_ok=True)
+# Для Unity: тот же GLB и PNG, но как .bytes в Resources (читаются в игре через TextAsset)
+UNITY = ROOT.parent / "unity" / "Assets" / "BattleSim" / "Resources" / "Models"
+UNITY.mkdir(parents=True, exist_ok=True)
 
 KEEP_ANIMS = {
     "Knight": ["Idle", "Running_A", "Walking_A", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal",
@@ -134,6 +137,7 @@ def pack(name, rel):
     glb = struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(js) + 8 + len(blob))
     glb += struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + bytes(blob)
     (OUT / f"{name}.txt").write_text(base64.b64encode(glb).decode(), encoding="ascii")
+    (UNITY / f"{name}.bytes").write_bytes(glb)
     return len(glb)
 
 
@@ -142,4 +146,6 @@ for name, rel in MODELS.items():
     n = pack(name, rel)
     total += n
     print(f"{name:16s} {n / 1024:8.0f} KB")
+for png in OUT.glob("*.png"):
+    (UNITY / (png.stem + ".png.bytes")).write_bytes(png.read_bytes())
 print("GLB total:", round(total / 1e6, 2), "MB;  folder:", round(sum(f.stat().st_size for f in OUT.iterdir()) / 1e6, 2), "MB")

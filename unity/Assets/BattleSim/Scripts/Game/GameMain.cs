@@ -1,0 +1,396 @@
+using System.Collections;
+using System.Collections.Generic;
+using BattleSim.Core;
+using UnityEngine;
+
+namespace BattleSim
+{
+    public enum Phase { Loading, Setup, Fight, Result }
+
+    /// <summary>
+    /// Точка входа: повесьте на пустой объект в сцене (это делает меню BattleSim → Настроить проект)
+    /// и нажмите Play. Мир, армии, камера и интерфейс создаются из кода.
+    /// </summary>
+    public class GameMain : MonoBehaviour
+    {
+        [Tooltip("0 — случайная карта при каждом запуске")]
+        public int Seed;
+
+        public Phase Phase = Phase.Loading;
+        public World World = new World();
+        public Battle Battle;
+        public ModelLibrary Lib = new ModelLibrary();
+        public CameraRig Rig;
+        public Camera Cam;
+        public Style Style;
+        public bool LowEnd;
+
+        // выбор игрока
+        public int Type, Team, MapSel = -1, ArmySize = 2;
+        public bool Eraser, Paused, Big;
+        public float Speed = 1;
+        public int Winner = -1;
+        public float BattleTime;
+        public MapType MapType;
+        public int MapSeed;
+        public string MapName = "Готовим поле…";
+        public string Toast;
+        public float ToastT;
+        public readonly List<LogEntry> Chronicle = new List<LogEntry>();
+        public bool HelpOpen;
+        public float LoadProgress;
+        public string LoadText = "Собираем войска и рисуем карту…";
+
+        WorldView view = new WorldView();
+        Overlays overlays;
+        Light sun;
+        Hud hud;
+        float resultDelay;
+        int lastBiome = -1;
+        bool pausedByHelp;
+        readonly Dictionary<Unit, Banner> banners = new Dictionary<Unit, Banner>();
+        readonly Dictionary<Unit, Matrix4x4> bannerM = new Dictionary<Unit, Matrix4x4>();
+        Plane[] frustum = new Plane[6];
+
+        const float LodDistHigh = 55f, LodDistLow = 38f;
+
+        void Awake()
+        {
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            LowEnd = Application.isMobilePlatform || SystemInfo.processorCount <= 4;
+            Battle.MaxUnits = LowEnd ? 1200 : 3200;
+            InputBridge.Init();
+
+            Cam = Camera.main;
+            if (Cam == null)
+            {
+                var go = new GameObject("Main Camera") { tag = "MainCamera" };
+                Cam = go.AddComponent<Camera>();
+                go.AddComponent<AudioListener>();
+            }
+            sun = RenderSettings.sun;
+            if (sun == null)
+            {
+                foreach (var l in FindObjectsByType<Light>(FindObjectsSortMode.None)) if (l.type == LightType.Directional) { sun = l; break; }
+                if (sun == null) sun = new GameObject("Sun").AddComponent<Light>();
+            }
+            Atmosphere.SetupCamera(Cam, LowEnd);
+            Rig = Cam.GetComponent<CameraRig>();
+            if (Rig == null) Rig = Cam.gameObject.AddComponent<CameraRig>();
+            Rig.OnTap = OnTap;
+            Rig.OnHover = OnHover;
+            Rig.Focus = () => Battle?.Centroid();
+            hud = gameObject.AddComponent<Hud>();
+            hud.Game = this;
+            Rig.IsOverUI = hud.IsOverUI;
+            Battle = new Battle(World);
+            Battle.OnLog += e => { Chronicle.Insert(0, e); if (Chronicle.Count > 12) Chronicle.RemoveAt(Chronicle.Count - 1); };
+            Battle.Bolts.Cap = LowEnd ? 700 : 1600;
+            StartCoroutine(Load());
+        }
+
+        IEnumerator Load()
+        {
+            yield return null;
+            yield return Lib.Load((p, text) => { LoadProgress = p; LoadText = text; });
+            Battle.ClipDur = (type, name) => type < 3 && Lib.Inf[type] != null ? Lib.Inf[type].Baked.Dur(name) : 0;
+            overlays = new Overlays();
+            overlays.SetBolt(Lib);
+            LoadText = "Рисуем карту…";
+            yield return null;
+            ArmySize = LowEnd ? 1 : 2;
+            string shots = Arg("-shots");
+            if (shots != null)
+            {
+                if (Arg("-map") != null) MapSel = int.Parse(Arg("-map"));
+                if (Arg("-size") != null) ArmySize = int.Parse(Arg("-size"));
+                if (Arg("-seed") != null) Seed = int.Parse(Arg("-seed"));
+            }
+            NewMap(Seed != 0 ? Seed : 0);
+            Battle.RandomArmies(ArmySize);
+            ShowToast("Карта: " + Style.Title + ". Расставьте армии и жмите «В бой!»", 4.2f);
+            if (shots != null) StartCoroutine(AutoShots(shots));
+        }
+
+        static string Arg(string name)
+        {
+            var a = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < a.Length - 1; i++) if (a[i] == name) return a[i + 1];
+            return null;
+        }
+
+        /// <summary>Автосъёмка для проверки: расстановка, начало боя, разгар, итог — и выход.</summary>
+        IEnumerator AutoShots(string dir)
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            string tag = MapType.ToString().ToLowerInvariant();
+            yield return new WaitForSeconds(2f);
+            ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0setup.png"));
+            yield return new WaitForSeconds(1f);
+            StartBattle();
+            Speed = 2;
+            foreach (int t in new[] { 8, 20, 35 })
+            {
+                while (BattleTime < t && Phase == Phase.Fight) yield return null;
+                var focus = Battle.Centroid();
+                if (focus.HasValue) Rig.LookAt(focus.Value.x, focus.Value.z - 30, 0.4f * t, (28 + t) * M.DEG, 60 + t, true);
+                yield return new WaitForSeconds(0.6f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{tag}_{t:00}s.png"));
+                yield return new WaitForSeconds(0.4f);
+            }
+            var c = Battle.Centroid();
+            if (c.HasValue) Rig.LookAt(c.Value.x, c.Value.z, 2.2f, 22 * M.DEG, 22, true);
+            yield return new WaitForSeconds(0.8f);
+            ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_close.png"));
+            yield return new WaitForSeconds(1f);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
+                $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
+                string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")));
+            Application.Quit();
+        }
+
+        public void ShowToast(string text, float sec = 2.6f) { Toast = text; ToastT = sec; }
+
+        public string MapTypeName => Defs.Maps[(int)MapType].Name;
+
+        /// <summary>Новая карта: биом и время суток по сиду, местность — выбранная или случайная.</summary>
+        public void NewMap(int seed = 0)
+        {
+            MapSeed = seed != 0 ? seed : Random.Range(1, 99999) | 1;
+            var r = new Rng(MapSeed);
+            int biome = (int)(r.Next() * Defs.Biomes.Length);
+            if (biome == lastBiome) biome = (biome + 1 + (int)(r.Next() * (Defs.Biomes.Length - 1))) % Defs.Biomes.Length;
+            lastBiome = biome;
+            Style = Style.Make(biome, (int)(r.Next() * Defs.Times.Length));
+            MapType = MapSel < 0 ? Defs.Maps[(int)(r.Next() * Defs.Maps.Length)].Type : (MapType)MapSel;
+            Style.Tweak(MapType);
+            Big = ArmySize == 3;
+            ClearBanners();
+            World.Generate(MapSeed, Style, MapType, Big, Lib.CityDefs, LowEnd);
+            view.Build(World, Style, Lib, LowEnd);
+            Atmosphere.Apply(Style, World.SunDir, sun, Cam);
+            Rig.World = World;
+            Battle.ResetToPlan();
+            Phase = Phase.Setup;
+            Rig.Cinematic = false;
+            Rig.LookAt(0, -(World.SpawnZ + 22), 0, 36 * M.DEG, Big ? 115 : 85, true);
+            MapName = $"{MapTypeName} · {Style.Title} · карта №{MapSeed}";
+        }
+
+        public void NewMapButton()
+        {
+            NewMap();
+            if (Battle.Plan.Count == 0 || MapType == MapType.City) Battle.RandomArmies(ArmySize);
+            ShowToast(MapName);
+        }
+
+        public void MakeArmies()
+        {
+            if ((ArmySize == 3) != Big) NewMap(MapSeed); // для великой сечи — большое поле
+            Battle.RandomArmies(ArmySize);
+            ShowToast($"Армии: {Battle.PlanCount[0]} синих против {Battle.PlanCount[1]} красных");
+        }
+
+        public void ChangeMapType(int sel)
+        {
+            MapSel = sel;
+            NewMap();
+            Battle.RandomArmies(ArmySize);
+            var d = Defs.Maps[(int)MapType];
+            ShowToast($"{d.Name}: {d.Note}", 3.6f);
+        }
+
+        public void StartBattle()
+        {
+            if (Battle.PlanCount[0] == 0 || Battle.PlanCount[1] == 0) { ShowToast("Нужны обе армии: поставьте и синих, и красных"); return; }
+            if (Phase != Phase.Setup) Battle.ResetToPlan();
+            ClearBanners();
+            Chronicle.Clear();
+            Battle.StartFight();
+            Phase = Phase.Fight; Paused = false; Speed = 1; Winner = -1; BattleTime = 0; resultDelay = 0; Eraser = false;
+            overlays.GhostCount = 0;
+        }
+
+        public void StopBattle()
+        {
+            ClearBanners();
+            Battle.ResetToPlan();
+            Phase = Phase.Setup;
+            Paused = false;
+            Rig.Cinematic = false;
+        }
+
+        public void OpenHelp(bool open)
+        {
+            HelpOpen = open;
+            if (open) { pausedByHelp = Phase == Phase.Fight && !Paused; if (pausedByHelp) Paused = true; }
+            else { if (pausedByHelp) Paused = false; pausedByHelp = false; }
+        }
+
+        void ClearBanners()
+        {
+            foreach (var b in banners.Values) Destroy(b.Go);
+            banners.Clear();
+        }
+
+        void OnTap(Vector2 screen)
+        {
+            if (Phase != Phase.Setup || HelpOpen) return;
+            var p = Rig.GroundPoint(screen);
+            if (p == null) return;
+            if (Eraser)
+            {
+                if (Battle.RemoveNear(p.Value.x, p.Value.z, 4) == 0) ShowToast("Здесь никого нет");
+                return;
+            }
+            if (!World.InField(p.Value.x, p.Value.z, 1)) { ShowToast("Ставить отряды можно только на поле боя"); return; }
+            int n = Battle.PlaceSquad(Type, Team, p.Value.x, p.Value.z, Team == 0 ? 0 : M.PI);
+            if (n == 0) ShowToast(Battle.Units.Count >= Battle.MaxUnits ? $"Предел — {Battle.MaxUnits} солдат" : "Здесь тесно — выберите другое место");
+        }
+
+        void OnHover(Vector2 screen)
+        {
+            if (overlays == null) return;
+            if (Phase != Phase.Setup || Eraser || HelpOpen) { overlays.GhostCount = 0; return; }
+            var p = Rig.GroundPoint(screen);
+            if (p == null || !World.InField(p.Value.x, p.Value.z, 1)) { overlays.GhostCount = 0; return; }
+            overlays.SetGhost(World, p, Type, Team);
+        }
+
+        void Update()
+        {
+            InputBridge.Poll();
+            float dt = Mathf.Min(Time.deltaTime, 0.05f);
+            ToastT -= Time.unscaledDeltaTime;
+            if (Phase == Phase.Loading) return;
+
+            if (!HelpOpen)
+            {
+                if (InputBridge.Pressed(K.Space) && Phase == Phase.Fight) Paused = !Paused;
+                if (InputBridge.Pressed(K.Tab)) Rig.Cinematic = !Rig.Cinematic;
+                if (Phase == Phase.Setup)
+                {
+                    if (InputBridge.Pressed(K.D1)) { Type = 0; Eraser = false; }
+                    if (InputBridge.Pressed(K.D2)) { Type = 1; Eraser = false; }
+                    if (InputBridge.Pressed(K.D3)) { Type = 2; Eraser = false; }
+                    if (InputBridge.Pressed(K.D4)) { Type = 3; Eraser = false; }
+                    if (InputBridge.Pressed(K.T)) Team = 1 - Team;
+                    if (InputBridge.Pressed(K.Enter)) StartBattle();
+                }
+            }
+
+            float simDt = Phase == Phase.Setup || Paused ? 0 : dt * Speed;
+            int steps = Mathf.Max(1, Mathf.CeilToInt(simDt / 0.034f));
+            for (int i = 0; i < steps; i++) Battle.Tick(simDt / steps);
+            if (Phase == Phase.Fight)
+            {
+                BattleTime += simDt;
+                if (Battle.Disengaged && Battle.Alive[0] > 0 && Battle.Alive[1] > 0)
+                {
+                    Winner = Battle.Alive[0] > Battle.Alive[1] ? 0 : Battle.Alive[1] > Battle.Alive[0] ? 1 : -1;
+                    Battle.AddLog(Winner, Winner < 0 ? "Армии разошлись — ничья" : $"Армии разошлись: поле боя осталось за {(Winner == 0 ? "синими" : "красными")}");
+                    Phase = Phase.Result;
+                    Rig.Cinematic = true;
+                }
+                else if (Battle.Alive[0] == 0 || Battle.Alive[1] == 0)
+                {
+                    resultDelay += simDt;
+                    if (resultDelay > 1.5f)
+                    {
+                        Winner = Battle.Alive[0] > 0 ? 0 : Battle.Alive[1] > 0 ? 1 : -1;
+                        Phase = Phase.Result;
+                        Rig.Cinematic = true;
+                    }
+                }
+            }
+
+            // Анимации и отрисовка толпы
+            float animDt = Phase == Phase.Setup ? dt : Paused ? 0 : dt * Speed;
+            bool cheer = Phase == Phase.Result;
+            foreach (var u in Battle.Units) if (u.Alive) Battle.Animate(u, cheer && u.Team == Winner);
+            RenderCrowd(animDt);
+            overlays.DrawRings(Battle);
+            overlays.DrawGhost();
+            overlays.DrawBolts(Battle, Lib);
+            UpdateBanners();
+            view.Draw();
+        }
+
+        /// <summary>Раскладывает всех видимых солдат по пачкам: вид × армия × детализация.</summary>
+        void RenderCrowd(float animDt)
+        {
+            foreach (var m in Lib.Inf) m.Begin();
+            foreach (var m in Lib.Rider.Values) m.Begin();
+            foreach (var m in Lib.Horse) m.Begin();
+            GeometryUtility.CalculateFrustumPlanes(Cam, frustum);
+            var cp = Cam.transform.position;
+            float lod = LowEnd ? LodDistLow : LodDistHigh, lod2 = lod * lod;
+            bannerM.Clear();
+            foreach (var u in Battle.Units)
+            {
+                u.Anim.Step(animDt);
+                u.Ride?.Step(animDt);
+                var p = Conv.U(u.Pos);
+                if (!GeometryUtility.TestPlanesAABB(frustum, new Bounds(p + Vector3.up, Vector3.one * 5))) continue;
+                int l = (p - cp).sqrMagnitude < lod2 ? 0 : 1;
+                float sink = u.Alive ? 0 : Mathf.Max(0, u.DeadT - 18) * 0.25f;
+                var m = Matrix4x4.TRS(new Vector3(p.x, p.y - sink, p.z), Conv.Yaw(u.Yaw), Vector3.one * u.Scale);
+                if (u.T.Mount)
+                {
+                    var hm = Lib.Horse[u.Horse];
+                    int hr = hm.Row(u.Anim);
+                    hm.Add(0, l, m, hr, u.Anim.PrevRow, u.Anim.Blend);
+                    u.Anim.LastRow = hr;
+                    var rm = Lib.Rider[u.Type];
+                    int rr = rm.Row(u.Ride);
+                    Vector3 off;
+                    if (u.Alive)
+                    {
+                        var s = Lib.Saddle[u.Horse];
+                        float bob = u.CurSpeed > 3.5f ? Mathf.Abs(Mathf.Sin(u.Phase)) * 0.12f : 0;
+                        off = new Vector3(s.x, s.y - Lib.RiderHipsY + bob, -s.z);
+                    }
+                    else off = new Vector3(1.2f, 0, 0.3f); // всадник падает рядом с конём
+                    var riderM = m * Matrix4x4.Translate(off);
+                    rm.Add(u.Team, l, riderM, rr, u.Ride.PrevRow, u.Ride.Blend);
+                    u.Ride.LastRow = rr;
+                    if (u.IsLeader && u.Alive) bannerM[u] = riderM;
+                }
+                else
+                {
+                    var im = Lib.Inf[u.Type];
+                    int r = im.Row(u.Anim);
+                    im.Add(u.Team, l, m, r, u.Anim.PrevRow, u.Anim.Blend);
+                    u.Anim.LastRow = r;
+                }
+            }
+            bool shadows = true;
+            foreach (var m in Lib.Inf) m.End(shadows);
+            foreach (var m in Lib.Rider.Values) m.End(shadows);
+            foreach (var m in Lib.Horse) m.End(shadows);
+        }
+
+        /// <summary>Знамёна едут за всадником: у главнокомандующего большое, у воевод поменьше.</summary>
+        void UpdateBanners()
+        {
+            float wind = M.Hypot(World.Wind.x, World.Wind.z);
+            var seen = new HashSet<Unit>();
+            foreach (var kv in bannerM)
+            {
+                var u = kv.Key;
+                if (!banners.TryGetValue(u, out var b))
+                {
+                    b = new Banner(u.Team, u.T.Special == Special.Captain ? 0.72f : 1f, Lib.RiderHipsY);
+                    banners[u] = b;
+                }
+                seen.Add(u);
+                b.Update(kv.Value, Time.time, wind);
+            }
+            var gone = new List<Unit>();
+            foreach (var kv in banners) if (!seen.Contains(kv.Key)) gone.Add(kv.Key);
+            foreach (var u in gone) { Destroy(banners[u].Go); banners.Remove(u); }
+        }
+    }
+}

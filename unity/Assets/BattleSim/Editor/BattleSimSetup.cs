@@ -9,66 +9,55 @@ using UnityEngine.Rendering.Universal;
 namespace BattleSim.EditorTools
 {
     /// <summary>
-    /// При первом открытии проекта создаёт сцену BattleSim, материалы и настраивает проект под Android.
+    /// При первом открытии проекта создаёт URP, сцену BattleSim и настраивает проект под Android.
     /// Повторить вручную: меню BattleSim → Настроить проект и открыть сцену.
     /// </summary>
     [InitializeOnLoad]
     public static class BattleSimSetup
     {
         const string Root = "Assets/BattleSim";
-        const string ResDir = Root + "/Resources";
+        const string SettingsDir = Root + "/Settings";
         const string ScenePath = Root + "/BattleSim.unity";
+        static readonly string[] Shaders = { "BattleSim/Lit", "BattleSim/Water", "BattleSim/Unlit", "Skybox/Procedural" };
 
         static BattleSimSetup()
         {
             EditorApplication.delayCall += TryAutoSetup;
         }
 
-        static string AutoKey => "BattleSim.AutoSetup." + Application.dataPath.GetHashCode();
-
         static void TryAutoSetup()
         {
-            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
-            {
-                EditorApplication.delayCall += TryAutoSetup;
-                return;
-            }
-            if (File.Exists(ScenePath) || EditorPrefs.GetBool(AutoKey, false)) return;
-            EditorPrefs.SetBool(AutoKey, true);
+            if (Application.isBatchMode || EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating) { EditorApplication.delayCall += TryAutoSetup; return; }
+            if (File.Exists(ScenePath)) return;
             Setup();
         }
 
         [MenuItem("BattleSim/Настроить проект и открыть сцену", priority = 0)]
         public static void Setup()
         {
-            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
-
-            if (GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset == null)
-            {
-                EditorUtility.DisplayDialog("BattleSim",
-                    "В проекте не включён URP (Universal Render Pipeline).\n\n" +
-                    "Проще всего создать новый проект в Unity Hub по шаблону «Universal 3D» и скопировать туда папку BattleSim.",
-                    "Понятно");
-            }
-
-            EnsureFolder(Root);
-            EnsureFolder(ResDir);
-            CreateMaterials();
-            CreateScene();
+            if (!Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            EnsureFolder(SettingsDir);
+            ConfigurePipeline();
             ConfigureProject();
+            CreateScene();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-
             Debug.Log("<b>BattleSim готов!</b> Сцена " + ScenePath + " открыта — нажмите Play ▶");
+        }
+
+        /// <summary>Для запуска из командной строки: -executeMethod BattleSim.EditorTools.BattleSimSetup.BatchSetup</summary>
+        public static void BatchSetup()
+        {
+            Setup();
+            EditorApplication.Exit(0);
         }
 
         [MenuItem("BattleSim/Открыть сцену битвы", priority = 1)]
         public static void OpenScene()
         {
             if (!File.Exists(ScenePath)) { Setup(); return; }
-            if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
         }
 
         static void EnsureFolder(string path)
@@ -79,97 +68,108 @@ namespace BattleSim.EditorTools
             AssetDatabase.CreateFolder(parent, Path.GetFileName(path));
         }
 
-        static void CreateMaterials()
+        /// <summary>URP: свой ассет конвейера с тенями на 150 м, если в проекте его ещё нет.</summary>
+        static void ConfigurePipeline()
         {
-            Shader lit = Shader.Find("Universal Render Pipeline/Lit");
-            if (lit == null) lit = Shader.Find("Standard");
-
-            CreateIfMissing(ResDir + "/" + GameMaterials.LitName + ".mat", () =>
+            var asset = GraphicsSettings.defaultRenderPipeline as UniversalRenderPipelineAsset;
+            if (asset == null)
             {
-                var m = new Material(lit);
-                GameMaterials.Configure(m, false);
-                return m;
-            });
-            CreateIfMissing(ResDir + "/" + GameMaterials.WaterName + ".mat", () =>
+                string rdPath = SettingsDir + "/BattleSimRenderer.asset", apPath = SettingsDir + "/BattleSimURP.asset";
+                var rd = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(rdPath);
+                if (rd == null)
+                {
+                    rd = ScriptableObject.CreateInstance<UniversalRendererData>();
+                    AssetDatabase.CreateAsset(rd, rdPath);
+                }
+                asset = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(apPath);
+                if (asset == null)
+                {
+                    asset = UniversalRenderPipelineAsset.Create(rd);
+                    AssetDatabase.CreateAsset(asset, apPath);
+                }
+                GraphicsSettings.defaultRenderPipeline = asset;
+            }
+            for (int i = 0; i < QualitySettings.names.Length; i++)
             {
-                var m = new Material(lit);
-                GameMaterials.Configure(m, true);
-                GameMaterials.SetColor(m, new Color(0.13f, 0.40f, 0.50f, 0.78f));
-                return m;
-            });
-            Shader sky = Shader.Find("Skybox/Procedural");
-            if (sky != null) CreateIfMissing(ResDir + "/" + GameMaterials.SkyName + ".mat", () => new Material(sky));
+                QualitySettings.SetQualityLevel(i, false);
+                QualitySettings.renderPipeline = asset;
+            }
+            asset.shadowDistance = 160f;
+            asset.shadowCascadeCount = 2;
+            asset.mainLightShadowmapResolution = 2048;
+            asset.supportsHDR = true;
+            asset.msaaSampleCount = 1;
+            EditorUtility.SetDirty(asset);
         }
 
-        static void CreateIfMissing(string path, System.Func<Material> make)
+        static void ConfigureProject()
         {
-            if (AssetDatabase.LoadAssetAtPath<Material>(path) != null) return;
-            AssetDatabase.CreateAsset(make(), path);
+            PlayerSettings.colorSpace = ColorSpace.Linear;
+            PlayerSettings.companyName = "Sokirko";
+            PlayerSettings.productName = "Сеча";
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
+            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+            PlayerSettings.allowedAutorotateToLandscapeRight = true;
+            PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Android, "com.sokirko.secha");
+
+            // Наши шейдеры ищутся по имени — включаем их в сборку
+            var gs = AssetDatabase.LoadAssetAtPath<Object>("ProjectSettings/GraphicsSettings.asset");
+            var so = new SerializedObject(gs);
+            var arr = so.FindProperty("m_AlwaysIncludedShaders");
+            foreach (var name in Shaders)
+            {
+                var sh = Shader.Find(name);
+                if (sh == null) continue;
+                bool has = false;
+                for (int i = 0; i < arr.arraySize; i++) if (arr.GetArrayElementAtIndex(i).objectReferenceValue == sh) has = true;
+                if (has) continue;
+                arr.InsertArrayElementAtIndex(arr.arraySize);
+                arr.GetArrayElementAtIndex(arr.arraySize - 1).objectReferenceValue = sh;
+            }
+            so.ApplyModifiedProperties();
         }
 
         static void CreateScene()
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
-            var sky = AssetDatabase.LoadAssetAtPath<Material>(ResDir + "/" + GameMaterials.SkyName + ".mat");
-            if (sky != null) RenderSettings.skybox = sky;
-            // Туман включён в сцене — так Unity сохранит нужные варианты шейдеров в сборке.
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogDensity = 0.003f;
-            RenderSettings.fogColor = new Color(0.7f, 0.79f, 0.88f);
             RenderSettings.ambientMode = AmbientMode.Trilight;
+            var skyShader = Shader.Find("Skybox/Procedural");
+            if (skyShader != null)
+            {
+                string skyPath = SettingsDir + "/Sky.mat";
+                var sky = AssetDatabase.LoadAssetAtPath<Material>(skyPath);
+                if (sky == null) { sky = new Material(skyShader); AssetDatabase.CreateAsset(sky, skyPath); }
+                RenderSettings.skybox = sky;
+            }
 
             var sunGo = new GameObject("Sun");
             var sun = sunGo.AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.shadows = LightShadows.Soft;
-            sun.intensity = 1.4f;
+            sun.intensity = 1.2f;
             sunGo.transform.rotation = Quaternion.Euler(52f, -35f, 0f);
             RenderSettings.sun = sun;
 
             var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
             var cam = camGo.AddComponent<Camera>();
             camGo.AddComponent<AudioListener>();
-            cam.farClipPlane = 1400f;
-            cam.transform.position = new Vector3(0f, 50f, -120f);
-            cam.transform.LookAt(Vector3.zero);
-            var data = cam.GetUniversalAdditionalCameraData();
-            data.renderPostProcessing = true;
-            data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+            cam.farClipPlane = 3000f;
+            camGo.AddComponent<UniversalAdditionalCameraData>();
+            camGo.transform.position = new Vector3(0f, 50f, 120f);
+            camGo.transform.LookAt(Vector3.zero);
 
-            new GameObject("BattleSim").AddComponent<BattleGame>();
-
+            new GameObject("BattleSim").AddComponent<GameMain>();
             EditorSceneManager.SaveScene(scene, ScenePath);
-        }
 
-        static void ConfigureProject()
-        {
             var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
             scenes.RemoveAll(s => s.path == ScenePath);
             scenes.Insert(0, new EditorBuildSettingsScene(ScenePath, true));
             EditorBuildSettings.scenes = scenes.ToArray();
-
-            // Только горизонтальная ориентация экрана
-            PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
-            PlayerSettings.allowedAutorotateToPortrait = false;
-            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
-            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
-            PlayerSettings.allowedAutorotateToLandscapeRight = true;
-
-            // Тени дальше, чтобы солдаты отбрасывали их при обзоре издалека
-            var assets = new HashSet<UniversalRenderPipelineAsset>();
-            if (GraphicsSettings.defaultRenderPipeline is UniversalRenderPipelineAsset def) assets.Add(def);
-            for (int i = 0; i < QualitySettings.names.Length; i++)
-                if (QualitySettings.GetRenderPipelineAssetAt(i) is UniversalRenderPipelineAsset q) assets.Add(q);
-            foreach (var a in assets)
-            {
-                if (a.shadowDistance < 150f)
-                {
-                    a.shadowDistance = 150f;
-                    EditorUtility.SetDirty(a);
-                }
-            }
         }
     }
 }
