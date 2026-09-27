@@ -164,7 +164,7 @@ namespace BattleSim.Core
         }
 
         /// <summary>Где армии выстраиваются перед боем (расстояние от центра до первой линии).</summary>
-        public float SpawnZ => Town != null ? Town.CZ + 16 : Mtn != null ? Field * 0.68f : Field * (Big ? 0.3f : 0.28f);
+        public float SpawnZ => Town != null ? Town.CZ + 17 : Mtn != null ? Field * 0.68f : Field * (Big ? 0.3f : 0.28f);
 
         /// <summary>Высота, на которой стоит солдат: земля или настил (мост, боевой ход стены, лестница).</summary>
         public float GroundAt(float x, float z)
@@ -616,6 +616,22 @@ namespace BattleSim.Core
             }
             foreach (var t in F.Towers) Decks.Add(new Deck { Kind = DeckKind.Tower, Ax = t.X - t.S / 2, Az = t.Z, Bx = t.X + t.S / 2, Bz = t.Z, W = t.S, HA = t.H, HB = t.H, Rel = true, Walk = true, Solid = true });
             foreach (var r in F.Ramps) Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = r.Ax, Az = r.Az, Bx = r.Bx, Bz = r.Bz, W = r.W, HA = 0.15f, HB = r.H, Rel = true, Walk = true, Solid = true });
+            // Каменные мосты через реку и мост через ров к воротам замка
+            var spans = new List<Seg>();
+            if (Town.River != null) spans.AddRange(Town.River.Bridges);
+            if (Town.CastleBridge != null) spans.Add(Town.CastleBridge);
+            foreach (var b in spans)
+            {
+                var d = Decks.Add(new Deck { Kind = DeckKind.Bridge, Ax = b.Ax, Az = b.Az, Bx = b.Bx, Bz = b.Bz, W = b.W, HA = HeightAt(b.Ax, b.Az) + 0.08f, HB = HeightAt(b.Bx, b.Bz) + 0.08f, Rel = false, Walk = true, Solid = false, Stone = true });
+                Bridges.Add(d);
+            }
+            // Всход с боевого хода северной стены на верх донжона
+            var c = Town.Castle;
+            if (c?.KeepRamp != null)
+            {
+                var kr = c.KeepRamp;
+                Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = kr.Ax, Az = kr.Az, Bx = kr.Bx, Bz = kr.Bz, W = kr.W, HA = HeightAt(kr.Ax, kr.Az) + c.WallH, HB = HeightAt(c.Keep.x, c.Keep.z) + c.KeepH, Rel = false, Walk = true, Solid = true });
+            }
         }
 
         // ---------------------------------------------------------------- высоты
@@ -639,20 +655,9 @@ namespace BattleSim.Core
             }
             else if (Type == MapType.City)
             {
-                field = 2.2 + hills * 0.8 + detail * 0.1;
-                var c = Town?.Citadel;
-                if (c != null)
-                {
-                    // Детинец на насыпном холме с крутыми склонами и въездом-пандусом
-                    double dx = Math.Max(Math.Max(c.X0 - x, 0), x - c.X1), dz = Math.Max(Math.Max(c.Z0 - z, 0), z - c.Z1);
-                    double lift = c.H * M.Smooth(3.5, 0.5, Math.Sqrt(dx * dx + dz * dz));
-                    var r = Town.Road;
-                    double rl = Math.Sqrt((r.Bx - r.Ax) * (double)(r.Bx - r.Ax) + (r.Bz - r.Az) * (double)(r.Bz - r.Az)), ux = (r.Bx - r.Ax) / rl, uz = (r.Bz - r.Az) / rl;
-                    double along = (x - r.Ax) * ux + (z - r.Az) * uz, lat = Math.Abs(-(x - r.Ax) * uz + (z - r.Az) * ux);
-                    if (along > -1 && along < rl + 2 && lat < r.W / 2 + 1.5)
-                        lift = Math.Max(lift, c.H * M.Clamp(along / rl, 0, 1) * M.Smooth(r.W / 2 + 1.5, r.W / 2, lat));
-                    field += lift;
-                }
+                // Город уступами: посад, верхний город, скала замка; подъёмы-улицы и ров (река — ниже, после сглаживания)
+                field = 2.2 + hills * 0.35 + detail * 0.08;
+                if (Town != null) field += Town.Lift((float)x, (float)z);
             }
             else if (Type == MapType.Mountains)
             {
@@ -694,6 +699,17 @@ namespace BattleSim.Core
             }
             if (Type == MapType.Swamp || Type == MapType.Mountains) field = Math.Max(field, -3.5);
             else if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
+            if (Town?.River != null)
+            { // река через посад: крутые набережные, у стены — брод
+                var rv = Town.River;
+                double d = M.PolyDist((float)x, (float)z, rv.Pts), hw = rv.W / 2;
+                if (d < hw + 1.4)
+                {
+                    double bed = rv.Bed, fd = M.Hypot((float)x - rv.Ford.x, (float)z - rv.Ford.z);
+                    if (fd < 11) bed = M.Lerp(-0.5, bed, M.Smooth(7, 11, fd)); // широкий брод перед проломом
+                    field = M.Lerp(field, bed, M.Smooth(hw + 1.4, hw - 0.2, d));
+                }
+            }
 
             // Окрестности: холмы крупнее, озёра, горы по краям
             double outer = 3 + hills * 16 + detail * 0.9;

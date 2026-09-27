@@ -106,6 +106,13 @@ namespace BattleSim.Core
             {
                 float g = w.HeightAt(t.X, t.Z), bas = MathF.Min(g, MathF.Min(w.HeightAt(t.X + t.S / 2, t.Z + t.S / 2), w.HeightAt(t.X - t.S / 2, t.Z - t.S / 2))) - 1.5f, top = g + t.H;
                 Box(t.X, (bas + top) / 2, t.Z, t.S, top - bas, t.S, 0, dark);
+                if (t.Keep)
+                { // донжон: пояс и угловая башенка с дозорной площадкой
+                    Box(t.X, g + t.H * 0.55f, t.Z, t.S + 0.4f, 0.5f, t.S + 0.4f, 0, stone);
+                    float cx = t.X + t.S / 2 - 1.6f, cz = t.Z - t.S / 2 + 1.6f;
+                    Box(cx, top + 2.2f, cz, 3.2f, 4.4f, 3.2f, 0, dark);
+                    Box(cx, top + 4.6f, cz, 3.8f, 0.4f, 3.8f, 0, stone);
+                }
                 Box(t.X, top - 0.25f, t.Z, t.S + 0.5f, 0.5f, t.S + 0.5f, 0, stone);
                 foreach (var (ex, ez) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
                     for (int k = -2; k <= 2; k++)
@@ -127,9 +134,85 @@ namespace BattleSim.Core
             foreach (var a in F.Arches)
             {
                 float g = w.HeightAt(a.X, a.Z), yaw = MathF.Atan2(a.Ux, a.Uz) - M.PI / 2;
-                Box(a.X, g + a.H - 0.9f, a.Z, a.Citadel ? 7.6f : 8.6f, 1.8f, a.W, yaw, dark); // арка над воротами
+                Box(a.X, g + a.H - 0.9f, a.Z, a.Citadel ? 7.2f : 8.6f, 1.8f, a.W, yaw, dark); // арка над воротами
             }
+            Terraces(w, bb, R);
             return bb.Count > 0 ? bb.Build() : null;
+        }
+
+        /// <summary>
+        /// Кладка уступов города: подпорные стены по краю уступа, скала замка и ров, стенки вдоль улиц-подъёмов,
+        /// набережные реки. Каждая стенка — от нижней земли до верхней, куски по 2 м.
+        /// </summary>
+        static void Terraces(World w, BoxBuilder bb, Rng R)
+        {
+            var T = w.Town;
+            Rgb wall = Rgb.Hex(0x8a8174), bank = Rgb.Hex(0x766f65), cap = Rgb.Hex(0x9d958a);
+            void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * M.Lerp(0.88f, 1.08f, R.F()));
+            bool InClimb(float x, float z, float pad)
+            {
+                foreach (var cl in T.Climbs)
+                    if (M.SegDist(x, z, cl.Ax, cl.Az, cl.Bx, cl.Bz) < cl.W / 2 + pad) return true;
+                return false;
+            }
+            // стенка по отрезку: верх — большая из высот по обе стороны, низ — меньшая
+            void Face(float ax, float az, float bx, float bz, float thick, Rgb c, float probe = 2.2f, bool skipClimbs = true)
+            {
+                float len = M.Hypot(bx - ax, bz - az);
+                if (len < 0.1f) return;
+                float ux = (bx - ax) / len, uz = (bz - az) / len, nx = -uz, nz = ux, yaw = MathF.Atan2(ux, uz) - M.PI / 2;
+                for (float t = 0; t < len; t += 2)
+                {
+                    float l = MathF.Min(2.05f, len - t + 0.05f), x = ax + ux * (t + l / 2), z = az + uz * (t + l / 2);
+                    if (skipClimbs && InClimb(x, z, 0.4f)) continue;
+                    float h1 = w.HeightAt(x + nx * probe, z + nz * probe), h2 = w.HeightAt(x - nx * probe, z - nz * probe);
+                    float top = MathF.Max(h1, h2) + 0.12f, bas = MathF.Min(h1, h2) - 1.2f;
+                    if (top - bas < 2.2f) continue; // ровно — стенка не нужна
+                    Box(x, (bas + top) / 2, z, l, top - bas, thick, yaw, c);
+                    Box(x, top + 0.1f, z, l, 0.2f, thick + 0.25f, yaw, cap); // карниз по верху
+                }
+            }
+            // край уступа — по всей ширине города
+            for (float x = -T.CX + 2; x < T.CX - 2; x += 2)
+                Face(x, T.EdgeZ(x), x + 2, T.EdgeZ(x + 2), 2.6f, wall);
+            // скала замка и ров
+            var c = T.Castle;
+            if (c != null)
+            {
+                var m = c.Moat;
+                Face(c.MX0, c.MZ0 + 0.3f, c.MX0, c.MZ1, 2.4f, wall);
+                Face(c.MX1, c.MZ1, c.MX1, c.MZ0 + 0.3f, 2.4f, wall);
+                Face(c.MX0, c.MZ0, c.MX1, c.MZ0, 2.2f, wall, 2.2f, false);   // северная стенка рва — отвес скалы
+                Face(m.X0, m.Z0, m.X1, m.Z0, 2.2f, wall);                    // южная стенка рва (кроме насыпи)
+                Face(m.X0, m.Z0, m.X0, m.Z1, 2.2f, wall);
+                Face(m.X1, m.Z0, m.X1, m.Z1, 2.2f, wall);
+            }
+            // стенки вдоль подъёмов: пандус врезан в уступ или поднят над землёй
+            foreach (var cl in T.Climbs)
+            {
+                float len = M.Hypot(cl.Bx - cl.Ax, cl.Bz - cl.Az), ux = (cl.Bx - cl.Ax) / len, uz = (cl.Bz - cl.Az) / len, nx = -uz, nz = ux;
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    float o = cl.W / 2 + 0.7f;
+                    Face(cl.Ax + nx * o * side, cl.Az + nz * o * side, cl.Bx + nx * o * side, cl.Bz + nz * o * side, 1.3f, wall, 1.4f, false);
+                }
+            }
+            // набережные реки у города
+            if (T.River != null)
+            {
+                var rv = T.River;
+                for (int i = 1; i < rv.Pts.Count; i++)
+                {
+                    var a = rv.Pts[i - 1]; var b = rv.Pts[i];
+                    if (MathF.Max(MathF.Abs(a.x), MathF.Abs(b.x)) > T.CX + 12) continue;
+                    float dx = b.x - a.x, dz = b.z - a.z, l = M.Hypot(dx, dz), nx = -dz / l, nz = dx / l;
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        float o = rv.W / 2 + 0.6f;
+                        Face(a.x + nx * o * side, a.z + nz * o * side, b.x + nx * o * side, b.z + nz * o * side, 1.4f, bank, 1.8f, false);
+                    }
+                }
+            }
         }
 
         /// <summary>Деревянные мосты: доски настила, перила и опоры до дна ущелья.</summary>
@@ -140,9 +223,27 @@ namespace BattleSim.Core
             var R = new Rng(777);
             Rgb wood = Rgb.Hex(0x7a5534), beam = Rgb.Hex(0x5b3e25);
             void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * M.Lerp(0.85f, 1.1f, R.F()));
+            Rgb stone = Rgb.Hex(0x928a7d), stoneDark = Rgb.Hex(0x7a7266);
             foreach (var d in w.Bridges)
             {
                 float yaw = MathF.Atan2(d.Ux, d.Uz), nx = -d.Uz, nz = d.Ux;
+                if (d.Stone)
+                { // каменный мост: настил, парапеты, быки до дна
+                    int ns = (int)MathF.Ceiling(d.Len / 1.2f);
+                    for (int k = 0; k < ns; k++)
+                    {
+                        float t = (k + 0.5f) / ns, x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = M.Lerp(d.HA, d.HB, t);
+                        Box(x, y - 0.35f, z, d.W + 0.6f, 0.7f, d.Len / ns + 0.02f, yaw, stone);
+                        foreach (float side in new[] { -1f, 1f })
+                            Box(x + nx * side * (d.W / 2 + 0.15f), y + 0.45f, z + nz * side * (d.W / 2 + 0.15f), 0.5f, 0.95f, d.Len / ns + 0.02f, yaw, stoneDark);
+                    }
+                    foreach (float t in new[] { 0.36f, 0.64f })
+                    {
+                        float x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = M.Lerp(d.HA, d.HB, t), bottom = w.HeightAt(x, z) - 1;
+                        if (y - bottom > 1.2f) Box(x, (y - 0.7f + bottom) / 2, z, d.W + 0.2f, y - 0.7f - bottom, 1.4f, yaw, stoneDark);
+                    }
+                    continue;
+                }
                 int n = (int)MathF.Ceiling(d.Len / 0.55f);
                 for (int k = 0; k < n; k++)
                 {

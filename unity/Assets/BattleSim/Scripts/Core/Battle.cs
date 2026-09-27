@@ -225,7 +225,7 @@ namespace BattleSim.Core
             var town = World.Town;
             int Pick(int[] ab) => ab[0] + (int)(Rng.Rand() * (ab[1] - ab[0] + 1));
             // Штурм: как обычная армия, но на треть больше пехоты
-            float z0 = town.CZ + 16;
+            float z0 = town.CZ + 17; // за рекой, что течёт вдоль южной стены
             for (int line = 0; line < lines; line++)
             {
                 int n = Pick(front) + 1;
@@ -233,7 +233,7 @@ namespace BattleSim.Core
                     PlaceSquad(Rng.Rand() < 0.55f ? 0 : 1, 0, (i - (n - 1) / 2f) * 10 + (Rng.Rand() - 0.5f) * 2, -(z0 + line * 8 + Rng.Rand() * 2), 0);
             }
             int xr = Pick(xbow);
-            for (int i = 0; i < xr; i++) PlaceSquad(2, 0, (i - (xr - 1) / 2f) * 11, -(z0 + 2 + lines * 8), 0);
+            for (int i = 0; i < xr; i++) PlaceSquad(2, 0, (i - (xr - 1) / 2f) * 11, -(z0 - 5), 0); // стрелки впереди, у берега
             int cv = Pick(cav);
             for (int i = 0; i < cv; i++)
             {
@@ -267,13 +267,52 @@ namespace BattleSim.Core
                 }
                 return false;
             }
+            // Гарнизон рубежа: ставим прямо в точку, держит её (командиры его не трогают)
+            bool Hold(int type, float x, float z, float yaw, float leash, string why)
+            {
+                int placed = PlaceSquad(type, 1, x, z, yaw);
+                if (placed >= Defs.Types[type].Cols * Defs.Types[type].Rows * 0.6f)
+                {
+                    var g = Squads[Squads.Count - 1];
+                    g.Garrison = true;
+                    g.Order = new Order(type == 2 ? OrderKind.Fire : OrderKind.Hold, Mode.Hold) { Leash = leash, Why = why }.At(x, z);
+                    return true;
+                }
+                if (placed > 0) RemoveSquadAt(new V2(x, z));
+                return false;
+            }
             int def = Math.Max(3, (Pick(front) * lines) * 2 / 3);
             // у каждого входа — заслон
             foreach (var e in town.SouthEntries) Put(Rng.Rand() < 0.5f ? 0 : 1, new V2(e.x, e.z + 10), 14);
-            for (int i = town.SouthEntries.Count; i < def; i++) Put(Rng.Rand() < 0.55f ? 0 : 1, new V2((Rng.Rand() - 0.5f) * town.CX * 1.6f, -town.CZ * 0.3f), 60);
+            int placedDef = town.SouthEntries.Count;
+            // наверху каждого подъёма в верхний город — заслон; у ворот замка — стража
+            foreach (var cl in town.Climbs)
+            {
+                if (placedDef >= def + 2) break;
+                if (cl.High > town.L1 + 0.1f) continue;
+                if (Hold(Rng.Rand() < 0.5f ? 0 : 1, cl.Bx, cl.Bz + 3.5f, M.PI, 10, "держать подъём")) placedDef++;
+            }
+            var cas = town.Castle;
+            if (cas != null)
+            {
+                Hold(0, cas.GateX, cas.Z0 + 7, M.PI, 9, "держать ворота замка");
+                Hold(1, cas.Keep.x + (cas.Keep.x > cas.GateX ? -1 : 1) * (cas.KeepS / 2 + 6), cas.Z0 + 8, M.PI, 12, "оборонять двор замка");
+            }
+            for (int i = placedDef; i < def; i++) Put(Rng.Rand() < 0.55f ? 0 : 1, new V2((Rng.Rand() - 0.5f) * town.CX * 1.6f, -town.CZ * 0.3f), 60);
             int dx = Pick(xbow);
+            // стрелки: один отряд — на краю уступа над посадом, один — на стене замка, остальные — на южной стене
+            if (dx > 1)
+            {
+                float lx = town.Climbs.Count > 1 ? (town.Climbs[0].Ax + town.Climbs[1].Ax) / 2 : 0;
+                if (Hold(2, lx, town.EdgeZ(lx) + 3, M.PI, 6, "стрелять с уступа")) dx--;
+            }
+            if (dx > 1 && cas != null)
+            {
+                var cw = World.WallSpots.Where(w => w.Out.z < -0.5f && w.P.z > cas.Z0 - 3 && MathF.Abs(w.P.x - cas.GateX) > 9).OrderBy(w => MathF.Abs(w.P.x - cas.GateX)).FirstOrDefault();
+                if (cw.Out.z < 0 && Hold(2, cw.P.x, cw.P.z, M.PI, 4, "держать стену замка")) dx--;
+            }
             // стрелки гарнизона — на боевом ходу южной стены, у зубцов; кому не хватило места — на улицах у стены
-            var wallSpots = World.WallSpots.Where(w => w.Out.z < -0.5f).Select(w => w.P).OrderBy(p => p.x).ToList();
+            var wallSpots = World.WallSpots.Where(w => w.Out.z < -0.5f && w.P.z < -town.CZ + 3).Select(w => w.P).OrderBy(p => p.x).ToList();
             var usedWall = new List<V2>();
             for (int i = 0; i < dx; i++)
             {

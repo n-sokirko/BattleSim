@@ -109,6 +109,7 @@ namespace BattleSim.Core
             {
                 if (sq.Order.Mode == Mode.Rout || sq.Pending != null || Battle.Time < sq.NextDecision) continue;
                 if (sq.Reserve && !ReserveCommitted) continue; // резерв ждёт своего часа
+                if (sq.Garrison) continue;                      // гарнизон держит свой рубеж
                 var order = Decide(sq, my, en);
                 if (order != null && Differs(sq.Order, order))
                 {

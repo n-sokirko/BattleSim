@@ -102,6 +102,8 @@ namespace BattleSim.Core
         public DeckKind Kind;
         public float Ax, Az, Bx, Bz, W, HA, HB, Parapet, OutSign;
         public bool Rel, Walk, Solid;
+        /// <summary>Каменный мост (для отрисовки; деревянные — в горах).</summary>
+        public bool Stone;
         public float Len, Ux, Uz, X, Z;
     }
 

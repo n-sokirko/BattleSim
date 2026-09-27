@@ -130,6 +130,11 @@ namespace BattleSim
             yield return new WaitForSeconds(2f);
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0setup.png"));
             yield return new WaitForSeconds(1f);
+            // общий план карты с юго-востока
+            Rig.LookAt(0, 4, 0.55f, 36 * M.DEG, World.Field * 1.25f, true);
+            yield return new WaitForSeconds(0.8f);
+            ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0overview.png"));
+            yield return new WaitForSeconds(0.6f);
             StartBattle();
             Speed = 2;
             Perf.Clear();
@@ -146,6 +151,12 @@ namespace BattleSim
             if (c.HasValue) Rig.LookAt(c.Value.x, c.Value.z, 2.2f, 22 * M.DEG, 22, true);
             yield return new WaitForSeconds(0.8f);
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_close.png"));
+            yield return new WaitForSeconds(1f);
+            // совсем близко — разглядеть бойцов
+            var near = Battle.Units.Find(u => u.Alive && u.Engaged) ?? Battle.Units.Find(u => u.Alive);
+            if (near != null) Rig.LookAt(near.Pos.x, near.Pos.z, 1.3f, 14 * M.DEG, 7, true);
+            yield return new WaitForSeconds(0.8f);
+            ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_macro.png"));
             yield return new WaitForSeconds(1f);
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
@@ -374,7 +385,8 @@ namespace BattleSim
                 u.Ride?.Step(animDt);
                 var p = Conv.U(u.RenderPos(Alpha));
                 if (!GeometryUtility.TestPlanesAABB(frustum, new Bounds(p + Vector3.up, Vector3.one * 5))) continue;
-                int l = (p - cp).sqrMagnitude < lod2 ? 0 : 1;
+                float dd = (p - cp).sqrMagnitude;
+                int l = dd < lod2 ? 0 : dd < lod2 * 6.25f ? 1 : 2;
                 float sink = u.Alive ? 0 : Mathf.Max(0, u.DeadT - 18) * 0.25f;
                 var m = Matrix4x4.TRS(new Vector3(p.x, p.y - sink, p.z), Conv.Yaw(u.RenderYaw(Alpha)), Vector3.one * u.Scale);
                 if (u.T.Mount)

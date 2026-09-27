@@ -49,6 +49,8 @@ namespace BattleSim.Core
         public Order Pending;
         public float OrderT, Morale = 100, LastHitT = -99, LastShotT = -99, FirstStrikeT = -99, LastActiveT, EngagedFor, NextDecision, LabelT;
         public bool Engaged, Hidden, Special, Reserve;
+        /// <summary>Гарнизон рубежа (верх подъёма, замок, край уступа): командиры его не переставляют — он держит своё место.</summary>
+        public bool Garrison;
         public List<Squad> Foes = new List<Squad>();
         public float FoeDist = float.PositiveInfinity;
         public Wing Wing;

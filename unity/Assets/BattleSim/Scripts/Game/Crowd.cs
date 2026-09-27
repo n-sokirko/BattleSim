@@ -14,10 +14,11 @@ namespace BattleSim
     {
         public const int Batch = 1023;
         public readonly BakedAnims Baked;
-        public readonly Mesh[] Lod = new Mesh[2];
+        public const int Lods = 3;
+        public readonly Mesh[] Lod = new Mesh[Lods];
         public readonly Material[] Mats; // по армиям (у коня — один)
         public readonly Texture2D BakeTex;
-        public readonly int[] Verts = new int[2];
+        public readonly int[] Verts = new int[Lods];
 
         sealed class Bucket
         {
@@ -33,14 +34,18 @@ namespace BattleSim
         public CrowdModel(SkinnedModel model, IList<ClipDef> defs, Material[] mats)
         {
             Baked = ModelKit.Bake(model, defs);
-            var base0 = model.Mesh.Clone();
-            Conv.FlipV(base0);
+            // Детальные модели (десятки тысяч вершин) упрощаем уже вблизи; простые — только вдали
             model.Mesh.Bounds(out var mn, out var mx);
-            var lod1 = ModelKit.Decimate(model.Mesh, M.Hypot(mx.x - mn.x, mx.y - mn.y, mx.z - mn.z) * 0.034f);
-            Conv.FlipV(lod1);
-            Lod[0] = Conv.ToMesh(base0, "crowd0", true);
-            Lod[1] = Conv.ToMesh(lod1, "crowd1", true);
-            Verts[0] = base0.VertexCount; Verts[1] = lod1.VertexCount;
+            float diag = M.Hypot(mx.x - mn.x, mx.y - mn.y, mx.z - mn.z);
+            bool heavy = model.Mesh.VertexCount > 10000;
+            float[] cells = heavy ? new[] { 0.012f, 0.02f, 0.034f } : new[] { 0f, 0.034f, 0.06f };
+            for (int l = 0; l < Lods; l++)
+            {
+                var m = cells[l] > 0 ? ModelKit.Decimate(model.Mesh, diag * cells[l]) : model.Mesh.Clone();
+                Conv.FlipV(m);
+                Lod[l] = Conv.ToMesh(m, "crowd" + l, true);
+                Verts[l] = m.VertexCount;
+            }
 
             // Строка = кадр, 3 текселя на кость = строки матрицы 3×4 (уже в координатах Unity)
             int nb = Baked.Bones;
@@ -70,8 +75,8 @@ namespace BattleSim
                 m.SetTexture("_BakeTex", BakeTex);
                 m.enableInstancing = true;
             }
-            buckets = new Bucket[Mats.Length, 2];
-            for (int t = 0; t < Mats.Length; t++) for (int l = 0; l < 2; l++) buckets[t, l] = new Bucket();
+            buckets = new Bucket[Mats.Length, Lods];
+            for (int t = 0; t < Mats.Length; t++) for (int l = 0; l < Lods; l++) buckets[t, l] = new Bucket();
         }
 
         public int Row(AnimState st) => Baked.Row(st);
@@ -91,11 +96,13 @@ namespace BattleSim
             b.Count++;
         }
 
+        /// <summary>Рисуем пачки; тени — только у ближних уровней (дальние тени не видны, а стоят как вторая армия).</summary>
         public void End(bool shadows)
         {
             for (int t = 0; t < Mats.Length; t++)
-                for (int l = 0; l < 2; l++)
+                for (int l = 0; l < Lods; l++)
                 {
+                    bool sh = shadows && l < Lods - 1;
                     var b = buckets[t, l];
                     for (int k = 0; k * Batch < b.Count; k++)
                     {
@@ -103,7 +110,7 @@ namespace BattleSim
                         mpb.Clear();
                         mpb.SetVectorArray(AnimId, b.A[k]);
                         Graphics.DrawMeshInstanced(Lod[l], 0, Mats[t], b.M[k], n, mpb,
-                            shadows ? ShadowCastingMode.On : ShadowCastingMode.Off, true, 0, null);
+                            sh ? ShadowCastingMode.On : ShadowCastingMode.Off, true, 0, null);
                     }
                 }
         }
