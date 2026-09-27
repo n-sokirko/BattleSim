@@ -60,6 +60,13 @@ namespace BattleSim.Core
         public int Files, Rows, APathI;
         public List<V2> APath;
         public readonly List<V2> Trail = new List<V2>();
+        // очередь у узкого места: ждём, пока свой отряд впереди не втянется в проход
+        public Choke Choke;
+        public bool ChokeGo;
+        public V2 ChokeE, ChokeDir, AvoidP;
+        public float ChokeD, ChokeHold, ChokeWaitT, ChokeGoT, AvoidUntil, LagT;
+        /// <summary>Сдвиг от назначенной точки, чтобы не стоять на месте соседнего отряда.</summary>
+        public V2 Offset;
 
         public Squad(string id, int type, int team, float yaw)
         {
@@ -160,6 +167,14 @@ namespace BattleSim.Core
             float step = rate * dt;
             Yaw += MathF.Abs(d) <= step ? d : M.Sign(d) * step;
         }
+    }
+
+    /// <summary>Узкое место (мост, брод, проём, ворота, тропа): отряды одной стороны входят в него по очереди.</summary>
+    public sealed class Choke
+    {
+        public V2 E, Dir;
+        public int Team;
+        public readonly List<Squad> Queue = new List<Squad>();
     }
 
     public sealed class LogEntry

@@ -11,6 +11,7 @@ unity/[Bb]uild/
 unity/[Bb]uilds/
 unity/[Ll]ogs/
 unity/[Uu]ser[Ss]ettings/
+unity/Shots/
 unity/*.csproj
 unity/*.sln
 unity/*.user

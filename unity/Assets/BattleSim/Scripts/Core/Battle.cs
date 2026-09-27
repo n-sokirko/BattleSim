@@ -408,7 +408,7 @@ namespace BattleSim.Core
             sq.Order = order;
             sq.OrderT = Time;
             sq.LabelT = 4;
-            sq.APath = null; sq.AnchorArrived = false;
+            sq.APath = null; sq.AnchorArrived = false; sq.Offset = new V2(0, 0);
         }
 
         void ComputeArmyCenters()

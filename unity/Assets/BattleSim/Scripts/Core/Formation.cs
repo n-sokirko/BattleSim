@@ -13,6 +13,11 @@ namespace BattleSim.Core
     public sealed partial class Battle
     {
         const float FormEvery = 0.5f;
+        /// <summary>Проход уже этого — узкое место, отряды входят в него по одному.</summary>
+        const float NarrowW = 7.5f;
+        /// <summary>Как далеко вперёд по пути точка отряда высматривает узкие места.</summary>
+        const float ChokeLook = 30f;
+        readonly List<Choke> Chokes = new List<Choke>();
 
         /// <summary>Строй на марше: точка отряда впереди, шеренги — по её следу.</summary>
         static bool Marching(Squad sq) => sq.FormMarch;
@@ -22,9 +27,9 @@ namespace BattleSim.Core
             var nav = World.Nav;
             foreach (var sq in Squads)
             {
-                if (sq.Special || sq.Alive == 0) continue;
+                if (sq.Special || sq.Alive == 0) { if (sq.Choke != null) LeaveChoke(sq); continue; }
                 var o = sq.Order;
-                if (o.Mode == Mode.Rout) { sq.FormInit = false; continue; }
+                if (o.Mode == Mode.Rout) { sq.FormInit = false; if (sq.Choke != null) LeaveChoke(sq); continue; }
                 int cls = sq.T.Mount ? 1 : 0;
                 if (!sq.FormInit)
                 {
@@ -48,11 +53,18 @@ namespace BattleSim.Core
                     if (sq.T.Ranged) stop = sq.T.Range * 0.7f;
                 }
                 else goal = o.HasPos ? o.Pos : sq.C;
+                // сосед уже стоит там — встаём рядом (сдвиг потихоньку забывается)
+                sq.Offset = new V2(sq.Offset.x * (1 - 0.1f * dt), sq.Offset.z * (1 - 0.1f * dt));
+                if (goal.HasValue && (o.HasPos || advance)) goal = new V2(goal.Value.x + sq.Offset.x, goal.Value.z + sq.Offset.z);
 
                 // Сошлись с врагом — строй держится вокруг самого отряда
-                bool contact = advance && !sq.T.Ranged && (sq.Engaged || (foe != null && V2.Dist(foe.C, sq.C) < (sq.T.Mount ? 16 : 10)));
+                // (через ущелье или стену — не сошлись: до врага ещё идти в обход)
+                bool contact = advance && !sq.T.Ranged && (sq.Engaged || (foe != null && V2.Dist(foe.C, sq.C) < (sq.T.Mount ? 16 : 10)
+                    && nav.LineClear(sq.C.x, sq.C.z, foe.C.x, foe.C.z, cls)));
                 float speed = sq.T.Speed * (sq.T.Mount ? 0.95f : 0.9f);
-                float lagK = M.Clamp(1.3f - sq.Lag / 4f, 0.3f, 1f);
+                // точка отряда ждёт своих; если строй долго не собирается (кто-то застрял) — идёт дальше потихоньку
+                sq.LagT = sq.Lag > 6 ? sq.LagT + dt : 0;
+                float lagK = M.Clamp(1.25f - sq.Lag / 6f, sq.LagT > 8 ? 0.3f : 0f, 1f);
                 float wantFacing = sq.Facing;
                 bool moved = false;
 
@@ -74,14 +86,26 @@ namespace BattleSim.Core
                         float wx = wp.x - sq.Anchor.x, wz = wp.z - sq.Anchor.z, wl = M.Hypot(wx, wz);
                         if (wl > 1e-3f)
                         {
+                            // в гору, по броду и чаще точка отряда идёт так же медленно, как солдаты
+                            float gy = World.GroundAt(sq.Anchor.x + wx / wl, sq.Anchor.z + wz / wl) - World.GroundAt(sq.Anchor.x, sq.Anchor.z);
+                            float tf = (gy > 0 ? MathF.Max(0.35f, 1 - gy * 1.4f) : MathF.Min(1f, 1 - gy * 0.5f)) * MathF.Max(0.2f, nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls));
+                            lagK *= tf;
                             float step = MathF.Min(speed * lagK * dt, MathF.Min(wl, dist - stop));
+                            bool queued = sq.Choke != null && !sq.ChokeGo;
+                            if (queued)
+                            { // в очереди к проходу: подходим только до своего места в ней
+                                step = MathF.Min(step, MathF.Max(0, sq.ChokeHold));
+                                sq.ChokeHold -= step;
+                                if (step < speed * lagK * dt * 0.5f) sq.ChokeWaitT += dt;
+                            }
                             var na = new V2(sq.Anchor.x + wx / wl * step, sq.Anchor.z + wz / wl * step);
-                            if (nav.SpeedAt(na.x, na.z, cls) > 0 || nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls) == 0)
+                            if (step > 0 && (nav.SpeedAt(na.x, na.z, cls) > 0 || nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls) == 0))
                             {
                                 sq.Anchor = na;
                                 moved = true;
                             }
-                            sq.AnchorVel = new V2(wx / wl * speed * lagK, wz / wl * speed * lagK);
+                            float v = queued && step <= 1e-4f ? 0 : speed * lagK;
+                            sq.AnchorVel = new V2(wx / wl * v, wz / wl * v);
                             wantFacing = MathF.Atan2(wx, wz);
                         }
                     }
@@ -111,9 +135,174 @@ namespace BattleSim.Core
                 if ((sq.FormT -= dt) <= 0)
                 {
                     sq.FormT = FormEvery + Rng.Rand() * 0.1f;
+                    UpdateChoke(sq, cls, goal, stop, contact);
                     AssignSlots(sq, cls);
                 }
             }
+            // пустые очереди больше не нужны
+            for (int i = Chokes.Count - 1; i >= 0; i--) if (Chokes[i].Queue.Count == 0) Chokes.RemoveAt(i);
+            SeparateSquads(dt);
+        }
+
+        /// <summary>Сколько места занимает строй (радиус пятна).</summary>
+        static float FormRadius(Squad sq)
+        {
+            int files = Math.Max(1, sq.Files), rows = Math.Max(1, sq.Rows);
+            return MathF.Max(files, rows) * sq.T.Spacing * 0.5f + 0.6f;
+        }
+
+        /// <summary>
+        /// Строи своих отрядов не налезают друг на друга: если двум отрядам велено в одно место
+        /// или они сошлись у одного врага, они встают рядом, а не одной кучей. Колонны на марше
+        /// не раздвигаем — их разводит очередь у проходов.
+        /// </summary>
+        void SeparateSquads(float dt)
+        {
+            var nav = World.Nav;
+            for (int i = 0; i < Squads.Count; i++)
+            {
+                var a = Squads[i];
+                if (a.Special || a.Alive == 0 || !a.FormInit || a.FormMarch || a.Order.Mode == Mode.Rout) continue;
+                float ra = FormRadius(a);
+                for (int j = 0; j < Squads.Count; j++)
+                {
+                    var b = Squads[j];
+                    if (j == i || b.Team != a.Team || b.Special || b.Alive == 0 || !b.FormInit || b.FormMarch || b.Order.Mode == Mode.Rout) continue;
+                    float need = ra + FormRadius(b) + 0.8f;
+                    float dx = a.Anchor.x - b.Anchor.x, dz = a.Anchor.z - b.Anchor.z, d = M.Hypot(dx, dz);
+                    if (d >= need) continue;
+                    if (d < 1e-3f) { dx = MathF.Sin(a.Facing + 1.57f); dz = MathF.Cos(a.Facing + 1.57f); d = 1; }
+                    else { dx /= d; dz /= d; }
+                    float push = MathF.Min(need - d, a.T.Speed * 0.6f * dt);
+                    // вперёд-назад не толкаем — только вбок, чтобы строй вставал в линию, а не в затылок
+                    var f = new V2(MathF.Sin(a.Facing), MathF.Cos(a.Facing));
+                    float along = dx * f.x + dz * f.z;
+                    float sx = dx - f.x * along * 0.7f, sz = dz - f.z * along * 0.7f, sl = M.Hypot(sx, sz);
+                    if (sl < 1e-3f) { sx = f.z; sz = -f.x; sl = 1; }
+                    // рубящийся строй не сдвигаем ради подошедшего; равные расходятся поровну
+                    float ka = a.Engaged == b.Engaged ? 0.5f : a.Engaged ? 0f : 1f;
+                    if (ka <= 0) continue;
+                    float px = sx / sl * push * ka, pz = sz / sl * push * ka;
+                    var na = new V2(a.Anchor.x + px, a.Anchor.z + pz);
+                    int cls = a.T.Mount ? 1 : 0;
+                    if (nav.SpeedAt(na.x, na.z, cls) > 0 && nav.LineClear(a.Anchor.x, a.Anchor.z, na.x, na.z, cls))
+                    {
+                        a.Anchor = na;
+                        // сдвиг запоминаем: отряд встаёт рядом с соседом, а не возвращается в ту же точку
+                        a.Offset = new V2(a.Offset.x + px, a.Offset.z + pz);
+                        float ol = M.Hypot(a.Offset.x, a.Offset.z);
+                        if (ol > 25) a.Offset = new V2(a.Offset.x * 25 / ol, a.Offset.z * 25 / ol);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Очередь у узкого места. Если на пути впереди мост, брод, проём или тропа и туда уже
+        /// входит свой отряд, ждём строем позади него, пока его хвост не втянется в проход.
+        /// Так отряды идут друг за другом колоннами, а не сливаются у входа в одну толпу.
+        /// Слишком долго стоим — ищем другую дорогу.
+        /// </summary>
+        void UpdateChoke(Squad sq, int cls, V2? goal, float stop, bool contact)
+        {
+            var ch = sq.Choke;
+            if (ch != null && sq.ChokeGo)
+            { // наш черёд: держим очередь, пока последняя шеренга не зайдёт в проход
+                if (RearIn(sq) || Time - sq.ChokeGoT > 40 || sq.AnchorArrived || sq.Order.Mode == Mode.Rout) LeaveChoke(sq);
+                return;
+            }
+            float dE = -1;
+            V2 e = default, dir = default;
+            if (!contact && sq.FormMarch && goal.HasValue) dE = FindChoke(sq, cls, goal.Value, stop, out e, out dir);
+            if (dE < 0) { if (ch != null) LeaveChoke(sq); return; }
+            if (ch != null && V2.Dist(sq.ChokeE, e) > 8) { LeaveChoke(sq); ch = null; }
+            if (ch == null)
+            {
+                foreach (var c in Chokes)
+                    if (c.Team == sq.Team && V2.Dist(c.E, e) < 8 && c.Dir.x * dir.x + c.Dir.z * dir.z > 0) { ch = c; break; }
+                if (ch == null) { ch = new Choke { E = e, Dir = dir, Team = sq.Team }; Chokes.Add(ch); }
+                ch.Queue.Add(sq);
+                sq.Choke = ch; sq.ChokeGo = false; sq.ChokeWaitT = 0;
+            }
+            sq.ChokeE = e; sq.ChokeDir = dir; sq.ChokeD = dE;
+
+            // кто впереди в очереди: уже входящий и те, кто ближе к проходу
+            float hold = 3;
+            bool free = true;
+            foreach (var o in ch.Queue)
+            {
+                if (o == sq || o.Alive == 0) continue;
+                if (o.ChokeGo || o.ChokeD < dE || (o.ChokeD == dE && string.CompareOrdinal(o.Id, sq.Id) < 0))
+                {
+                    free = false;
+                    hold += o.Rows * o.T.Spacing + 2.5f;
+                }
+            }
+            if (free)
+            {
+                sq.ChokeGo = true; sq.ChokeGoT = Time;
+                return;
+            }
+            sq.ChokeHold = dE - hold;
+            if (sq.ChokeWaitT > 25)
+            { // стоим давно — пробуем другой мост, брод или проём
+                sq.AvoidP = e; sq.AvoidUntil = Time + 45;
+                sq.APath = null; sq.APathT = -99;
+                LeaveChoke(sq);
+            }
+        }
+
+        void LeaveChoke(Squad sq)
+        {
+            sq.Choke?.Queue.Remove(sq);
+            sq.Choke = null; sq.ChokeGo = false; sq.ChokeWaitT = 0;
+        }
+
+        /// <summary>Последняя шеренга уже в проходе (или за ним).</summary>
+        bool RearIn(Squad sq)
+        {
+            Unit rear = null;
+            foreach (var u in sq.Units) if (u.Alive && (rear == null || u.SlotBack > rear.SlotBack)) rear = u;
+            if (rear == null) return true;
+            float ox = rear.Pos.x - sq.ChokeE.x, oz = rear.Pos.z - sq.ChokeE.z;
+            return ox * sq.ChokeDir.x + oz * sq.ChokeDir.z > -1 || M.Hypot(ox, oz) < 2.5f;
+        }
+
+        /// <summary>
+        /// Первое узкое место на пути точки отряда в пределах ChokeLook: расстояние до него, точка входа
+        /// и направление пути там; -1 — впереди свободно (или мы уже в проходе).
+        /// </summary>
+        float FindChoke(Squad sq, int cls, V2 goal, float stop, out V2 e, out V2 dir)
+        {
+            e = default; dir = default;
+            var pts = new List<V2>(8) { sq.Anchor };
+            if (sq.APath != null) for (int i = Math.Max(1, sq.APathI); i < sq.APath.Count; i++) pts.Add(sq.APath[i]);
+            else pts.Add(goal);
+            float total = 0;
+            for (int i = 1; i < pts.Count; i++) total += V2.Dist(pts[i - 1], pts[i]);
+            float limit = MathF.Min(ChokeLook, total - stop - 1);
+            if (limit < 2) return -1;
+            float acc = 0, s = 0;
+            for (int i = 1; i < pts.Count && s <= limit; i++)
+            {
+                var a = pts[i - 1]; var b = pts[i];
+                float d = V2.Dist(a, b);
+                if (d < 1e-3f) continue;
+                var f = new V2((b.x - a.x) / d, (b.z - a.z) / d);
+                for (; s <= acc + d && s <= limit; s += 1.5f)
+                {
+                    var p = new V2(a.x + f.x * (s - acc), a.z + f.z * (s - acc));
+                    Corridor(p, f, cls, out float L, out float R);
+                    if (L + R < NarrowW)
+                    {
+                        if (s < 0.5f) return -1; // уже идём узким местом
+                        e = p; dir = f;
+                        return s;
+                    }
+                }
+                acc += d;
+            }
+            return -1;
         }
 
         /// <summary>Путь точки отряда: напрямую, если свободно, иначе по A* (пересчёт раз в 3 с).</summary>
@@ -123,12 +312,13 @@ namespace BattleSim.Core
             if (nav.Barriers == 0) return g;
             if (sq.APath == null || Time - sq.APathT > 3 || V2.Dist(g, sq.APathGoal) > 5)
             {
-                if (nav.LineClear(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls)) { sq.APath = null; sq.APathT = Time; sq.APathGoal = g; return g; }
+                bool avoid = Time < sq.AvoidUntil;
+                if (!avoid && nav.LineClear(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls)) { sq.APath = null; sq.APathT = Time; sq.APathGoal = g; return g; }
                 if (PathBudget > 0 || sq.APath == null && Time - sq.APathT > 1)
                 {
                     PathBudget--;
                     // пути других отрядов «дороже» — армия расходится по разным подъёмам, мостам и воротам
-                    sq.APath = nav.FindPath(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls, 0.9f);
+                    sq.APath = nav.FindPath(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls, 0.9f, sq.AvoidP.x, sq.AvoidP.z, avoid ? 14 : 0);
                     nav.MarkCrowd(sq.APath, sq.Alive / 12f);
                     sq.APathT = Time; sq.APathGoal = g; sq.APathI = 1;
                 }
@@ -216,6 +406,15 @@ namespace BattleSim.Core
                     if (s < 0) { p = new V2(sq.Anchor.x - f.x * s, sq.Anchor.z - f.z * s); fw = f; }
                     else TrailAt(sq, s, out p, out fw);
                     Corridor(p, fw, cls, out float L, out float R);
+                    if (L + R < width) { width = L + R; shift = (R - L) / 2; }
+                }
+            }
+            else if (World.Nav.Barriers > 0)
+            {
+                float half = (n + maxCols - 1) / maxCols * sp / 2 + 1;
+                for (float s = -half; s <= half; s += 2)
+                {
+                    Corridor(new V2(sq.Anchor.x + f.x * s, sq.Anchor.z + f.z * s), f, cls, out float L, out float R);
                     if (L + R < width) { width = L + R; shift = (R - L) / 2; }
                 }
             }

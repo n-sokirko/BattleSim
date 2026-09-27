@@ -128,6 +128,13 @@ namespace BattleSim.EditorTools
                 arr.InsertArrayElementAtIndex(arr.arraySize);
                 arr.GetArrayElementAtIndex(arr.arraySize - 1).objectReferenceValue = sh;
             }
+            // материалы создаются в коде, поэтому сборка не знает, что нужен инстансинг (солдаты, деревья)
+            // и какой туман: оставляем все варианты, иначе армии в сборке невидимы
+            so.FindProperty("m_InstancingStripping").intValue = 2; // Keep All
+            so.FindProperty("m_FogStripping").intValue = 1;        // Custom: все три режима
+            so.FindProperty("m_FogKeepLinear").boolValue = true;
+            so.FindProperty("m_FogKeepExp").boolValue = true;
+            so.FindProperty("m_FogKeepExp2").boolValue = true;
             so.ApplyModifiedProperties();
         }
 

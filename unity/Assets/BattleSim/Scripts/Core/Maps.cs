@@ -361,7 +361,7 @@ namespace BattleSim.Core
         }
 
         /// <summary>A* по сетке с учётом перепадов высот; путь сглаживается до точек поворота.</summary>
-        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0)
+        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0)
         {
             int D = Dim;
             var sp = Speed[cls];
@@ -400,6 +400,11 @@ namespace BattleSim.Core
                             if (sp[a] == 0 || sp[b2] == 0 || !Step(c, a, false) || !Step(c, b2, false)) continue;
                         }
                         float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost) + MathF.Abs(S[ni] - S[c]) * 0.4f;
+                        if (avoidR > 0)
+                        {
+                            float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;
+                            if (ox * ox + oz * oz < avoidR * avoidR) ng += 6;
+                        }
                         if (seen[ni] != rn || ng < gs[ni]) { seen[ni] = rn; gs[ni] = ng; came[ni] = c; heap.Push(ni, ng + H(ni, gx, gz, D)); }
                     }
             }
