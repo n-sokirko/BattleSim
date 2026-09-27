@@ -34,7 +34,10 @@ class World {
     this.pn = new Perlin(rand);
     const o = () => rand() * 200;
     this.o = { hx: o(), hz: o(), lx: o(), lz: o(), mx: o(), mz: o(), cx: o(), cz: o() };
-    this.town = type === 'city' && assets ? makeTown(rand, assets.cityDefs) : null;
+    this.town = type === 'city' && assets ? makeCity(rand, assets.cityDefs) : null;
+    this.mtn = type === 'mountains' ? makeMountainPlan(rand) : null;
+    this.decks = new Decks(FIELD);
+    this.pathMask = null; this.bridges = []; this.watchtowers = [];
     this.features = this.makeFeatures(rand, type);
     const wa = rand() * Math.PI * 2, ws = rand() < 0.2 ? 0 : 1 + rand() * 6;
     this.wind = new THREE.Vector2(Math.cos(wa) * ws, Math.sin(wa) * ws);
@@ -43,6 +46,8 @@ class World {
     for (let z = 0; z <= RES; z++)
       for (let x = 0; x <= RES; x++)
         h[z * (RES + 1) + x] = this.rawHeight(x * CELL - HALF, z * CELL - HALF);
+    if (this.mtn) this.carveMountains(rand);
+    if (this.town) this.addFortress();
 
     // Препятствия: стволы леса, дома, мелочи; ограды — отдельной сеткой (их перелезают)
     this.obs = new Obstacles(FIELD);
@@ -65,6 +70,7 @@ class World {
         this.obs.addCircle(p.x, p.z, Math.max(p.def.w, p.def.d) * s * 0.5, 1.1, p.y);
       }
     }
+    for (const t of this.watchtowers || []) this.obs.addCircle(t.x, t.z, 3, 11, t.y);
     this.nav = new NavGrid(this);
     this.analyze();
 
@@ -72,6 +78,8 @@ class World {
     this.buildWater(style);
     this.applyAtmosphere(style);
     this.buildWalls();
+    this.buildFortress();
+    this.buildBridges();
     if (assets) this.buildDecor(style, assets);
   }
 
@@ -85,7 +93,13 @@ class World {
   own(o) { this.owned.push(o); return o; }
 
   /** Где армии выстраиваются перед боем (расстояние от центра до первой линии). */
-  get spawnZ() { return this.town ? this.town.TZ + 8 : FIELD * (this.big ? 0.3 : 0.28); }
+  get spawnZ() { return this.town ? this.town.CZ + 11 : this.mtn ? FIELD * 0.68 : FIELD * (this.big ? 0.3 : 0.28); }
+
+  /** Высота, на которой стоит солдат: земля или настил (мост, боевой ход стены, лестница). */
+  groundAt(x, z) {
+    const g = this.heightAt(x, z), d = this.decks.surface(x, z, g);
+    return d > g ? d : g;
+  }
 
   // ---------------------------------------------------------------- тактический рельеф
 
@@ -109,8 +123,8 @@ class World {
 
     if (type === 'city') { f.walls = this.town ? this.town.walls.slice() : []; return f; }
 
-    if (type === 'mountains') {
-      // Две гряды поперёк поля, в каждой — перевалы
+    if (type === 'mountains') return f; // рельеф строит makeMountainPlan: террасы, ущелье, серпантины
+    if (type === 'mountains-old') {
       for (const zc of [lerp(-F * 0.22, -F * 0.05, R()), lerp(F * 0.08, F * 0.25, R())]) {
         const gaps = 1 + ((R() * 2) | 0), cuts = [...Array(gaps)].map(() => lerp(-F * 0.6, F * 0.6, R())).sort((a, b) => a - b);
         let x = -F * 1.05;
@@ -189,17 +203,17 @@ class World {
     for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
       const x = -FIELD + ix * step, z = -FIELD + iz * step;
       let s = 0;
-      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
-      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
+      for (let a = 0; a < 8; a++) s += this.groundAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
+      prom[iz * n + ix] = this.groundAt(x, z) - s / 8;
     }
     const high = [], low = [], hide = [];
     for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
-      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
+      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.groundAt(x, z);
       if (this.nav.speedAt(x, z, 0) === 0) continue;
       if (p > 1.4) {
         let top = true;
         for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
-          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
+          if ((dx || dz) && this.groundAt(x + dx * step, z + dz * step) > h) { top = false; break; }
         if (top) high.push({ x, z, h, prom: p });
       }
       if (p < -1.0 && h > WATER - 0.3) { low.push({ x, z, h, depth: -p }); hide.push({ x, z, depth: -p }); }
@@ -243,6 +257,7 @@ class World {
     for (let i = 1; i < n; i++) {
       const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t, g = this.heightAt(x, z);
       if (g > y - 0.1) return false;
+      if (this.decks.solidTop(x, z, g) > y || this.decks.thinBlocks(x, z, y)) return false;
       if (this.wallTop(x, z) > y) return false;
       if (houses && this.obs.blocks(x, z, y)) return false;
       if (forest && y < g + 7 && this.nav.canopyAt(x, z) && (canopy += step) > 7) return false;
@@ -259,11 +274,201 @@ class World {
       const nx = -(w.bz - w.az) / l, nz = (w.bx - w.ax) / l, side = nx * (mx - ec.x) + nz * (mz - ec.z) > 0 ? 1 : -1;
       out.push({ x: mx + nx * 1.6 * side, z: mz + nz * 1.6 * side, kind: 'wall' });
     }
+    if (this.town) for (const w of this.town.fort.walls) {
+      // на боевой ход стены: высоко и за зубцами
+      out.push({ x: (w.ax + w.bx) / 2, z: (w.az + w.bz) / 2, kind: 'wallwalk' });
+    }
     if (this.town) for (const b of this.town.buildings) {
       const v = norm2(b.x - ec.x, b.z - ec.z), r = Math.max(b.hx, b.hz) + 2;
       out.push({ x: b.x + v.x * r, z: b.z + v.z * r, kind: 'house' });
     }
     return out;
+  }
+
+  // ---------------------------------------------------------------- горы: серпантины, мосты, сторожевые башни
+
+  maskAt(x, z) {
+    const gx = clamp((x + HALF) / CELL, 0, RES), gz = clamp((z + HALF) / CELL, 0, RES);
+    return this.pathMask[Math.round(gz) * (RES + 1) + Math.round(gx)];
+  }
+
+  /**
+   * Прокладываем тропы: профиль высоты вдоль тропы сглаживается до уклона не круче ~0,3,
+   * рельеф под тропой подрезается или подсыпается — так на террасах появляются
+   * пологие подъёмы и спуски. Концы троп у ущелья соединяют мосты.
+   */
+  carveMountains(R) {
+    const M = this.mtn, V = RES + 1, n = V * V;
+    const best = new Float32Array(n).fill(1e9), bestH = new Float32Array(n);
+    this.pathMask = new Float32Array(n);
+    const w = 4.6, R0 = w / 2 + 3.5;
+    for (const p of M.paths) {
+      const pts = catmull(p.ctrl, 1);
+      const prof = pts.map(([x, z]) => this.heightAt(x, z));
+      for (let it = 0; it < 4; it++) {
+        for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * 0.3; prof[i] = clamp(prof[i], prof[i - 1] - d, prof[i - 1] + d); }
+        for (let i = pts.length - 2; i >= 0; i--) { const d = Math.hypot(pts[i][0] - pts[i + 1][0], pts[i][1] - pts[i + 1][1]) * 0.3; prof[i] = clamp(prof[i], prof[i + 1] - d, prof[i + 1] + d); }
+      }
+      const sm = prof.map((v, i) => { let a = 0, c = 0; for (let k = -3; k <= 3; k++) { const j = i + k; if (j >= 0 && j < prof.length) { a += prof[j]; c++; } } return a / c; });
+      p.pts = pts; p.prof = sm;
+      for (let i = 0; i < pts.length; i++) {
+        const [px, pz] = pts[i];
+        const ix0 = Math.max(0, Math.floor((px - R0 + HALF) / CELL)), ix1 = Math.min(RES, Math.ceil((px + R0 + HALF) / CELL));
+        const iz0 = Math.max(0, Math.floor((pz - R0 + HALF) / CELL)), iz1 = Math.min(RES, Math.ceil((pz + R0 + HALF) / CELL));
+        for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+          const k = iz * V + ix, d = Math.hypot(ix * CELL - HALF - px, iz * CELL - HALF - pz);
+          if (d < best[k]) { best[k] = d; bestH[k] = sm[i]; }
+        }
+      }
+    }
+    for (let k = 0; k < n; k++) {
+      if (best[k] >= R0) continue;
+      this.h[k] = lerp(this.h[k], bestH[k], smooth(R0, w / 2, best[k]));
+      this.pathMask[k] = smooth(w / 2 + 0.8, w / 2 - 0.6, best[k]);
+    }
+    // Мосты через ущелье: настил от конца одной тропы до конца другой
+    this.bridges = [];
+    for (const br of M.bridges) {
+      const [pa, pb] = br.paths[0].side < 0 ? br.paths : [br.paths[1], br.paths[0]];
+      const a = pa.pts[pa.pts.length - 1], b = pb.pts[pb.pts.length - 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / len, uz = (b[1] - a[1]) / len;
+      const d = this.decks.add({ kind: 'bridge', ax: a[0] - ux * 1.5, az: a[1] - uz * 1.5, bx: b[0] + ux * 1.5, bz: b[1] + uz * 1.5, w: 4.4,
+        hA: pa.prof[pa.prof.length - 1] + 0.05, hB: pb.prof[pb.prof.length - 1] + 0.05, rel: false, walk: true, solid: false });
+      this.bridges.push(d);
+    }
+    // Сторожевые башни и развалины над переправами
+    this.watchtowers = [];
+    for (const p of M.paths) {
+      const end = p.pts[p.pts.length - 1], hEnd = p.prof[p.prof.length - 1];
+      for (let tries = 0; tries < 30; tries++) {
+        const a = R() * Math.PI * 2, r = lerp(9, 20, R()), x = end[0] + Math.cos(a) * r, z = end[1] + Math.sin(a) * r * 0.6 - p.side * 6;
+        if (Math.sign(z - M.gz(x)) !== p.side || Math.abs(z - M.gz(x)) < M.gorge.w / 2 + 5) continue;
+        const y = this.heightAt(x, z);
+        if (this.maskAt(x, z) > 0.05 || y < hEnd - 1 || this.slopeAt(x, z) > 0.08) continue;
+        this.watchtowers.push({ x, z, y });
+        break;
+      }
+      // стенка с проходом поперёк тропы — рубеж обороны у моста
+      const i = Math.max(0, p.pts.length - 9), q = p.pts[i], q2 = p.pts[Math.max(0, i - 2)];
+      const dx = q[0] - q2[0], dz = q[1] - q2[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l;
+      this.features.walls.push({ ax: q[0] + nx * 1.4, az: q[1] + nz * 1.4, bx: q[0] + nx * 6, bz: q[1] + nz * 6, h: 1.35, t: 0.6 });
+      this.features.walls.push({ ax: q[0] - nx * 1.4, az: q[1] - nz * 1.4, bx: q[0] - nx * 6, bz: q[1] - nz * 6, h: 1.35, t: 0.6 });
+    }
+  }
+
+  // ---------------------------------------------------------------- город: крепостные стены, башни, лестницы
+
+  addFortress() {
+    const F = this.town.fort;
+    for (const w of F.walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az) || 1, ux = (w.bx - w.ax) / len, uz = (w.bz - w.az) / len;
+      const outSign = Math.sign(-uz * w.out[0] + ux * w.out[1]) || 1;
+      this.decks.add({ kind: 'wall', ax: w.ax, az: w.az, bx: w.bx, bz: w.bz, w: w.w, hA: w.h, hB: w.h, rel: true, walk: true, solid: true, parapet: 1.1, outSign });
+    }
+    for (const t of F.towers) this.decks.add({ kind: 'tower', ax: t.x - t.s / 2, az: t.z, bx: t.x + t.s / 2, bz: t.z, w: t.s, hA: t.h, hB: t.h, rel: true, walk: true, solid: true });
+    for (const r of F.ramps) this.decks.add({ kind: 'ramp', ax: r.ax, az: r.az, bx: r.bx, bz: r.bz, w: r.w, hA: 0.15, hB: r.h, rel: true, walk: true, solid: true });
+  }
+
+  /** Каменная кладка: стены с зубцами, башни, лестницы и арки ворот — один меш. */
+  buildFortress() {
+    if (!this.town) return;
+    const F = this.town.fort, geos = [], R = mulberry32(4242);
+    const stone = new THREE.Color(0x857d70), dark = new THREE.Color(0x6c655b);
+    const box = (x, y, z, sx, sy, sz, yaw, col) => {
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      g.rotateY(yaw); g.translate(x, y, z);
+      const c = col.clone().multiplyScalar(lerp(0.88, 1.08, R())), n = g.getAttribute('position').count, arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+      g.deleteAttribute('uv');
+      geos.push(g);
+    };
+    for (const w of F.walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az), ux = (w.bx - w.ax) / len, uz = (w.bz - w.az) / len, yaw = Math.atan2(ux, uz) - Math.PI / 2;
+      for (let t = 0; t < len; t += 2) {
+        const l = Math.min(2.05, len - t + 0.05), x = w.ax + ux * (t + l / 2), z = w.az + uz * (t + l / 2), g = this.heightAt(x, z);
+        const base = g - 1.5, top = g + w.h;
+        box(x, (base + top) / 2, z, l, top - base, w.w, yaw, stone);
+      }
+      for (let t = 0.7; t < len - 0.3; t += 1.45) {
+        const x = w.ax + ux * t + w.out[0] * (w.w / 2 - 0.28), z = w.az + uz * t + w.out[1] * (w.w / 2 - 0.28);
+        box(x, this.heightAt(w.ax + ux * t, w.az + uz * t) + w.h + 0.55, z, 0.75, 1.1, 0.55, yaw, stone);
+      }
+    }
+    for (const t of F.towers) {
+      const g = this.heightAt(t.x, t.z), base = Math.min(g, this.heightAt(t.x + t.s / 2, t.z + t.s / 2), this.heightAt(t.x - t.s / 2, t.z - t.s / 2)) - 1.5, top = g + t.h;
+      box(t.x, (base + top) / 2, t.z, t.s, top - base, t.s, 0, dark);
+      box(t.x, top - 0.25, t.z, t.s + 0.5, 0.5, t.s + 0.5, 0, stone);
+      for (const [ex, ez] of [[1, 0], [-1, 0], [0, 1], [0, -1]])
+        for (let k = -2; k <= 2; k++) {
+          const off = k * (t.s / 5);
+          box(t.x + ex * (t.s / 2) + ez * off, top + 0.55, t.z + ez * (t.s / 2) + ex * off, ez ? 0.7 : 0.5, 1.1, ex ? 0.7 : 0.5, 0, stone);
+        }
+    }
+    for (const r of F.ramps) {
+      const len = Math.hypot(r.bx - r.ax, r.bz - r.az), ux = (r.bx - r.ax) / len, uz = (r.bz - r.az) / len, yaw = Math.atan2(ux, uz) - Math.PI / 2;
+      const n = Math.ceil(len / 0.45);
+      for (let k = 0; k < n; k++) {
+        const t = (k + 0.5) / n, x = r.ax + ux * len * t, z = r.az + uz * len * t, g = this.heightAt(x, z), top = g + 0.15 + (r.h - 0.15) * t;
+        box(x, (top + g - 0.6) / 2, z, len / n + 0.02, top - g + 0.6, r.w, yaw, stone);
+      }
+    }
+    for (const a of F.arches) {
+      const g = this.heightAt(a.x, a.z), yaw = Math.atan2(a.ux, a.uz) - Math.PI / 2;
+      box(a.x, g + a.h - 0.9, a.z, 7, 1.8, a.w, yaw, dark); // арка над воротами
+    }
+    if (!geos.length) return;
+    const merged = this.own(mergeGeometries(geos, false));
+    geos.forEach((g) => g.dispose());
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, this.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 })));
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
+  }
+
+  /** Деревянные мосты: доски настила, перила и опоры до дна ущелья. */
+  buildBridges() {
+    if (!this.bridges || !this.bridges.length) return;
+    const geos = [], R = mulberry32(777), wood = new THREE.Color(0x7a5534), beam = new THREE.Color(0x5b3e25);
+    const box = (x, y, z, sx, sy, sz, yaw, col) => {
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      g.rotateY(yaw); g.translate(x, y, z);
+      const c = col.clone().multiplyScalar(lerp(0.85, 1.1, R())), n = g.getAttribute('position').count, arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+      g.deleteAttribute('uv');
+      geos.push(g);
+    };
+    for (const d of this.bridges) {
+      const yaw = Math.atan2(d.ux, d.uz), nx = -d.uz, nz = d.ux, n = Math.ceil(d.len / 0.55);
+      for (let k = 0; k < n; k++) {
+        const t = (k + 0.5) / n, x = d.ax + d.ux * d.len * t, z = d.az + d.uz * d.len * t, y = lerp(d.hA, d.hB, t);
+        box(x, y - 0.08, z, d.w, 0.16, d.len / n - 0.06, yaw, wood);
+      }
+      for (const side of [-1, 1]) {
+        const ox = nx * side * (d.w / 2 - 0.15), oz = nz * side * (d.w / 2 - 0.15);
+        const mid = (d.hA + d.hB) / 2, pitch = Math.atan2(d.hB - d.hA, d.len);
+        const rail = new THREE.BoxGeometry(0.12, 0.12, d.len);
+        rail.rotateX(-pitch); rail.rotateY(yaw); rail.translate(d.x + ox, mid + 1.05, d.z + oz);
+        const arr = new Float32Array(rail.getAttribute('position').count * 3).fill(0.4);
+        rail.setAttribute('color', new THREE.BufferAttribute(arr, 3)); rail.deleteAttribute('uv');
+        geos.push(rail);
+        for (let t = 0; t <= d.len; t += 2.2) {
+          const x = d.ax + d.ux * t + ox, z = d.az + d.uz * t + oz, y = lerp(d.hA, d.hB, t / d.len);
+          box(x, y + 0.55, z, 0.14, 1.1, 0.14, 0, beam);
+          if (t > 1.5 && t < d.len - 1.5 && Math.round(t / 2.2) % 2 === 0) {
+            const bottom = this.heightAt(x, z) - 1;
+            box(x, (y + bottom) / 2, z, 0.35, y - bottom, 0.35, 0, beam); // опора до дна
+          }
+        }
+      }
+    }
+    const merged = this.own(mergeGeometries(geos, false));
+    geos.forEach((g) => g.dispose());
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, this.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })));
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
   }
 
   // ---------------------------------------------------------------- высоты
@@ -280,9 +485,32 @@ class World {
       const pool = n.n01(x * 0.028 + o.lx, z * 0.028 + o.lz);
       field -= Math.max(0, pool - 0.42) * 7;
       field += smooth(FIELD * 0.42, FIELD * 0.72, Math.abs(z)) * 1.9; // у армий суше
-    } else if (T === 'city') field = 2.2 + hills * 1.0 + detail * 0.12;
-    else if (T === 'mountains') field = 3 + hills * 5 + detail * 0.5 + n.ridged(x * 0.02 + o.mx, z * 0.02 + o.mz, 3) * 4 * (1 - smooth(FIELD * 0.5, FIELD * 0.75, Math.abs(z)));
-    else field = 2.6 + hills * 3.2 + detail * 0.35;
+    } else if (T === 'city') {
+      field = 2.2 + hills * 0.8 + detail * 0.1;
+      const c = this.town && this.town.citadel;
+      if (c) {
+        // Детинец на насыпном холме с крутыми склонами и въездом-пандусом
+        const dx = Math.max(c.x0 - x, 0, x - c.x1), dz = Math.max(c.z0 - z, 0, z - c.z1);
+        let lift = c.h * smooth(3.5, 0.5, Math.hypot(dx, dz));
+        const r = this.town.road, rl = Math.hypot(r.bx - r.ax, r.bz - r.az), ux = (r.bx - r.ax) / rl, uz = (r.bz - r.az) / rl;
+        const along = (x - r.ax) * ux + (z - r.az) * uz, lat = Math.abs(-(x - r.ax) * uz + (z - r.az) * ux);
+        if (along > -1 && along < rl + 2 && lat < r.w / 2 + 1.5) lift = Math.max(lift, c.h * clamp(along / rl, 0, 1) * smooth(r.w / 2 + 1.5, r.w / 2, lat));
+        field += lift;
+      }
+    } else if (T === 'mountains') {
+      // Долины у армий, между ними — массив террасами с обрывами, посередине ущелье с рекой
+      const M = this.mtn, zz = Math.abs(z), m = smooth(FIELD * 0.62, FIELD * 0.4, zz);
+      field = 3 + hills * 2.5 + detail * 0.4;
+      if (m > 0) {
+        let mh = 10 + n.ridged(x * 0.017 + o.mx, z * 0.017 + o.mz, 4) * 17 + hills * 4;
+        const q = mh / 5, fl = Math.floor(q), fr = q - fl;
+        const soft = smooth(0.55, 0.8, n.n01(x * 0.03 + o.lx, z * 0.03 + o.lz)); // где-то уступ пологий — естественный подъём
+        mh = (fl + smooth(lerp(0.74, 0.25, soft), lerp(0.92, 0.99, soft), fr)) * 5;
+        field = lerp(field, mh + detail * 0.5, m);
+      }
+      const dg = polyDist(x, z, M.gorge.pts), hw = M.gorge.w / 2;
+      if (dg < hw + 3) field = lerp(field, -3.5, smooth(hw + 3, hw - 1, dg));
+    } else field = 2.6 + hills * 3.2 + detail * 0.35;
 
     if (dist < FIELD + 30) {
       for (const hl of F.hills) {
@@ -298,7 +526,7 @@ class World {
         if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
       }
     }
-    if (T === 'swamp') field = Math.max(field, -2.2);
+    if (T === 'swamp' || T === 'mountains') field = Math.max(field, -3.5);
     else if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
 
     // Окрестности: холмы крупнее, озёра, горы по краям
@@ -391,6 +619,7 @@ class World {
         c.lerp(s.rock, smooth(32, 48, y + (n1 - 0.5) * 12));
         c.lerp(s.snow, smooth(s.snowLine, s.snowLine + 6, y + (n2 - 0.5) * 10) * (1 - smooth(0.2, 0.3, slope)));
         if (this.town) c.lerp(cobble, this.paving(x, z) * (0.75 + n2 * 0.2));
+        if (this.pathMask) c.lerp(s.dirt, this.maskAt(x, z) * 0.85);
         const k = 0.9 + n2 * 0.18;
         const i = (ty * TEX + tx) * 4;
         data[i] = clamp(c.r * k * 255, 0, 255); data[i + 1] = clamp(c.g * k * 255, 0, 255); data[i + 2] = clamp(c.b * k * 255, 0, 255); data[i + 3] = 255;
@@ -610,6 +839,7 @@ class World {
     if (fi > 0) this.group.add(flowers);
 
     if (this.town) this.buildTown(assets);
+    for (const t of this.watchtowers || []) this.placeBuilding(assets.buildings.tower, { x: t.x, z: t.z, y: t.y + 0.6 }, r() * Math.PI * 2, 11);
 
     // Замки армий за их спинами, мельница и башни на холмах
     const F = FIELD;

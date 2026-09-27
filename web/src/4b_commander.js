@@ -30,6 +30,8 @@ class Commander {
     this.mission = role === 'captain' ? { kind: 'attack' } : null;
     this.flankDone = false;
     this.reserveCommitted = false;
+    this.outbox = [];
+    this.claims = new Set();
   }
 
   get title() { return this.role === 'captain' ? 'Воевода ' + this.name : this.name; }
@@ -66,6 +68,7 @@ class Commander {
     if (this.role === 'general' && (this.nextWings -= dt) <= 0) {
       this.nextWings = 6.5 + Math.random() * 1.5;
       this.thinkWings();
+      this.flushLog();
     }
     if ((this.nextThink -= dt) > 0) return;
     this.nextThink = TRAITS[this.trait].think + Math.random() * 0.8;
@@ -140,6 +143,14 @@ class Commander {
   }
 
   decide(sq, my, en) {
+    // Никто не отсиживается: давно без дела и враг далеко — вперёд (стрелки — на рубеж стрельбы)
+    const B = this.battle;
+    if (en.length && B.time > 12 && !sq.engaged && !sq.reserve && sq.order.mode !== 'ambush' && B.time - (sq.lastActiveT || 0) > 14) {
+      if (sq.t.ranged) {
+        const ec = Commander.center(en), pos = this.firingPosition(sq, my, en, ec, false);
+        if (pos && d2d(pos, sq.center) > 5) return { kind: 'fire', mode: 'move', x: pos.x, z: pos.z, then: { kind: 'fire', mode: 'hold' }, why: 'стрелять не по кому — ' + pos.why };
+      } else if (sq.order.mode !== 'advance' && sq.order.mode !== 'charge') return { kind: 'advance', mode: 'advance', why: 'без дела стоять нельзя — в бой' };
+    }
     if (this.role === 'captain' && en.length) {
       const o = this.missionOrder(sq, my, en);
       if (o !== undefined) return o;
@@ -176,7 +187,7 @@ class Commander {
   /** Главнокомандующий: сравнивает силы на каждом крыле и ставит воеводам задачи. */
   thinkWings() {
     const B = this.battle, wings = B.wings[this.team].filter((w) => w.squads.some((s) => s.alive > 0));
-    const en = this.foeSquads();
+    const en = B.squads.filter((s) => s.team !== this.team && !s.special && s.alive > 0);
     if (!wings.length || !en.length) return;
     const val = (q) => q.alive * (q.t.mount ? 2.2 : q.t.ranged ? 0.8 : q.type === 1 ? 1.1 : 1);
     const info = wings.map((w) => {
@@ -189,12 +200,14 @@ class Commander {
     const ec = Commander.center(en);
     const myTot = info.reduce((a, i) => a + i.str, 0), enTot = en.reduce((a, q) => a + val(q), 0);
     const plan = new Map();
+    const myR = Commander.count(this.allMine(), (q) => q.t.ranged), enR = Commander.count(en, (q) => q.t.ranged);
     for (const i of info) {
-      let kind;
-      if (this.trait === 'fierce') kind = i.ratio < 0.45 ? 'hold' : 'attack';
-      else if (this.trait === 'cautious') kind = i.ratio > 1.35 ? 'attack' : 'hold';
-      else kind = i.w.key === 'center' ? (i.ratio > 1.6 ? 'attack' : 'hold') : i.ratio > 1.1 ? 'attack' : 'hold';
-      plan.set(i.w, { kind });
+      let kind = 'attack';
+      // Держать позицию — только осторожному, когда крыло слабее, а стрелков у нас больше: пусть враг идёт под болты
+      if (this.trait === 'cautious' && i.ratio < 0.75 && myR > enR * 1.1 && !i.engaged) kind = 'hold';
+      const cur = i.w.mission;
+      if (kind === 'hold' && cur && cur.kind === 'hold' && B.time - (cur.t || 0) > 28) kind = 'attack'; // ждали достаточно
+      plan.set(i.w, kind === 'hold' && cur && cur.kind === 'hold' ? cur : { kind, t: B.time });
     }
     // Хитрый посылает сильнейшее по коннице крыло в обход
     if (this.trait === 'cunning') {
@@ -210,7 +223,7 @@ class Commander {
       const helper = info.filter((i) => i !== losing && !i.engaged && i.ratio > 1).sort((a, b) => d2d(a.c, losing.c) - d2d(b.c, losing.c))[0];
       if (helper && this.trait !== 'fierce') plan.set(helper.w, { kind: 'support', wing: losing.w });
       this.commitReserve(losing);
-    } else if (myTot > enTot * 1.3 || B.time > 60) this.commitReserve(null);
+    } else if ((myTot > enTot * 1.3 && B.time > 15) || B.time > 25) this.commitReserve(null);
     for (const [w, m] of plan) this.sendMission(w, m);
   }
 
@@ -254,7 +267,7 @@ class Commander {
 
   decideRanged(sq, my, en, ec) {
     const B = this.battle;
-    const threat = en.find((e) => !e.t.ranged && d2d(e.center, sq.center) < 22);
+    const threat = en.find((e) => !e.t.ranged && d2d(e.center, sq.center) < 20);
     if (threat && !my.some((q) => !q.t.ranged && !q.t.mount && q.order.mode !== 'rout' && d2d(q.center, sq.center) < 12)) {
       const guards = my.filter((q) => !q.t.ranged && !q.t.mount && q.order.mode !== 'rout');
       const guard = Commander.nearest(guards, sq.center);
@@ -263,21 +276,47 @@ class Commander {
       return { kind: 'withdraw', mode: 'move', ...clampField(p), then: { kind: 'hold', mode: 'hold' }, why: `к ним рвутся ${threat.name}` };
     }
     const enR = Commander.count(en, (q) => q.t.ranged), myR = Commander.count(my, (q) => q.t.ranged);
-    const underFire = B.time - sq.lastHitT < 3;
-    if ((underFire && enR > myR * 1.1) || (this.trait === 'cautious' && enR > myR * 1.3)) {
-      const c = this.coverFor(sq, ec);
-      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: { wall: 'за ограду', house: 'за дома', low: world.type === 'forest' ? 'в чащу' : world.type === 'swamp' ? 'в камыши' : 'в низину' }[c.kind] + ', от чужих болтов' };
-    }
-    if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0 && sq.order.kind !== 'cover') {
-      const h = this.highNear(sq.center, 36, en, ec);
-      if (h) return { kind: 'high', mode: 'move', x: h.x, z: h.z, then: { kind: 'hold', mode: 'hold' }, why: 'с высоты бьют дальше' };
-    }
-    if (sq.order.mode === 'hold' && B.time - sq.lastShotT > 7 && B.time - sq.orderT > 7) {
-      const v = norm2(ec.x - sq.center.x, ec.z - sq.center.z);
-      return { kind: 'advance', mode: 'move', ...clampField({ x: sq.center.x + v.x * 14, z: sq.center.z + v.z * 14 }), then: { kind: 'hold', mode: 'hold' }, why: 'враг вне выстрела' };
-    }
-    if (sq.order.mode === 'advance') return { kind: 'hold', mode: 'hold', why: 'стоять и стрелять' };
+    const underFire = B.time - sq.lastHitT < 3 && enR > myR * 1.1;
+    // Каждые несколько секунд — лучший рубеж стрельбы: в пределах выстрела, с прямой видимостью,
+    // повыше, за своей пехотой, подальше от вражеских мечей, под обстрелом — в укрытии
+    const pos = this.firingPosition(sq, my, en, ec, underFire);
+    if (pos && d2d(pos, sq.center) > 6) return { kind: 'fire', mode: 'move', x: pos.x, z: pos.z, then: { kind: 'fire', mode: 'hold' }, why: pos.why };
+    if (sq.order.mode === 'advance') return { kind: 'fire', mode: 'hold', why: 'стоять и стрелять' };
     return null;
+  }
+
+  firingPosition(sq, my, en, ec, underFire) {
+    const range = sq.t.range;
+    const pick = en.filter((e) => e.engaged && !e.t.ranged);
+    const target = Commander.nearest(pick.length ? pick : en, sq.center);
+    if (!target) return null;
+    const tc = target.center, ty = world.groundAt(tc.x, tc.z);
+    const away = norm2(sq.center.x - tc.x, sq.center.z - tc.z);
+    const ideal = { x: tc.x + away.x * range * 0.7, z: tc.z + away.z * range * 0.7 };
+    const cands = [ideal, { x: sq.center.x, z: sq.center.z }];
+    for (const r of [5, 10, 16]) for (let a = 0; a < 8; a++) cands.push({ x: ideal.x + Math.cos((a * Math.PI) / 4) * r, z: ideal.z + Math.sin((a * Math.PI) / 4) * r });
+    for (const h of world.an.high) { const d = d2d(h, tc); if (d < range * 0.95 && d > range * 0.35) cands.push({ x: h.x, z: h.z }); }
+    const melee = en.filter((e) => !e.t.ranged);
+    let best = null, bs = -Infinity;
+    for (const c of cands) {
+      const p = clampField(c, 3);
+      if (!world.walkable(p.x, p.z, 0.5)) continue;
+      const dt = d2d(p, tc);
+      if (dt > range * 0.92 || dt < range * 0.35) continue;
+      const gy = world.groundAt(p.x, p.z);
+      if (!world.los(p.x, gy + 1.4, p.z, tc.x, ty + 1.0, tc.z)) continue;
+      let s = clamp((gy - ty) * 1.2, -6, 10);
+      let danger = Infinity;
+      for (const e of melee) danger = Math.min(danger, d2d(e.center, p));
+      if (danger < 15) s -= (15 - danger) * 2;
+      if (my.some((q) => !q.t.ranged && !q.t.mount && d2d(q.center, tc) < dt - 3 && d2d(q.center, p) < 24)) s += 4;
+      if (world.concealedAt(p.x, p.z) || world.inWall(p.x, p.z) || gy > world.heightAt(p.x, p.z) + 3) s += underFire ? 5 : 1.5;
+      s -= d2d(p, sq.center) * 0.08;
+      if (s > bs) { bs = s; best = { x: p.x, z: p.z, dh: gy - ty, walls: gy > world.heightAt(p.x, p.z) + 3 }; }
+    }
+    if (!best) return null;
+    best.why = best.walls ? 'на стену — сверху и за зубцами' : best.dh > 2.5 ? 'на высоту в пределах выстрела' : underFire ? 'на рубеж под прикрытием' : 'вперёд, на рубеж выстрела';
+    return best;
   }
 
   // ---------------------------------------------------------------- конница
@@ -302,7 +341,7 @@ class Commander {
       const target = Commander.nearest(pinned, sq.center);
       return { kind: 'charge', mode: 'charge', target, why: `${target.name} связаны боем — удар во фланг` };
     }
-    if (this.stance === 'defend') {
+    if (this.stance === 'defend' && this.battle.time < 25) {
       const inf = my.filter((q) => !q.t.ranged && !q.t.mount), c = Commander.center(inf) || sq.center;
       const back = norm2(c.x - ec.x, c.z - ec.z), side = sq.center.x >= c.x ? 1 : -1;
       const p = clampField({ x: c.x + back.x * 10 - back.z * 14 * side, z: c.z + back.z * 10 + back.x * 14 * side });
@@ -338,6 +377,10 @@ class Commander {
     }
     // 3. Оборона: занять холм и ждать
     if (this.stance === 'defend' && !sq.engaged) {
+      const holding = sq.order.mode === 'hold' || (sq.order.mode === 'move' && sq.order.kind === 'high');
+      if (holding && (B.time - sq.orderT > 22 || (sq.foeDist || 99) < 28))
+        return { kind: 'advance', mode: 'advance', why: (sq.foeDist || 99) < 28 ? 'враг рядом — контратака' : 'ждали достаточно — вперёд' };
+      if (sq.order.kind === 'advance' || sq.order.kind === 'charge' || B.time > 20) return null; // уже в бою — не отзываем
       if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0) {
         const h = this.highNear(sq.center, 32, en, ec);
         if (h) return { kind: 'high', mode: 'move', x: h.x, z: h.z, then: { kind: 'hold', mode: 'hold', leash: 11 }, why: 'пусть враг лезет вверх' };
@@ -354,12 +397,10 @@ class Commander {
         return { kind: 'flank', mode: 'move', claim: 'flank:' + target.id, x: fp.x, z: fp.z, then: { kind: 'charge', mode: 'charge', target, claim: 'flank:' + target.id }, why: `${target.name} связаны боем` };
       }
     }
-    // 5. Враг засел на холме: не лезть в лоб, если есть чем стрелять
+    // 5. Враг засел на холме: не лезть в лоб, а обойти склон
     const target = Commander.nearest(en, sq.center);
     if (this.trait !== 'fierce' && world.prominenceAt(target.center.x, target.center.z) > 1.2 && !sq.engaged) {
-      const myR = Commander.count(my, (q) => q.t.ranged), enR = Commander.count(en, (q) => q.t.ranged);
-      if (myR > enR && sq.order.kind !== 'hold') return { kind: 'hold', mode: 'hold', leash: 10, why: `${target.name} на холме — пусть их выбьют арбалеты` };
-      if (myR <= enR && sq.order.kind !== 'flank') {
+      if (sq.order.kind !== 'flank' && sq.order.kind !== 'advance') {
         const fp = this.flankPoint(target, sq.center, my);
         return { kind: 'flank', mode: 'move', x: fp.x, z: fp.z, then: { kind: 'charge', mode: 'charge', target }, why: `${target.name} на холме — обойти склон` };
       }

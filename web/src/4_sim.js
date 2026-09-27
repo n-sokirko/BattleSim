@@ -62,7 +62,7 @@ class Squad {
     this.units = []; this.size = 0; this.alive = 0;
     this.center = new THREE.Vector3();
     this.order = { kind: 'advance', mode: 'advance' }; this.orderT = 0; this.pending = null;
-    this.morale = 100; this.lastHitT = -99; this.lastShotT = -99; this.firstStrikeT = -99;
+    this.morale = 100; this.lastHitT = -99; this.lastShotT = -99; this.firstStrikeT = -99; this.lastActiveT = 0;
     this.engaged = false; this.engagedFor = 0; this.hidden = false;
     this.nextDecision = 0; this.labelT = 0;
     this.special = !!this.t.special;
@@ -99,7 +99,7 @@ class Unit {
     this.plan = plan;
     this.type = plan.type; this.t = TYPES_ALL[plan.type]; this.team = plan.team; this.variant = plan.variant;
     this.ox = plan.ox || 0; this.oz = plan.oz || 0;
-    this.pos = new THREE.Vector3(plan.x, world.heightAt(plan.x, plan.z), plan.z);
+    this.pos = new THREE.Vector3(plan.x, world.groundAt(plan.x, plan.z), plan.z);
     this.vel = new THREE.Vector3(); this.knock = new THREE.Vector3();
     this.yaw = plan.yaw; this.hp = this.t.hp; this.alive = true;
     this.target = null; this.retargetT = Math.random() * 0.5; this.cooldown = Math.random() * 0.8;
@@ -388,13 +388,17 @@ class Battle {
 
   tick(dt) {
     this.time += dt;
+    this.pathBudget = 4;
     this.teams[0].length = 0; this.teams[1].length = 0;
     const alive = [0, 0];
     for (const u of this.units) if (u.alive) { this.teams[u.team].push(u); if (!u.t.special) alive[u.team]++; }
     this.alive = alive;
     this.computeArmyCenters();
     this.buildGrid();
-    for (const sq of this.squads) sq.refresh(dt);
+    for (const sq of this.squads) {
+      sq.refresh(dt);
+      if (sq.engaged || this.time - sq.lastShotT < 1.5) sq.lastActiveT = this.time;
+    }
     for (const cs of this.couriers) if (cs) cs.refresh(dt);
 
     if (this.fighting && dt > 0) {
@@ -486,7 +490,7 @@ class Battle {
         const [wx, wz] = this.navTarget(u, tg.pos.x, tg.pos.z), ll = Math.hypot(wx - u.pos.x, wz - u.pos.z) || 1;
         dx = (wx - u.pos.x) / ll * t.speed; dz = (wz - u.pos.z) / ll * t.speed; wantSlot = false;
       }
-      } else if (d <= contact) {
+      } else if (d <= contact && Math.abs(tg.pos.y - u.pos.y) < 1.8) {
         u.engaged = true; wantSlot = false;
         u.face(nx, nz, dt);
         if (u.cooldown <= 0 && u.atkT < 0 && t.dmg > 0) this.startAttack(u, false);
@@ -530,7 +534,7 @@ class Battle {
    */
   navTarget(u, gx, gz) {
     const nav = world.nav;
-    if (!nav.blockedCount) return [gx, gz];
+    if (!nav.barriers) return [gx, gz];
     const cls = u.t.mount ? 1 : 0;
     if (this.time > (u.navT || 0) || Math.hypot(gx - u.navGX, gz - u.navGZ) > 5) {
       u.navT = this.time + 0.7 + Math.random() * 0.4;
@@ -540,7 +544,10 @@ class Battle {
         const sq = u.squad, pc = sq.pathCache;
         let path;
         if (pc && pc.cls === cls && Math.hypot(pc.gx - gx, pc.gz - gz) < 6 && this.time - pc.t < 3 && d2d(sq.center, u.pos) < 12) path = pc.path;
+        else if (this.pathBudget <= 0) { u.navT = this.time + 0.2; return u.path ? u.path[Math.min(u.pathI, u.path.length - 1)] : [gx, gz]; }
         else {
+          // не больше нескольких поисков пути за шаг — иначе рывки при сотнях отрядов
+          this.pathBudget--;
           const from = d2d(sq.center, u.pos) < 12 && nav.speedAt(sq.center.x, sq.center.z, cls) > 0 ? sq.center : u.pos;
           path = nav.findPath(from.x, from.z, gx, gz, cls);
           if (from === sq.center) sq.pathCache = { cls, gx, gz, t: this.time, path };
@@ -751,7 +758,7 @@ class Battle {
     if (!tg || !tg.alive) return;
     if (u.shot) { this.bolts.fire(u, tg); return; }
     const tx = tg.pos.x - u.pos.x, tz = tg.pos.z - u.pos.z, d = Math.hypot(tx, tz);
-    if (d > u.t.radius + tg.t.radius + u.t.reach + 0.6) return; // промах: цель отошла
+    if (d > u.t.radius + tg.t.radius + u.t.reach + 0.6 || Math.abs(tg.pos.y - u.pos.y) > 2) return; // промах: цель отошла
     const nx = d > 1e-4 ? tx / d : 0, nz = d > 1e-4 ? tz / d : 1;
     let dmg = u.t.ranged ? 8 : u.t.dmg;
     if (tg.t.mount) dmg *= u.t.vsCav;
@@ -782,6 +789,7 @@ class Battle {
     if (!t.alive) return;
     amount *= 0.8 + Math.random() * 0.4;
     if (arrow && !rear) amount *= 1 - t.t.arrowBlock;
+    if (arrow && t.pos.y > world.heightAt(t.pos.x, t.pos.z) + 3) amount *= 0.55; // за зубцами стены
     amount *= 1 - t.t.armor;
     t.hp -= amount;
     t.knock.x += kx; t.knock.z += kz;
@@ -827,28 +835,34 @@ class Battle {
     let f = 1;
     if (sp > 0.05) {
       // в гору тяжело, под гору легче
-      const g = world.heightAt(u.pos.x + vx / sp, u.pos.z + vz / sp) - u.pos.y;
+      const g = world.groundAt(u.pos.x + vx / sp, u.pos.z + vz / sp) - u.pos.y;
       f = g > 0 ? Math.max(0.35, 1 - g * 1.4) : Math.min(1.2, 1 - g * 0.5);
     }
     f *= Math.max(0.2, nav.speedAt(u.pos.x, u.pos.z, cls)); // топь, брод, чаща
     if (world.inWall(u.pos.x, u.pos.z)) f *= 0.35; // перелезаем ограду
     u.curSpeed = sp * f;
-    const ox = u.pos.x, oz = u.pos.z;
-    u.pos.x += (vx * f + u.knock.x) * dt;
-    u.pos.z += (vz * f + u.knock.z) * dt;
-    // В непроходимое (обрыв, глубокая вода, дом) не заходим — скользим вдоль
-    if (nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && nav.speedAt(ox, oz, cls) > 0) {
-      if (nav.speedAt(u.pos.x, oz, cls) > 0) u.pos.z = oz;
-      else if (nav.speedAt(ox, u.pos.z, cls) > 0) u.pos.x = ox;
-      else { u.pos.x = ox; u.pos.z = oz; }
+    const ox = u.pos.x, oz = u.pos.z, oy = u.pos.y, lim = FIELD - 0.5;
+    let nx = clamp(ox + (vx * f + u.knock.x) * dt, -lim, lim), nz = clamp(oz + (vz * f + u.knock.z) * dt, -lim, lim);
+    // Не заходим в непроходимое и не прыгаем с обрыва или со стены — скользим вдоль
+    if (!this.canMove(ox, oz, oy, nx, nz, cls)) {
+      if (this.canMove(ox, oz, oy, nx, oz, cls)) nz = oz;
+      else if (this.canMove(ox, oz, oy, ox, nz, cls)) nx = ox;
+      else { nx = ox; nz = oz; }
     }
+    u.pos.x = nx; u.pos.z = nz;
     world.obs.pushOut(u.pos, u.t.radius * 0.8);
+    const ny = world.groundAt(u.pos.x, u.pos.z);
+    if (Math.abs(ny - oy) > 1.2) { u.pos.x = ox; u.pos.z = oz; u.pos.y = oy; } else u.pos.y = ny;
     const k = Math.exp(-7 * dt);
     u.knock.x *= k; u.knock.z *= k;
-    const lim = FIELD - 0.5;
-    u.pos.x = clamp(u.pos.x, -lim, lim); u.pos.z = clamp(u.pos.z, -lim, lim);
-    u.pos.y = world.heightAt(u.pos.x, u.pos.z);
     u.phase += dt * u.curSpeed * (u.t.mount ? 1.4 : 3.3);
+  }
+
+  /** Можно ли шагнуть из (ox, oz) на высоте oy в (nx, nz): не в дом, не в воду, не с обрыва. */
+  canMove(ox, oz, oy, nx, nz, cls) {
+    const nav = world.nav;
+    if (nav.speedAt(nx, nz, cls) === 0 && nav.speedAt(ox, oz, cls) > 0) return false;
+    return Math.abs(world.groundAt(nx, nz) - oy) <= Math.hypot(nx - ox, nz - oz) * 1.2 + 0.25;
   }
 
   // ---------------------------------------------------------------- соседи
@@ -885,7 +899,7 @@ class Battle {
           for (let j = this.head[z * GRID_DIM + x]; j >= 0; j = this.next[j]) {
             if (j === i) continue;
             const o = U[j], dx = u.pos.x - o.pos.x, dz = u.pos.z - o.pos.z, min = u.t.radius + o.t.radius, d2 = dx * dx + dz * dz;
-            if (d2 >= min * min) continue;
+            if (d2 >= min * min || Math.abs(u.pos.y - o.pos.y) > 1.5) continue; // на стене и под стеной не толкаются
             const d = Math.sqrt(d2);
             const nx = d > 1e-4 ? dx / d : Math.cos(i), nz = d > 1e-4 ? dz / d : Math.sin(i);
             const s = (min - d) * (o.t.mass / (u.t.mass + o.t.mass)) * 0.5;
@@ -901,12 +915,13 @@ class Battle {
       if (!u.alive || (px === 0 && pz === 0)) continue;
       const l = Math.hypot(px, pz);
       if (l > 0.4) { px *= 0.4 / l; pz *= 0.4 / l; }
-      const ox = u.pos.x, oz = u.pos.z, cls = u.t.mount ? 1 : 0;
-      u.pos.x = clamp(u.pos.x + px, -lim, lim); u.pos.z = clamp(u.pos.z + pz, -lim, lim);
-      // толкотня не выдавливает в обрыв или в воду
-      if (world.nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && world.nav.speedAt(ox, oz, cls) > 0) { u.pos.x = ox; u.pos.z = oz; }
+      const ox = u.pos.x, oz = u.pos.z, oy = u.pos.y, cls = u.t.mount ? 1 : 0;
+      const nx = clamp(u.pos.x + px, -lim, lim), nz = clamp(u.pos.z + pz, -lim, lim);
+      if (!this.canMove(ox, oz, oy, nx, nz, cls)) continue; // толкотня не сбрасывает со стены и в воду
+      u.pos.x = nx; u.pos.z = nz;
       world.obs.pushOut(u.pos, u.t.radius * 0.8);
-      u.pos.y = world.heightAt(u.pos.x, u.pos.z);
+      const ny = world.groundAt(u.pos.x, u.pos.z);
+      if (Math.abs(ny - oy) > 1.2) { u.pos.x = ox; u.pos.z = oz; } else u.pos.y = ny;
     }
   }
 
@@ -966,7 +981,7 @@ class Bolts {
     const to = new THREE.Vector3(
       dst.pos.x + dst.vel.x * dur + Math.cos(ang) * rad + world.wind.x * dur * 0.8, 0,
       dst.pos.z + dst.vel.z * dur + Math.sin(ang) * rad + world.wind.y * dur * 0.8);
-    to.y = world.heightAt(to.x, to.z) + 0.9;
+    to.y = world.groundAt(to.x, to.z) + 0.9;
     this.list.push({ from, to, age: 0, dur, arc: 0.4 + d * 0.07, team: src.team, dmg: src.t.dmg, flying: true, stuck: 0, pos: from.clone(), dir: new THREE.Vector3(dx, 0, dz) });
   }
   tick(dt) {
@@ -979,9 +994,9 @@ class Bolts {
         a.pos.lerpVectors(a.from, a.to, s); a.pos.y += a.arc * 4 * s * (1 - s);
         a.dir.subVectors(a.to, a.from).divideScalar(a.dur); a.dir.y += a.arc * 4 * (1 - 2 * s) / a.dur;
         // Болт врезается в склон или ограду — так и работает укрытие
-        const gy = world.heightAt(a.pos.x, a.pos.z);
+        const gy = world.groundAt(a.pos.x, a.pos.z);
         const inTrees = world.type === 'forest' && a.pos.y < gy + 7 && world.nav.canopyAt(a.pos.x, a.pos.z) && Math.random() < dt * 2.2;
-        if (s > 0.08 && s < 1 && (a.pos.y < gy + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y || world.obs.blocks(a.pos.x, a.pos.z, a.pos.y) || inTrees)) {
+        if (s > 0.08 && s < 1 && (a.pos.y < gy + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y || world.obs.blocks(a.pos.x, a.pos.z, a.pos.y) || world.decks.solidTop(a.pos.x, a.pos.z, world.heightAt(a.pos.x, a.pos.z)) > a.pos.y || inTrees)) {
           a.flying = false; a.stuck = 8; a.dir.normalize();
           continue;
         }
@@ -995,7 +1010,7 @@ class Bolts {
           continue;
         }
         a.flying = false; a.stuck = 8;
-        const g = world.heightAt(a.to.x, a.to.z);
+        const g = world.groundAt(a.to.x, a.to.z);
         a.dir.normalize();
         const down = Math.max(0.3, -a.dir.y);
         a.pos.copy(a.to).addScaledVector(a.dir, Math.max(0, a.to.y - g) / down - 0.25);

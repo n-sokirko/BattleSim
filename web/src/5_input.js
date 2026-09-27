@@ -139,12 +139,12 @@ class CameraRig {
     this.dist += (g.dist - this.dist) * s;
     this.target.x += (g.target.x - this.target.x) * s;
     this.target.z += (g.target.z - this.target.z) * s;
-    this.groundY += (world.heightAt(this.target.x, this.target.z) - this.groundY) * (1 - Math.exp(-6 * dt));
+    this.groundY += (world.groundAt(this.target.x, this.target.z) - this.groundY) * (1 - Math.exp(-6 * dt));
 
     const cp = Math.cos(this.pitch);
     const look = new THREE.Vector3(this.target.x, this.groundY + 1, this.target.z);
     const pos = look.clone().sub(new THREE.Vector3(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp).multiplyScalar(this.dist));
-    const minY = world.heightAt(pos.x, pos.z) + 1.5;
+    const minY = world.groundAt(pos.x, pos.z) + 1.5;
     if (pos.y < minY) pos.y = minY;
     this.cam.position.copy(pos);
     this.cam.lookAt(look);

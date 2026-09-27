@@ -78,7 +78,7 @@ function tweakStyle(st, type) {
     st.water = new THREE.Color(0x3d4a2c); st.underwater = new THREE.Color(0x3c3f26);
     st.grassA.lerp(new THREE.Color(0x6b7a3a), 0.5); st.grassB.lerp(new THREE.Color(0x7d8a40), 0.5);
   }
-  if (type === 'mountains') st.snowLine = Math.min(st.snowLine, 13);
+  if (type === 'mountains') st.snowLine = Math.min(st.snowLine, 19);
   if (type === 'forest') st.treeDensity *= 1.2;
 }
 
@@ -147,7 +147,7 @@ rig.onHover = (x, y) => {
     const ox = (c - (t.cols - 1) / 2) * t.spacing, oz = -(r - (t.rows - 1) / 2) * t.spacing;
     const gx = p.x + ox * cos + oz * sin, gz = p.z - ox * sin + oz * cos;
     const k = t.radius * 1.6;
-    m4.makeScale(k, 1, k).setPosition(gx, world.heightAt(gx, gz) + 0.06, gz);
+    m4.makeScale(k, 1, k).setPosition(gx, world.groundAt(gx, gz) + 0.06, gz);
     ghost.setMatrixAt(i++, m4);
   }
   ghost.count = i;
@@ -499,7 +499,7 @@ async function start(saved) {
 window.claude?.hot?.snapshot?.(() => ({ seed: game.seed, plan: battle.plan }));
 if (window.claude?.hot?.ready) window.claude.hot.ready(start);
 else start(window.claude?.hot?.data ?? {});
-window.sechaDebug = { rig, battle, game, world, ASSETS, camera };
+window.sechaDebug = { rig, battle, game, world, ASSETS, camera, makeCity, mulberry32 };
 // Отладка: прокрутить симуляцию вперёд без отрисовки (для проверки в среде без полноценного rAF)
 window.sechaDebug.step = (sec, dt = 1 / 30) => {
   for (let t = 0; t < sec; t += dt) {

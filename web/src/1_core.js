@@ -149,6 +149,6 @@ const TRAITS = {
 };
 const ORDER_TEXT = {
   advance: 'Вперёд', hold: 'Держать строй', high: 'Занять высоту', cover: 'В укрытие', ambush: 'Засада', flank: 'Обход с фланга',
-  charge: 'Натиск', screen: 'Прикрыть стрелков', withdraw: 'Отход', rally: 'Сбор у знамени', rout: 'Бегут!', reserve: 'В резерв', support: 'На помощь',
+  charge: 'Натиск', screen: 'Прикрыть стрелков', withdraw: 'Отход', rally: 'Сбор у знамени', rout: 'Бегут!', reserve: 'В резерв', support: 'На помощь', fire: 'На рубеж стрельбы',
 };
 const SQUAD_NAME = ['мечники', 'варвары', 'арбалетчики', 'рыцари'];

@@ -1,0 +1,3036 @@
+<title>Сеча</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Ruslan+Display&display=swap">
+<style>
+  /* Игра намеренно в одной тёмной теме: панели лежат поверх 3D-сцены. */
+  :root {
+    color-scheme: dark;
+    --ink: #10141a;
+    --panel: rgba(16, 20, 26, 0.8);
+    --panel-hi: rgba(34, 40, 50, 0.92);
+    --line: rgba(236, 226, 204, 0.14);
+    --line-hi: rgba(236, 226, 204, 0.32);
+    --text: #ece2cc;
+    --muted: #a59d8b;
+    --brass: #d7a33f;
+    --brass-ink: #251904;
+    --blue: #4a86ea;
+    --red: #de4f41;
+    --gutter: 16px;
+    --display: 'Ruslan Display', 'Georgia', serif;
+    --ui: 'Onest', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ink); color: var(--text); font: 500 13px/1.35 var(--ui); overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+  .hud { position: fixed; left: 0; right: 0; display: flex; gap: 10px; padding-inline: var(--gutter); pointer-events: none; z-index: 2; }
+  .hud > * { pointer-events: auto; }
+  .hud-top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 12px); justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+  .hud-bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); align-items: flex-end; justify-content: space-between; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .tally { padding: 8px 12px 10px; width: min(320px, calc(100vw - 2 * var(--gutter))); display: grid; gap: 6px; }
+  .tally-row { display: flex; justify-content: space-between; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+  .tally-row .b { color: #8db4f5; } .tally-row .r { color: #f08a7e; }
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(0, 0, 0, 0.45); }
+  .bar i { display: block; height: 100%; transition: width 0.25s ease; }
+  #barBlue { background: var(--blue); } #barRed { background: var(--red); }
+  .map-name { color: var(--muted); font-size: 12px; font-weight: 500; }
+
+  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .btn { font: 600 13px/1 var(--ui); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 13px; min-height: 40px; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    transition: background 0.15s, border-color 0.15s, transform 0.08s; white-space: nowrap; }
+  .btn:hover { background: var(--panel-hi); border-color: var(--line-hi); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible, .card:focus-visible, .team:focus-visible, .fight:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .btn[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.2); color: #f6d792; }
+
+  .dock { display: flex; gap: 8px; align-items: stretch; min-width: 0; flex: 1 1 auto; }
+  .teams { display: grid; gap: 6px; padding: 6px; }
+  .team { display: flex; align-items: center; gap: 8px; font: 700 13px/1 var(--ui); color: var(--text); padding: 8px 12px; min-height: 36px;
+    border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+  .team::before { content: ''; width: 12px; height: 14px; clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); background: var(--c); }
+  .team[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 30%, transparent); border-color: var(--c); }
+  #team-0 { --c: var(--blue); } #team-1 { --c: var(--red); }
+
+  #cards { display: flex; gap: 6px; padding: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  #cards::-webkit-scrollbar { display: none; }
+  .card { position: relative; display: grid; gap: 2px; text-align: left; min-width: 118px; padding: 8px 10px 8px; border-radius: 8px; cursor: pointer;
+    color: var(--text); background: rgba(255, 255, 255, 0.03); border: 1px solid transparent; font: 500 12px/1.25 var(--ui); }
+  .card b { font-size: 14px; font-weight: 700; }
+  .card small { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .card .note { color: #cdbb8f; }
+  .card-key { position: absolute; top: 6px; right: 8px; font-size: 10px; color: var(--muted); }
+  .card:hover { background: rgba(255, 255, 255, 0.07); }
+  .card[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.16); }
+  .eraser-wrap { display: flex; align-items: center; padding: 6px; }
+
+  .fight { font: 400 22px/1 var(--display); letter-spacing: 0.04em; color: var(--brass-ink); background: linear-gradient(#f0c565, var(--brass));
+    border: 1px solid #f7da98; border-radius: 12px; padding: 0 26px; min-height: 64px; cursor: pointer; flex: none;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 -3px 0 rgba(0, 0, 0, 0.18); }
+  .fight:hover { filter: brightness(1.06); }
+  .fight:disabled { filter: grayscale(1) brightness(0.7); cursor: not-allowed; }
+
+  #hint { position: fixed; left: var(--gutter); right: var(--gutter); bottom: calc(env(safe-area-inset-bottom, 0px) + 104px); text-align: center; color: var(--text);
+    font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); pointer-events: none; z-index: 1; }
+  body:has(#setupBar[hidden]) #hint { display: none; }
+  #toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--gutter));
+    padding: 10px 16px; border-radius: 10px; background: var(--panel-hi); border: 1px solid var(--line); z-index: 3; text-align: center; pointer-events: none; }
+
+  #result { position: fixed; inset: 0; display: grid; place-items: center; padding-inline: var(--gutter); z-index: 4; pointer-events: none; }
+  .result-card { pointer-events: auto; width: min(520px, 100%); padding: 26px 24px 22px; text-align: center; display: grid; gap: 14px; background: rgba(12, 15, 20, 0.88); }
+  #resultTitle { margin: 0; font: 400 clamp(28px, 6vw, 44px)/1.05 var(--display); text-wrap: balance; letter-spacing: 0.02em; }
+  #resultTitle[data-team="0"] { color: #8db4f5; } #resultTitle[data-team="1"] { color: #f08a7e; }
+  #resultText { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .result-card .row { justify-content: center; }
+  .btn.primary { background: linear-gradient(#f0c565, var(--brass)); color: var(--brass-ink); border-color: #f7da98; }
+
+  #loading { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding-inline: var(--gutter);
+    background: radial-gradient(ellipse at 50% 40%, #1d2530, var(--ink) 70%); }
+  .load-box { width: min(420px, 100%); display: grid; gap: 14px; text-align: center; }
+  .load-box h1 { margin: 0; font: 400 clamp(48px, 12vw, 84px)/1 var(--display); color: var(--brass); letter-spacing: 0.04em; }
+  .load-box p { margin: 0; color: var(--muted); }
+  .load-track { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+  #loadBar { height: 100%; width: 0; background: var(--brass); transition: width 0.2s; }
+  .credits { font-size: 11px; color: var(--muted); }
+  .credits a { color: #cdbb8f; }
+
+  .map-meta { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 500; }
+  .wind { display: inline-flex; align-items: center; gap: 4px; color: var(--text); }
+  #windArrow { display: inline-block; font-weight: 700; color: #9fd0ff; transition: transform 0.2s linear; }
+  #cmdInfo { color: #cdbb8f; }
+
+  #labels { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+  .olabel { position: absolute; left: 0; top: 0; padding: 3px 8px; border-radius: 6px; font: 600 12px/1.2 var(--ui); white-space: nowrap;
+    color: var(--text); background: rgba(16, 20, 26, 0.78); border: 1px solid var(--line); will-change: transform; }
+  .olabel.team0 { border-color: rgba(74, 134, 234, 0.8); } .olabel.team1 { border-color: rgba(222, 79, 65, 0.8); }
+  .olabel.cmd { font-size: 13px; color: #f6d792; border-color: var(--brass); }
+
+  #chronicle { position: fixed; left: var(--gutter); bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); z-index: 2; margin: 0;
+    width: min(440px, calc(100vw - 2 * var(--gutter))); padding: 8px 10px; list-style: none; display: grid; gap: 4px; pointer-events: none; }
+  #chronicle li { display: grid; grid-template-columns: 34px 1fr; gap: 6px; font-size: 12px; line-height: 1.3; color: var(--text);
+    padding-left: 8px; border-left: 3px solid var(--muted); animation: logIn 0.3s ease; }
+  #chronicle li[data-team="0"] { border-left-color: var(--blue); } #chronicle li[data-team="1"] { border-left-color: var(--red); }
+  #chronicle li:not(:first-child) { opacity: 0.72; }
+  #chronicle time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  @keyframes logIn { from { transform: translateY(4px); } to { transform: none; } }
+
+  #helpBox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; padding-inline: var(--gutter); background: rgba(8, 10, 14, 0.55); overflow-y: auto; }
+  .help-card { width: min(980px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 22px 24px 18px; display: grid; gap: 14px; background: rgba(14, 17, 22, 0.95); margin-block: 16px; }
+  #helpTitle { margin: 0; font: 400 clamp(24px, 4vw, 34px)/1.1 var(--display); color: var(--brass); letter-spacing: 0.02em; }
+  .help-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .help-cols h3 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: #cdbb8f; }
+  .help-cols ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--text); font-size: 13px; line-height: 1.45; max-width: 62ch; }
+  .help-cols b { color: #f6d792; }
+  .help-card .row { justify-content: flex-end; }
+
+  @media (max-width: 760px) {
+    .hud-bottom { flex-wrap: wrap; }
+    .dock { flex-basis: 100%; }
+    .fight { flex: 1 1 100%; min-height: 52px; }
+    #hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 176px); }
+  }
+  @media (max-height: 460px) {
+    .card .note, .map-name { display: none; }
+    .card { min-width: 104px; padding: 6px 8px; }
+    .fight { min-height: 52px; font-size: 19px; padding: 0 18px; }
+    .btn { min-height: 34px; padding: 8px 10px; }
+    #hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
+    #toast { top: calc(env(safe-area-inset-top, 0px) + 70px); }
+    #chronicle { width: min(360px, calc(100vw - 2 * var(--gutter))); bottom: calc(env(safe-area-inset-bottom, 0px) + 56px); }
+    #chronicle li { font-size: 11px; }
+    #cmdInfo, .map-meta #sunText { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<canvas id="c" tabindex="0" aria-label="Поле боя"></canvas>
+
+<header class="hud hud-top">
+  <div class="panel tally">
+    <div class="tally-row"><span class="b">Синие <span id="nBlue">0</span></span><span class="r"><span id="nRed">0</span> Красные</span></div>
+    <div class="bar"><i id="barBlue"></i><i id="barRed"></i></div>
+    <div class="map-name" id="mapName">Готовим поле…</div>
+    <div class="map-meta"><span class="wind"><span id="windArrow" aria-hidden="true">↑</span> <span id="windText">Безветрие</span></span><span id="sunText" hidden>· низкое солнце слепит стрелков</span></div>
+    <div class="map-name" id="cmdInfo"></div>
+  </div>
+  <div class="row" id="setupTop">
+    <button class="btn" id="newMap">Новая карта</button>
+    <button class="btn" id="random">Случайные армии</button>
+    <button class="btn" id="clear">Очистить</button>
+    <button class="btn" id="cmdToggle">Полководцы: есть</button>
+    <button class="btn" id="helpBtn">Как устроен бой</button>
+  </div>
+  <div class="row" id="fightTop" hidden>
+    <button class="btn" id="pause">Пауза</button>
+    <button class="btn" id="slow">×0,25</button>
+    <button class="btn" id="normal">×1</button>
+    <button class="btn" id="fast">×2</button>
+    <button class="btn" id="orbit">Облёт</button>
+    <button class="btn" id="helpBtn2" aria-label="Как устроен бой">?</button>
+  </div>
+</header>
+
+<div id="labels" aria-hidden="true"></div>
+<ol id="chronicle" class="panel" hidden aria-live="polite"></ol>
+<div id="hint"></div>
+<div id="toast" hidden></div>
+
+<footer class="hud hud-bottom" id="setupBar">
+  <div class="dock">
+    <div class="panel teams">
+      <button class="team" id="team-0">Синие</button>
+      <button class="team" id="team-1">Красные</button>
+    </div>
+    <div class="panel" style="display:flex;min-width:0">
+      <div id="cards"></div>
+      <div class="eraser-wrap"><button class="btn" id="eraser">Ластик</button></div>
+    </div>
+  </div>
+  <button class="fight" id="fight">В бой!</button>
+</footer>
+
+<footer class="hud hud-bottom" id="fightBar" hidden>
+  <button class="btn" id="stop">■ К расстановке</button>
+</footer>
+
+<div id="result" hidden>
+  <div class="panel result-card">
+    <h2 id="resultTitle">Победа</h2>
+    <p id="resultText"></p>
+    <div class="row">
+      <button class="btn primary" id="rematch">Реванш</button>
+      <button class="btn" id="edit">Изменить армии</button>
+      <button class="btn" id="resultMap">Новая карта</button>
+    </div>
+  </div>
+</div>
+
+<div id="helpBox" hidden>
+  <div class="panel help-card" role="dialog" aria-labelledby="helpTitle">
+    <h2 id="helpTitle">Как устроен бой</h2>
+    <div class="help-cols">
+      <section>
+        <h3>Рельеф решает</h3>
+        <ul>
+          <li><b>Высота.</b> В гору идут медленнее, натиск конницы на склоне гаснет. Удар сверху сильнее до 35%, снизу слабее до 30%. Арбалетчики на холме бьют дальше.</li>
+          <li><b>Укрытия.</b> Болт — настоящий снаряд: он врезается в склон или каменную ограду. Без прямой видимости стрелок не стреляет.</li>
+          <li><b>Ограды и проёмы.</b> Через ограду лезут втрое медленнее, через проём проходят свободно.</li>
+          <li><b>Низины.</b> Отряд в овраге издали не виден, пока не выстрелит или враг не подойдёт ближе 20 м. Кольцо под ним темнеет.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Полководцы думают</h3>
+        <ul>
+          <li>У каждой армии свой полководец на белом коне со знаменем: осторожный, яростный или хитрый.</li>
+          <li>Раз в 3–4 секунды он оценивает силы и рельеф и отдаёт приказы: занять высоту, уйти в укрытие, устроить засаду, обойти с фланга, ударить конницей по стрелкам, прикрыть стрелков, отойти и разогнаться снова.</li>
+          <li>Все решения видны в летописи боя слева внизу и подписями над отрядами.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Чего нет в других играх</h3>
+        <ul>
+          <li><b>Гонцы.</b> Приказ дальнему отряду везёт всадник. Перехватите его, и приказ не дойдёт. Убейте полководца, и армия останется без управления.</li>
+          <li><b>Солнце и ветер.</b> На закате и рассвете низкое солнце слепит стрелков, которые смотрят на него. Ветер сносит болты и меняет дальность: попутный добавляет, встречный отнимает.</li>
+          <li><b>Засады.</b> Первый удар из укрытия сильнее в 1,6 раза. Удар в спину сильнее в 1,35 раза, щит от него не спасает.</li>
+          <li><b>Боевой дух.</b> Потери, болты и удары в спину его подтачивают. Сломленный отряд бежит, а рядом со знаменем полководца приходит в себя.</li>
+        </ul>
+      </section>
+    </div>
+    <div class="row"><button class="btn primary" id="helpClose">Понятно</button></div>
+  </div>
+</div>
+
+<div id="loading">
+  <div class="load-box">
+    <h1>Сеча</h1>
+    <p id="loadText">Собираем войска и рисуем карту…</p>
+    <div class="load-track"><div id="loadBar"></div></div>
+    <p class="credits">Модели: <a href="https://kaylousberg.com" target="_blank" rel="noopener">KayKit</a> и <a href="https://quaternius.com" target="_blank" rel="noopener">Quaternius</a> (CC0)</p>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+
+// ------------------------------------------------------------------ утилиты
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const clamp01 = (v) => clamp(v, 0, 1);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const DEG = Math.PI / 180;
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
+const LOW_END = IS_TOUCH || (navigator.hardwareConcurrency || 8) <= 4;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Классический 2D-шум Перлина. noise() ≈ -1..1, n01() ≈ 0..1 (как Mathf.PerlinNoise). */
+class Perlin {
+  constructor(rand) {
+    const p = [...Array(256).keys()];
+    for (let i = 255; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    this.p = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) this.p[i] = p[i & 255];
+  }
+  static grad(h, x, y) {
+    switch (h & 7) {
+      case 0: return x + y; case 1: return -x + y; case 2: return x - y; case 3: return -x - y;
+      case 4: return x; case 5: return -x; case 6: return y; default: return -y;
+    }
+  }
+  noise(x, y) {
+    let X = Math.floor(x), Y = Math.floor(y);
+    x -= X; y -= Y; X &= 255; Y &= 255;
+    const u = x * x * x * (x * (x * 6 - 15) + 10), v = y * y * y * (y * (y * 6 - 15) + 10);
+    const p = this.p, a = p[X] + Y, b = p[X + 1] + Y, g = Perlin.grad;
+    return lerp(lerp(g(p[a], x, y), g(p[b], x - 1, y), u), lerp(g(p[a + 1], x, y - 1), g(p[b + 1], x - 1, y - 1), u), v) * 0.72;
+  }
+  n01(x, y) { return this.noise(x, y) * 0.5 + 0.5; }
+  fbm(x, y, oct) {
+    let s = 0, amp = 1, f = 1, norm = 0;
+    for (let i = 0; i < oct; i++) { s += this.noise(x * f, y * f) * amp; norm += amp; amp *= 0.5; f *= 2.03; }
+    return s / norm;
+  }
+  ridged(x, y, oct) {
+    let s = 0, amp = 1, f = 1, norm = 0;
+    for (let i = 0; i < oct; i++) { const n = 1 - Math.abs(this.noise(x * f, y * f)); s += n * n * amp; norm += amp; amp *= 0.5; f *= 2.1; }
+    return s / norm;
+  }
+}
+
+// ------------------------------------------------------------------ типы войск
+
+/** Баланс армий. Цифры те же, что в Unity-версии (UnitTypes.cs). */
+const TYPES = [
+  { key: 'sword', name: 'Мечники', model: 'Knight', hp: 110, armor: 0.3, speed: 3.3, accel: 12, radius: 0.58, mass: 1,
+    reach: 0.7, dmg: 18, cd: 1.05, atkTime: 0.75, arrowBlock: 0.55, vsCav: 1, charge: 1, cols: 5, rows: 3, spacing: 1.45,
+    note: 'Щит гасит болты', keep: ['1H_Sword', 'Badge_Shield', 'Knight_Helmet', 'Knight_Cape'],
+    anim: { idle: 'Idle', run: 'Running_A', attack: ['1H_Melee_Attack_Chop', '1H_Melee_Attack_Slice_Diagonal'], cheer: 'Cheer' } },
+  { key: 'barb', name: 'Варвары', model: 'Barbarian', hp: 130, armor: 0.12, speed: 3.6, accel: 12, radius: 0.6, mass: 1.1,
+    reach: 1.0, dmg: 30, cd: 1.5, atkTime: 0.85, arrowBlock: 0, vsCav: 2.2, charge: 1, cols: 4, rows: 3, spacing: 1.5,
+    note: 'Топор рубит конницу', keep: ['2H_Axe', 'Barbarian_Hat', 'Barbarian_Cape'],
+    anim: { idle: '2H_Melee_Idle', run: 'Running_A', attack: ['2H_Melee_Attack_Chop', '2H_Melee_Attack_Slice'], cheer: 'Cheer' } },
+  { key: 'xbow', name: 'Арбалетчики', model: 'Rogue_Hooded', hp: 65, armor: 0.05, speed: 3.4, accel: 12, radius: 0.52, mass: 0.9,
+    reach: 0.5, dmg: 26, cd: 2.3, atkTime: 0.7, ranged: true, range: 36, arrowBlock: 0, vsCav: 1, charge: 1, cols: 5, rows: 2, spacing: 1.45,
+    note: 'Стреляют на 36 м', keep: ['2H_Crossbow', 'Rogue_Cape'],
+    anim: { idle: '2H_Ranged_Aiming', run: 'Running_A', attack: ['2H_Ranged_Shoot'], aim: '2H_Ranged_Aiming', reload: '2H_Ranged_Reload', melee: '1H_Melee_Attack_Stab', cheer: 'Cheer' } },
+  { key: 'knight', name: 'Рыцари', model: 'Knight', mount: true, hp: 220, armor: 0.38, speed: 7.5, accel: 5, radius: 1.1, mass: 3.5,
+    reach: 0.9, dmg: 24, cd: 1.25, atkTime: 0.7, arrowBlock: 0.25, vsCav: 1, charge: 2.3, cols: 3, rows: 2, spacing: 2.7,
+    note: 'Натиск ×2,3', keep: ['1H_Sword', 'Round_Shield', 'Knight_Helmet', 'Knight_Cape'],
+    anim: { attack: ['1H_Melee_Attack_Slice_Horizontal', '1H_Melee_Attack_Slice_Diagonal'] } },
+];
+const ALL_ATTACHMENTS = ['1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
+  'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat', 'Barbarian_Cape',
+  'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape'];
+
+const TEAM = [
+  { name: 'Синие', hue: 214, sat: 0.62, css: '#3f7fe6' },
+  { name: 'Красные', hue: 2, sat: 0.66, css: '#d9483b' },
+];
+const MAX_UNITS = LOW_END ? 420 : 700;
+
+// ------------------------------------------------------------------ стили мира
+
+const BIOMES = ['Лето', 'Осень', 'Зима', 'Степь'];
+const TIMES = ['день', 'закат', 'туманное утро'];
+const C = (hex) => new THREE.Color(hex);
+
+function makeStyle(biome, time) {
+  const s = { biome, time, title: BIOMES[biome] + ', ' + TIMES[time] };
+  Object.assign(s, {
+    rock: C(0x7b7670), snow: C(0xf2f5fa), sand: C(0xd8c894), dirt: C(0x7a5d3f), underwater: C(0x4f6f5c),
+    water: C(0x2a6f86), waterAlpha: 0.8, snowLine: 42, snowGround: false, treeDensity: 1, grassDensity: 1, flowers: 0.15,
+    grass1: C(0x5e9a2f), grass2: C(0x86b440), flower: [C(0xf2e14a), C(0xf0f0f0), C(0xd9534f)], leafShift: null,
+  });
+  if (biome === 0) Object.assign(s, { grassA: C(0x5f9a35), grassB: C(0x78ad3c), dry: C(0xa9a852) });
+  if (biome === 1) Object.assign(s, { grassA: C(0x8a8a3a), grassB: C(0x9c8c3c), dry: C(0xb8904a), grass1: C(0x8f8a3a), grass2: C(0xb09a45),
+    flower: [C(0xe8b030), C(0xc8602a), C(0xa03a28)], flowers: 0.05, leafShift: 'autumn', water: C(0x255f70) });
+  if (biome === 2) Object.assign(s, { grassA: C(0xe6ecf4), grassB: C(0xd7e0ec), dry: C(0x9aa08a), snowGround: true, snowLine: 18,
+    grass1: C(0x9aa37a), grass2: C(0xb8bfa0), grassDensity: 0.25, flowers: 0, leafShift: 'winter', underwater: C(0x6a8a94), sand: C(0xc8ccc8), water: C(0x4b7c92) });
+  if (biome === 3) Object.assign(s, { grassA: C(0xb4a55a), grassB: C(0xc2b066), dry: C(0xcfae6a), dirt: C(0x9a6a45), rock: C(0xa47e62),
+    grass1: C(0xb8a458), grass2: C(0xd0bc6c), flower: [C(0xe86a3a), C(0xf0d060), C(0xb06ac0)], flowers: 0.08, treeDensity: 0.3, grassDensity: 1.2, snowLine: 60, leafShift: 'steppe', water: C(0x2b6e74) });
+
+  // Время суток: положение солнца, свет, туман, параметры неба
+  if (time === 0) Object.assign(s, { elev: 52, azim: -35, sunColor: C(0xfff1dc), sunI: 2.6, fog: C(0xb7c8d8), fogD: 0.0031, turb: 5, rayleigh: 1.4, expo: 0.62 });
+  if (time === 1) Object.assign(s, { elev: 9, azim: -65, sunColor: C(0xffb070), sunI: 2.9, fog: C(0xd9a78a), fogD: 0.0036, turb: 9, rayleigh: 3.2, expo: 0.58 });
+  if (time === 2) Object.assign(s, { elev: 20, azim: 115, sunColor: C(0xffe2bf), sunI: 2.1, fog: C(0xc3cad3), fogD: 0.0074, turb: 12, rayleigh: 2.2, expo: 0.62 });
+  if (s.snowGround) { s.fog.lerp(C(0xd6dfe9), 0.5); s.sunI *= 0.9; }
+  return s;
+}
+
+// ------------------------------------------------------------------ полководцы и гонцы
+
+/** Полководец: сидит на белом коне со знаменем, думает и рассылает приказы. */
+const COMMANDER = { key: 'cmd', name: 'Полководец', model: 'Knight', mount: true, special: 'commander', hp: 320, armor: 0.45, speed: 6.5, accel: 6,
+  radius: 1.1, mass: 3.5, reach: 0.9, dmg: 22, cd: 1.2, atkTime: 0.7, arrowBlock: 0.4, vsCav: 1, charge: 1, keep: ['2H_Sword', 'Knight_Helmet', 'Knight_Cape'],
+  anim: { attack: ['1H_Melee_Attack_Slice_Horizontal'] } };
+/** Гонец: везёт приказ от полководца к отряду. Его можно перехватить. */
+const MESSENGER = { key: 'msg', name: 'Гонец', model: 'Rogue_Hooded', mount: true, special: 'messenger', hp: 45, armor: 0, speed: 11, accel: 10,
+  radius: 0.9, mass: 2.5, reach: 0.5, dmg: 0, cd: 99, atkTime: 0.5, arrowBlock: 0, vsCav: 1, charge: 1, keep: ['Rogue_Cape'], anim: { attack: [] } };
+const TYPES_ALL = [...TYPES, COMMANDER, MESSENGER];
+const T_CMD = 4, T_MSG = 5;
+
+const CMD_NAMES = [['Ратибор', 'Ярополк', 'Мстислав', 'Добрыня', 'Святослав'], ['Всеслав', 'Изяслав', 'Горислав', 'Судислав', 'Братислав']];
+const TRAITS = {
+  cautious: { name: 'осторожный', think: 3.6, note: 'бережёт людей, держит высоты и укрытия' },
+  fierce: { name: 'яростный', think: 2.6, note: 'рвётся в бой и давит числом' },
+  cunning: { name: 'хитрый', think: 3.0, note: 'устраивает засады, обходы и налёты' },
+};
+const ORDER_TEXT = {
+  advance: 'Вперёд', hold: 'Держать строй', high: 'Занять высоту', cover: 'В укрытие', ambush: 'Засада', flank: 'Обход с фланга',
+  charge: 'Натиск', screen: 'Прикрыть стрелков', withdraw: 'Отход', rally: 'Сбор у знамени', rout: 'Бегут!', reserve: 'В резерв',
+};
+const SQUAD_NAME = ['мечники', 'варвары', 'арбалетчики', 'рыцари'];
+
+// ------------------------------------------------------------------ мир
+
+const SIZE = 440, RES = 256, HALF = SIZE / 2, CELL = SIZE / RES, FIELD = 80, WATER = 0, TEX = 512;
+
+class World {
+  constructor() {
+    this.h = new Float32Array((RES + 1) * (RES + 1));
+    this.group = null;
+    this.owned = [];
+    this.sunDir = new THREE.Vector3(0, 1, 0);
+  }
+
+  generate(seed, style, assets) {
+    this.dispose();
+    this.style = style;
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    const rand = mulberry32(seed);
+    this.rand = rand;
+    this.pn = new Perlin(rand);
+    const o = () => rand() * 200;
+    this.o = { hx: o(), hz: o(), lx: o(), lz: o(), mx: o(), mz: o(), cx: o(), cz: o() };
+    this.features = this.makeFeatures(rand);
+    const wa = rand() * Math.PI * 2, ws = rand() < 0.2 ? 0 : 1 + rand() * 6;
+    this.wind = new THREE.Vector2(Math.cos(wa) * ws, Math.sin(wa) * ws);
+
+    const h = this.h;
+    for (let z = 0; z <= RES; z++)
+      for (let x = 0; x <= RES; x++)
+        h[z * (RES + 1) + x] = this.rawHeight(x * CELL - HALF, z * CELL - HALF);
+    this.analyze();
+
+    this.buildTerrain(style);
+    this.buildWater(style);
+    this.applyAtmosphere(style);
+    this.buildWalls();
+    if (assets) this.buildDecor(style, assets);
+  }
+
+  // ---------------------------------------------------------------- тактический рельеф
+
+  /** Холмы, овраг, гряда и развалины каменных оград — всё, за что можно воевать. */
+  makeFeatures(R) {
+    const f = { hills: [], ridges: [], ravine: null, walls: [] };
+    for (const side of [-1, 1])
+      f.hills.push({ x: lerp(-45, 45, R()), z: side * lerp(20, 42, R()), r: lerp(11, 16, R()), h: lerp(4.5, 7.5, R()) });
+    if (R() < 0.65)
+      f.hills.push({ x: (R() < 0.5 ? -1 : 1) * lerp(38, 60, R()), z: lerp(-10, 10, R()), r: lerp(9, 13, R()), h: lerp(3.5, 6, R()) });
+
+    // Овраг поперёк поля между армиями
+    const z0 = lerp(-10, 10, R()), tilt = lerp(-0.22, 0.22, R()), x0 = lerp(-58, -22, R()), x1 = lerp(22, 60, R()), ph = R() * 6;
+    const pts = [];
+    for (let i = 0; i <= 16; i++) { const x = lerp(x0, x1, i / 16); pts.push([x, z0 + x * tilt + Math.sin(x * 0.06 + ph) * 6]); }
+    f.ravine = { pts, w: lerp(6.5, 9, R()), d: lerp(3.4, 4.4, R()) };
+
+    if (R() < 0.7) {
+      const s = R() < 0.5 ? -1 : 1, x = s * lerp(42, 64, R());
+      f.ridges.push({ ax: x, az: lerp(-38, -8, R()), bx: x + lerp(-10, 10, R()), bz: lerp(8, 38, R()), r: 4.5, h: lerp(2.6, 3.6, R()) });
+    }
+
+    // Каменные ограды с проёмами
+    const nW = 3 + ((R() * 3) | 0);
+    for (let i = 0; i < nW; i++) {
+      const cx = lerp(-62, 62, R()), cz = lerp(-34, 34, R());
+      const ang = R() < 0.6 ? lerp(-0.35, 0.35, R()) : Math.PI / 2 + lerp(-0.35, 0.35, R());
+      const len = lerp(10, 22, R()), dx = Math.cos(ang), dz = Math.sin(ang);
+      let s = -len / 2;
+      while (s < len / 2) {
+        const e = Math.min(len / 2, s + lerp(3.5, 7, R()));
+        f.walls.push({ ax: cx + dx * s, az: cz + dz * s, bx: cx + dx * e, bz: cz + dz * e, h: 1.35, t: 0.5 });
+        s = e + lerp(1.7, 2.6, R());
+      }
+    }
+    return f;
+  }
+
+  /** Карта «выпуклости» поля: где высоты, где низины. По ней думают полководцы. */
+  analyze() {
+    const step = 4, n = Math.floor((FIELD * 2) / step) + 1, prom = new Float32Array(n * n);
+    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
+      const x = -FIELD + ix * step, z = -FIELD + iz * step;
+      let s = 0;
+      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
+      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
+    }
+    const high = [], low = [];
+    for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
+      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
+      if (p > 1.4) {
+        let top = true;
+        for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
+          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
+        if (top) high.push({ x, z, h, prom: p });
+      }
+      if (p < -1.0) low.push({ x, z, h, depth: -p });
+    }
+    high.sort((a, b) => b.prom - a.prom);
+    this.an = { step, n, prom, high: high.slice(0, 12), low };
+  }
+
+  prominenceAt(x, z) {
+    const a = this.an, ix = clamp(Math.round((x + FIELD) / a.step), 0, a.n - 1), iz = clamp(Math.round((z + FIELD) / a.step), 0, a.n - 1);
+    return a.prom[iz * a.n + ix];
+  }
+
+  /** Верх ограды в точке (или -Infinity, если ограды нет). */
+  wallTop(x, z) {
+    for (const w of this.features.walls) {
+      if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.1) return this.heightAt(x, z) + w.h;
+    }
+    return -Infinity;
+  }
+
+  inWall(x, z) {
+    for (const w of this.features.walls) if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.35) return true;
+    return false;
+  }
+
+  /** Прямая видимость между двумя точками: мешают склоны и ограды. */
+  los(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz), n = Math.max(2, Math.ceil(d / 1.4));
+    for (let i = 1; i < n; i++) {
+      const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t;
+      if (this.heightAt(x, z) > y - 0.1) return false;
+      if (this.wallTop(x, z) > y) return false;
+    }
+    return true;
+  }
+
+  buildWalls() {
+    const walls = this.features.walls;
+    const stones = [];
+    const R = mulberry32(991);
+    for (const w of walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az), dx = (w.bx - w.ax) / len, dz = (w.bz - w.az) / len, yaw = Math.atan2(dx, dz);
+      for (let course = 0; course < 3; course++) {
+        const sy = course === 2 ? 0.3 : 0.52, y0 = course === 0 ? 0.26 : course === 1 ? 0.78 : 1.2;
+        for (let s = (course % 2) * 0.35; s < len; s += lerp(0.62, 0.8, R())) {
+          if (course === 2 && R() < 0.35) continue; // верх ограды местами осыпался
+          const x = w.ax + dx * s, z = w.az + dz * s;
+          stones.push({ x, z, y: this.heightAt(x, z) + y0, yaw: yaw + lerp(-0.12, 0.12, R()), sx: lerp(0.62, 0.82, R()), sy, sz: w.t * lerp(0.9, 1.1, R()), c: lerp(0.78, 1.05, R()) });
+        }
+      }
+    }
+    if (!stones.length) return;
+    const mesh = new THREE.InstancedMesh(this.own(new THREE.BoxGeometry(1, 1, 1)), this.own(new THREE.MeshStandardMaterial({ color: 0x8c8479, roughness: 0.95 })), stones.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
+    stones.forEach((st, i) => {
+      q.setFromEuler(e.set(lerp(-0.05, 0.05, R()), st.yaw + Math.PI / 2, lerp(-0.05, 0.05, R())));
+      m4.compose(p.set(st.x, st.y, st.z), q, sc.set(st.sx, st.sy, st.sz));
+      mesh.setMatrixAt(i, m4);
+      mesh.setColorAt(i, c.setScalar(st.c));
+    });
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
+  }
+
+  dispose() {
+    if (this.group) scene.remove(this.group);
+    for (const o of this.owned) o.dispose?.();
+    this.owned = [];
+    this.group = null;
+  }
+
+  own(o) { this.owned.push(o); return o; }
+
+  // ---------------------------------------------------------------- высоты
+
+  rawHeight(x, z) {
+    const n = this.pn, o = this.o;
+    const dist = Math.max(Math.abs(x), Math.abs(z)) * 0.6 + Math.hypot(x, z) * 0.4;
+    const hills = n.fbm(x * 0.006 + o.hx, z * 0.006 + o.hz, 4);
+    const detail = n.fbm(x * 0.05 + o.hx + 31.7, z * 0.05 + o.hz - 11.3, 2);
+
+    // Поле боя: мягкие холмы, всегда выше воды
+    let field = 2.6 + hills * 3.2 + detail * 0.35;
+    const F = this.features;
+    if (F && dist < FIELD + 30) {
+      for (const hl of F.hills) {
+        const d2 = ((x - hl.x) ** 2 + (z - hl.z) ** 2) / (hl.r * hl.r);
+        if (d2 < 9) field += hl.h * Math.exp(-d2);
+      }
+      for (const r of F.ridges) {
+        const d = segDist(x, z, r.ax, r.az, r.bx, r.bz);
+        if (d < r.r * 3) field += r.h * Math.exp(-((d / r.r) ** 2));
+      }
+      const rv = F.ravine;
+      const d = polyDist(x, z, rv.pts);
+      if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
+    }
+    if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
+
+    // Окрестности: холмы крупнее, озёра, горы по краям
+    let outer = 3 + hills * 16 + detail * 0.9;
+    const lake = n.n01(x * 0.011 + o.lx, z * 0.011 + o.lz);
+    outer -= Math.max(0, lake - 0.58) * 70 * smooth(105, 135, dist);
+    const floor = lerp(1.0, -30, smooth(100, 125, dist));
+    if (outer < floor) outer = floor;
+    const mt = smooth(115, 215, dist);
+    outer += mt * mt * (30 + n.ridged(x * 0.009 + o.mx, z * 0.009 + o.mz, 4) * 60);
+
+    return lerp(field, outer, smooth(FIELD - 5, FIELD + 40, dist));
+  }
+
+  H(ix, iz) { return this.h[iz * (RES + 1) + ix]; }
+
+  heightAt(x, z) {
+    const gx = clamp((x + HALF) / CELL, 0, RES - 0.0001), gz = clamp((z + HALF) / CELL, 0, RES - 0.0001);
+    const ix = gx | 0, iz = gz | 0, fx = gx - ix, fz = gz - iz;
+    const h00 = this.H(ix, iz), h10 = this.H(ix + 1, iz), h01 = this.H(ix, iz + 1), h11 = this.H(ix + 1, iz + 1);
+    if (fz >= fx) return h00 + (h11 - h01) * fx + (h01 - h00) * fz;
+    return h00 + (h10 - h00) * fx + (h11 - h10) * fz;
+  }
+
+  slopeAt(x, z) {
+    const e = 1;
+    const dx = this.heightAt(x - e, z) - this.heightAt(x + e, z), dz = this.heightAt(x, z - e) - this.heightAt(x, z + e);
+    return 1 - 2 * e / Math.hypot(dx, 2 * e, dz); // 0 = ровно, 1 = отвесно
+  }
+
+  static inField(x, z, margin = 0) { return Math.abs(x) <= FIELD - margin && Math.abs(z) <= FIELD - margin; }
+
+  /** Пересечение луча с рельефом: шагаем по лучу, затем уточняем делением пополам. */
+  raycast(ray) {
+    const p = new THREE.Vector3();
+    let prev = 0;
+    for (let t = 0; t < 1400; t += 1.5) {
+      ray.at(t, p);
+      if (Math.abs(p.x) > HALF || Math.abs(p.z) > HALF) { prev = t; continue; }
+      if (p.y <= this.heightAt(p.x, p.z)) {
+        let a = prev, b = t;
+        for (let i = 0; i < 14; i++) { const m = (a + b) / 2; ray.at(m, p); if (p.y <= this.heightAt(p.x, p.z)) b = m; else a = m; }
+        ray.at(b, p);
+        p.y = this.heightAt(p.x, p.z);
+        return p;
+      }
+      prev = t;
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- рельеф
+
+  buildTerrain(s) {
+    const n = this.pn, o = this.o;
+    const data = new Uint8Array(TEX * TEX * 4);
+    const c = new THREE.Color(), t = new THREE.Color();
+    for (let ty = 0; ty < TEX; ty++) {
+      for (let tx = 0; tx < TEX; tx++) {
+        const x = (tx + 0.5) / TEX * SIZE - HALF, z = (ty + 0.5) / TEX * SIZE - HALF;
+        const y = this.heightAt(x, z), slope = this.slopeAt(x, z);
+        const n1 = n.n01(x * 0.035 + o.cx, z * 0.035 + o.cz);
+        const n2 = n.n01(x * 0.16 + o.cz, z * 0.16 + o.cx);
+        const n3 = n.n01(x * 0.012 + o.cx * 0.5, z * 0.012 + o.cz * 0.5);
+
+        c.copy(s.grassA).lerp(s.grassB, n1);
+        c.lerp(s.dry, smooth(0.55, 0.8, n3) * 0.75);
+        c.lerp(s.dirt, smooth(0.72, 0.85, n2 * 0.6 + n1 * 0.4) * 0.6);
+        const shore = y - WATER;
+        t.copy(s.sand).lerp(c, smooth(0.2, 1.4, shore + (n2 - 0.5) * 0.6)); c.copy(t);
+        if (shore < 0) c.copy(s.sand).lerp(s.underwater, smooth(0, -5, shore));
+        c.lerp(s.rock, smooth(0.07, 0.16, slope + (n2 - 0.5) * 0.04));
+        c.lerp(s.rock, smooth(32, 48, y + (n1 - 0.5) * 12));
+        c.lerp(s.snow, smooth(s.snowLine, s.snowLine + 6, y + (n2 - 0.5) * 10) * (1 - smooth(0.2, 0.3, slope)));
+        const k = 0.9 + n2 * 0.18;
+        const i = (ty * TEX + tx) * 4;
+        data[i] = clamp(c.r * k * 255, 0, 255); data[i + 1] = clamp(c.g * k * 255, 0, 255); data[i + 2] = clamp(c.b * k * 255, 0, 255); data[i + 3] = 255;
+      }
+    }
+    // Цвета заданы в sRGB: кодируем их в текстуру как есть
+    const colorTex = this.own(new THREE.DataTexture(data, TEX, TEX));
+    colorTex.colorSpace = THREE.SRGBColorSpace;
+    colorTex.generateMipmaps = true;
+    colorTex.minFilter = THREE.LinearMipmapLinearFilter;
+    colorTex.magFilter = THREE.LinearFilter;
+    colorTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    colorTex.needsUpdate = true;
+
+    const V = RES + 1;
+    const pos = new Float32Array(V * V * 3), nor = new Float32Array(V * V * 3), uv = new Float32Array(V * V * 2);
+    for (let z = 0; z < V; z++) {
+      for (let x = 0; x < V; x++) {
+        const i = z * V + x;
+        pos[i * 3] = x * CELL - HALF; pos[i * 3 + 1] = this.H(x, z); pos[i * 3 + 2] = z * CELL - HALF;
+        const hl = this.H(Math.max(x - 1, 0), z), hr = this.H(Math.min(x + 1, RES), z);
+        const hd = this.H(x, Math.max(z - 1, 0)), hu = this.H(x, Math.min(z + 1, RES));
+        const nx = hl - hr, ny = 2 * CELL, nz = hd - hu, l = Math.hypot(nx, ny, nz);
+        nor[i * 3] = nx / l; nor[i * 3 + 1] = ny / l; nor[i * 3 + 2] = nz / l;
+        uv[i * 2] = x / RES; uv[i * 2 + 1] = z / RES;
+      }
+    }
+    const idx = new Uint32Array(RES * RES * 6);
+    let k = 0;
+    for (let z = 0; z < RES; z++) for (let x = 0; x < RES; x++) {
+      const i00 = z * V + x, i10 = i00 + 1, i01 = i00 + V, i11 = i01 + 1;
+      idx[k++] = i00; idx[k++] = i01; idx[k++] = i11;
+      idx[k++] = i00; idx[k++] = i11; idx[k++] = i10;
+    }
+    const g = this.own(new THREE.BufferGeometry());
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeBoundingSphere();
+
+    const mat = this.own(new THREE.MeshStandardMaterial({ map: colorTex, roughness: 0.96, metalness: 0 }));
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.detailMap = { value: DETAIL_TEX };
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D detailMap;')
+        .replace('#include <map_fragment>', `#ifdef USE_MAP
+          vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+          float dA = texture2D( detailMap, vMapUv * 97.0 ).r;
+          float dB = texture2D( detailMap, vMapUv * 23.0 ).g;
+          sampledDiffuseColor.rgb *= 0.74 + dA * 0.38 + dB * 0.16;
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
+    };
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.receiveShadow = true;
+    mesh.castShadow = !LOW_END;
+    this.group.add(mesh);
+  }
+
+  buildWater(s) {
+    const g = this.own(new THREE.PlaneGeometry(SIZE + 80, SIZE + 80));
+    g.rotateX(-Math.PI / 2);
+    const m = this.own(new THREE.MeshStandardMaterial({ color: s.water, transparent: true, opacity: s.waterAlpha, roughness: 0.05, metalness: 0.1 }));
+    const w = new THREE.Mesh(g, m);
+    w.position.y = WATER;
+    this.group.add(w);
+  }
+
+  // ---------------------------------------------------------------- небо и свет
+
+  applyAtmosphere(s) {
+    const phi = (90 - s.elev) * DEG, theta = s.azim * DEG;
+    this.sunDir.setFromSphericalCoords(1, phi, theta);
+    SKY.material.uniforms.sunPosition.value.copy(this.sunDir);
+    SKY.material.uniforms.turbidity.value = s.turb;
+    SKY.material.uniforms.rayleigh.value = s.rayleigh;
+    SKY.material.uniforms.mieCoefficient.value = 0.005;
+    SKY.material.uniforms.mieDirectionalG.value = 0.8;
+    sunLight.color.copy(s.sunColor);
+    sunLight.intensity = s.sunI;
+    hemiLight.color.copy(s.fog).lerp(new THREE.Color(0xffffff), 0.4);
+    hemiLight.groundColor.copy(s.grassA).multiplyScalar(0.5);
+    scene.fog = new THREE.FogExp2(s.fog, s.fogD);
+    renderer.toneMappingExposure = s.expo;
+
+    // Отражения и мягкий свет от неба
+    if (this.envRT) this.envRT.dispose();
+    const skyScene = new THREE.Scene();
+    const skyCopy = new Sky(); skyCopy.scale.setScalar(1000); skyCopy.material = SKY.material;
+    skyScene.add(skyCopy);
+    this.envRT = PMREM.fromScene(skyScene, 0, 0.1, 2000);
+    scene.environment = this.envRT.texture;
+  }
+
+  // ---------------------------------------------------------------- деревья, камни, трава, замки
+
+  flatSpot(xMin, xMax, zMin, zMax, radius, tries) {
+    let best = null, bestScore = Infinity;
+    for (let i = 0; i < tries; i++) {
+      const x = lerp(xMin, xMax, this.rand()), z = lerp(zMin, zMax, this.rand());
+      let lo = Infinity, hi = -Infinity;
+      for (let a = 0; a < 8; a++) {
+        const hx = this.heightAt(x + Math.cos(a * Math.PI / 4) * radius, z + Math.sin(a * Math.PI / 4) * radius);
+        lo = Math.min(lo, hx); hi = Math.max(hi, hx);
+      }
+      if (lo < WATER + 0.8) continue;
+      const score = hi - lo;
+      if (score < bestScore) { bestScore = score; best = { x, z, y: lo }; }
+    }
+    return best;
+  }
+
+  buildDecor(s, assets) {
+    const r = this.rand, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const treeKinds = assets.trees;
+    const lists = treeKinds.map(() => []);
+
+    // Деревья рощами, вне поля боя
+    const tries = Math.floor(2400 * s.treeDensity);
+    for (let i = 0; i < tries; i++) {
+      const x = lerp(-HALF + 6, HALF - 6, r()), z = lerp(-HALF + 6, HALF - 6, r());
+      if (Math.abs(x) < FIELD + 7 && Math.abs(z) < FIELD + 7) continue;
+      const y = this.heightAt(x, z);
+      if (y < WATER + 0.8 || y > s.snowLine + 4 || this.slopeAt(x, z) > 0.12) continue;
+      const forest = this.pn.n01(x * 0.013 + this.o.mx, z * 0.013 + this.o.mz);
+      if (forest < 0.45 && r() > 0.06) continue;
+      const kind = Math.floor(r() * treeKinds.length);
+      lists[kind].push([x, y - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.3, r())]);
+    }
+    const treeMat = assets.treeMaterial(s);
+    treeKinds.forEach((kind, i) => this.instanced(kind, treeMat, lists[i], true));
+
+    // Камни: крупные снаружи, мелкие на поле
+    const rockLists = assets.rocks.map(() => []);
+    for (let i = 0; i < 260; i++) {
+      const x = lerp(-HALF + 5, HALF - 5, r()), z = lerp(-HALF + 5, HALF - 5, r());
+      const inField = Math.abs(x) < FIELD + 4 && Math.abs(z) < FIELD + 4;
+      if (inField && r() > 0.3) continue;
+      const y = this.heightAt(x, z);
+      if (y < WATER - 1.5 || y > 40) continue;
+      const size = inField ? lerp(0.5, 1.1, r()) : lerp(1.2, 4, r());
+      rockLists[Math.floor(r() * rockLists.length)].push([x, y - size * 0.3, z, r() * Math.PI * 2, size]);
+    }
+    assets.rocks.forEach((kind, i) => this.instanced(kind, assets.rockMat, rockLists[i], true));
+
+    // Трава и цветы
+    const tuftCount = Math.floor((LOW_END ? 3500 : 7000) * s.grassDensity);
+    const grass = new THREE.InstancedMesh(GRASS_GEO, GRASS_MAT, tuftCount);
+    const flowerCount = Math.floor(tuftCount * s.flowers);
+    const flowers = new THREE.InstancedMesh(FLOWER_GEO, FLOWER_MAT, Math.max(1, flowerCount));
+    const col = new THREE.Color();
+    let gi = 0, fi = 0;
+    for (let tries2 = 0; gi < tuftCount && tries2 < tuftCount * 3; tries2++) {
+      const x = lerp(-FIELD - 30, FIELD + 30, r()), z = lerp(-FIELD - 30, FIELD + 30, r());
+      const y = this.heightAt(x, z);
+      if (y < WATER + 0.4 || this.pn.n01(x * 0.05 + this.o.lx, z * 0.05 + this.o.lz) < 0.33) continue;
+      q.setFromAxisAngle(up, r() * Math.PI * 2);
+      const k = lerp(0.7, 1.4, r());
+      m4.compose(p.set(x, y - 0.03, z), q, sc.set(k, k * lerp(0.8, 1.3, r()), k));
+      grass.setMatrixAt(gi, m4);
+      grass.setColorAt(gi, col.copy(s.grass1).lerp(s.grass2, r()));
+      gi++;
+      if (fi < flowerCount && r() < s.flowers * 1.2) {
+        m4.compose(p.set(x + 0.1, y + 0.33 * k, z), q, sc.set(1, 1, 1));
+        flowers.setMatrixAt(fi, m4);
+        flowers.setColorAt(fi, s.flower[Math.floor(r() * 3)]);
+        fi++;
+      }
+    }
+    grass.count = gi; flowers.count = fi;
+    grass.receiveShadow = true;
+    this.group.add(grass);
+    if (fi > 0) this.group.add(flowers);
+
+    // Замки армий за их спинами, мельница и башни на холмах
+    const blue = this.flatSpot(-35, 35, -150, -104, 9, 60), red = this.flatSpot(-35, 35, 104, 150, 9, 60);
+    if (blue) this.placeBuilding(assets.buildings.castle_blue, blue, 0, 24);
+    if (red) this.placeBuilding(assets.buildings.castle_red, red, Math.PI, 24);
+    for (let i = 0; i < 3; i++) {
+      const side = r() < 0.5 ? -1 : 1;
+      const spot = this.flatSpot(side * 150, side * 100, -120, 120, 5, 40);
+      if (spot) this.placeBuilding(i === 0 ? assets.buildings.windmill : assets.buildings.tower, spot, r() * Math.PI * 2, i === 0 ? 15 : 13);
+    }
+  }
+
+  instanced(kind, mat, list, shadow) {
+    if (!list.length) return;
+    const mesh = new THREE.InstancedMesh(kind.geometry, mat, list.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    list.forEach(([x, y, z, rot, k], i) => {
+      q.setFromAxisAngle(up, rot);
+      const f = kind.norm * k;
+      m4.compose(p.set(x, y, z), q, s.set(f, f, f));
+      mesh.setMatrixAt(i, m4);
+    });
+    mesh.castShadow = shadow;
+    mesh.receiveShadow = true;
+    mesh.computeBoundingSphere();
+    this.group.add(mesh);
+  }
+
+  placeBuilding(model, spot, rot, height) {
+    const o = model.scene.clone(true);
+    const f = height / model.height;
+    o.scale.setScalar(f);
+    o.position.set(spot.x, spot.y - 0.6, spot.z);
+    o.rotation.y = rot;
+    o.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    this.group.add(o);
+  }
+}
+
+// Общие ресурсы травы и детальной текстуры земли (создаются один раз)
+let DETAIL_TEX, GRASS_GEO, GRASS_MAT, FLOWER_GEO, FLOWER_MAT;
+
+function initSharedWorldResources() {
+  const n = 128, d = new Uint8Array(n * n * 4), pn = new Perlin(mulberry32(7));
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    // Бесшовный шум: смешиваем четыре сдвинутые копии
+    const u = x / n, v = y / n;
+    const f = (a, b, s) => pn.n01(a * s, b * s);
+    const tile = (s) => f(u, v, s) * (1 - u) * (1 - v) + f(u - 1, v, s) * u * (1 - v) + f(u, v - 1, s) * (1 - u) * v + f(u - 1, v - 1, s) * u * v;
+    const i = (y * n + x) * 4;
+    d[i] = tile(9) * 255; d[i + 1] = tile(3) * 255; d[i + 2] = 128; d[i + 3] = 255;
+  }
+  DETAIL_TEX = new THREE.DataTexture(d, n, n);
+  DETAIL_TEX.wrapS = DETAIL_TEX.wrapT = THREE.RepeatWrapping;
+  DETAIL_TEX.generateMipmaps = true;
+  DETAIL_TEX.minFilter = THREE.LinearMipmapLinearFilter;
+  DETAIL_TEX.magFilter = THREE.LinearFilter;
+  DETAIL_TEX.needsUpdate = true;
+
+  // Пучок травы: 5 изогнутых травинок
+  const pos = [];
+  for (let b = 0; b < 5; b++) {
+    const a = b * Math.PI * 2 / 5 + (b % 2) * 0.4;
+    const sx = Math.cos(a), sz = Math.sin(a), ax = -sz * 0.05, az = sx * 0.05;
+    const bx = sx * 0.06, bz = sz * 0.06, tx = sx * 0.22, tz = sz * 0.22, th = 0.42 + (b % 3) * 0.08;
+    // обе стороны травинки с нормалью вверх — иначе обратная сторона чернеет
+    pos.push(bx - ax, 0, bz - az, bx + ax, 0, bz + az, tx, th, tz);
+    pos.push(bx + ax, 0, bz + az, bx - ax, 0, bz - az, tx, th, tz);
+  }
+  GRASS_GEO = new THREE.BufferGeometry();
+  GRASS_GEO.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const nrm = [];
+  for (let i = 0; i < pos.length / 3; i++) nrm.push(0, 1, 0);
+  GRASS_GEO.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  GRASS_MAT = new THREE.MeshLambertMaterial();
+  FLOWER_GEO = new THREE.IcosahedronGeometry(0.07, 0);
+  FLOWER_MAT = new THREE.MeshLambertMaterial();
+}
+
+/** Расстояние от точки до отрезка (в плоскости XZ). */
+function segDist(x, z, ax, az, bx, bz) {
+  const vx = bx - ax, vz = bz - az, l2 = vx * vx + vz * vz;
+  const t = l2 > 0 ? clamp(((x - ax) * vx + (z - az) * vz) / l2, 0, 1) : 0;
+  return Math.hypot(x - ax - vx * t, z - az - vz * t);
+}
+
+/** Расстояние от точки до ломаной. */
+function polyDist(x, z, pts) {
+  let best = Infinity;
+  for (let i = 1; i < pts.length; i++) best = Math.min(best, segDist(x, z, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]));
+  return best;
+}
+
+// ------------------------------------------------------------------ модели (KayKit, Quaternius — CC0)
+
+// Модели упакованы скриптом pack_models.py: компактный GLB в base64 + текстуры PNG рядом
+const MODEL_NAMES = ['Knight', 'Barbarian', 'Rogue_Hooded', 'Horse', 'White_Horse', 'arrow',
+  'tree_single_A', 'tree_single_B', 'trees_A_large', 'trees_A_medium', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
+  'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
+  'castle_blue', 'castle_red', 'windmill', 'tower'];
+
+async function loadPacked(loader, name) {
+  const res = await fetch('pack/' + name + '.txt');
+  if (!res.ok) throw new Error(name + ': HTTP ' + res.status);
+  const bin = Uint8Array.from(atob((await res.text()).trim()), (c) => c.charCodeAt(0));
+  return loader.parseAsync(bin.buffer, 'pack/');
+}
+
+/** Клетки текстуры-палитры (8x4), которые перекрашиваются в цвет команды. */
+const TEAM_CELLS = {
+  Knight: [[0, 1], [2, 2]],
+  Barbarian: [[0, 1], [1, 1], [2, 2]],
+  Rogue_Hooded: [[0, 1], [1, 1], [1, 2]],
+};
+
+const UPPER_BONES = /^(upperarm|lowerarm|wrist|hand|handslot|chest|head)/;
+
+function imageToCanvas(img) {
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  return { cv, ctx };
+}
+
+function canvasTexture(cv, like) {
+  const t = new THREE.CanvasTexture(cv);
+  t.flipY = like.flipY;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = like.wrapS; t.wrapT = like.wrapT;
+  t.magFilter = like.magFilter; t.minFilter = like.minFilter;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Перекрашивает клетки палитры в оттенок команды, сохраняя градиент светлоты. */
+function recolorCells(tex, cells, team) {
+  const { cv, ctx } = imageToCanvas(tex.image);
+  const cw = cv.width / 8, ch = cv.height / 4, c = new THREE.Color(), hsl = {};
+  for (const [cx, cy] of cells) {
+    const img = ctx.getImageData(cx * cw, cy * ch, cw, ch), d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      c.setRGB(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255);
+      c.getHSL(hsl);
+      c.setHSL(team.hue / 360, Math.max(hsl.s, team.sat), clamp(hsl.l * 0.95 + 0.03, 0.08, 0.8));
+      d[i] = c.r * 255; d[i + 1] = c.g * 255; d[i + 2] = c.b * 255;
+    }
+    ctx.putImageData(img, cx * cw, cy * ch);
+  }
+  return canvasTexture(cv, tex);
+}
+
+/** Меняет цвет листвы под биом: осень, зима, степь. */
+function recolorFoliage(tex, mode) {
+  const { cv, ctx } = imageToCanvas(tex.image);
+  const img = ctx.getImageData(0, 0, cv.width, cv.height), d = img.data, c = new THREE.Color(), hsl = {};
+  for (let i = 0; i < d.length; i += 4) {
+    c.setRGB(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255);
+    c.getHSL(hsl);
+    const hue = hsl.h * 360;
+    if (hue < 60 || hue > 170 || hsl.s < 0.15) continue;
+    const k = (hue - 60) / 110;
+    if (mode === 'autumn') c.setHSL((10 + k * 36) / 360, Math.max(hsl.s, 0.62), hsl.l * 1.05);
+    else if (mode === 'winter') c.setHSL(0.58, hsl.s * 0.2, clamp(hsl.l * 0.45 + 0.52, 0, 0.95));
+    else if (mode === 'steppe') c.setHSL((42 + k * 20) / 360, Math.min(0.6, hsl.s * 0.8), hsl.l * 1.08);
+    d[i] = c.r * 255; d[i + 1] = c.g * 255; d[i + 2] = c.b * 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvasTexture(cv, tex);
+}
+
+/** Геометрия только с нужными атрибутами (иначе слияние невозможно). */
+function cleanGeometry(src, skin) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', src.getAttribute('position').clone());
+  g.setAttribute('normal', src.getAttribute('normal').clone());
+  const uv = src.getAttribute('uv');
+  g.setAttribute('uv', uv ? uv.clone() : new THREE.BufferAttribute(new Float32Array(src.getAttribute('position').count * 2), 2));
+  if (skin) {
+    g.setAttribute('skinIndex', skin.index);
+    g.setAttribute('skinWeight', skin.weight);
+  }
+  if (src.index) g.setIndex(src.index.clone());
+  else g.setIndex([...Array(src.getAttribute('position').count).keys()]);
+  return g;
+}
+
+/**
+ * Готовит шаблон персонажа: оставляет нужное оружие и превращает все части
+ * (тело, шлем, щит, меч) в ОДИН скиннованный меш — один draw call на солдата.
+ */
+function prepareCharacter(gltf, modelName, keep, team, targetHeight) {
+  const root = SkeletonUtils.clone(gltf.scene);
+  const drop = [];
+  root.traverse((o) => { if (ALL_ATTACHMENTS.includes(o.name) && !keep.includes(o.name)) drop.push(o); });
+  drop.forEach((o) => o.parent.remove(o));
+  root.updateMatrixWorld(true);
+
+  const skinned = [], rigid = [];
+  root.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); else if (o.isMesh) rigid.push(o); });
+  const ref = skinned[0], skel = ref.skeleton;
+  const invRefBind = ref.bindMatrix.clone().invert();
+  const boneIndex = new Map(skel.bones.map((b, i) => [b, i]));
+  const geos = [];
+
+  for (const part of skinned) {
+    const si = part.geometry.getAttribute('skinIndex'), sw = part.geometry.getAttribute('skinWeight');
+    const idx = new Uint16Array(si.count * 4), w = new Float32Array(sw.count * 4);
+    for (let v = 0; v < si.count; v++) {
+      for (let k = 0; k < 4; k++) {
+        const b = part.skeleton.bones[si.getComponent(v, k)];
+        idx[v * 4 + k] = boneIndex.has(b) ? boneIndex.get(b) : 0;
+        w[v * 4 + k] = sw.getComponent(v, k);
+      }
+    }
+    const g = cleanGeometry(part.geometry, { index: new THREE.BufferAttribute(idx, 4), weight: new THREE.BufferAttribute(w, 4) });
+    g.applyMatrix4(invRefBind.clone().multiply(part.bindMatrix));
+    geos.push(g);
+  }
+
+  for (const mesh of rigid) {
+    let bone = mesh.parent;
+    while (bone && !(bone.isBone && boneIndex.has(bone))) bone = bone.parent;
+    if (!bone) continue;
+    const bi = boneIndex.get(bone), n = mesh.geometry.getAttribute('position').count;
+    const idx = new Uint16Array(n * 4), w = new Float32Array(n * 4);
+    for (let v = 0; v < n; v++) { idx[v * 4] = bi; w[v * 4] = 1; }
+    const g = cleanGeometry(mesh.geometry, { index: new THREE.BufferAttribute(idx, 4), weight: new THREE.BufferAttribute(w, 4) });
+    const L = bone.matrixWorld.clone().invert().multiply(mesh.matrixWorld);
+    const boneBind = skel.boneInverses[bi].clone().invert();
+    g.applyMatrix4(invRefBind.clone().multiply(boneBind).multiply(L));
+    geos.push(g);
+  }
+
+  const merged = mergeGeometries(geos, false);
+  const srcMat = ref.material;
+  const mat = srcMat.clone();
+  mat.map = recolorCells(srcMat.map, TEAM_CELLS[modelName], team);
+  mat.roughness = 0.72; mat.metalness = 0; mat.envMapIntensity = 0.7;
+  // лёгкий оттенок команды на всём солдате — так армии различимы издалека
+  mat.color.set(0xffffff).lerp(new THREE.Color().setHSL(team.hue / 360, 0.7, 0.6), 0.14);
+
+  const body = new THREE.SkinnedMesh(merged, mat);
+  body.name = 'UnitBody';
+  body.position.copy(ref.position); body.quaternion.copy(ref.quaternion); body.scale.copy(ref.scale);
+  ref.parent.add(body);
+  body.bind(skel, ref.bindMatrix);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  for (const m of [...skinned, ...rigid]) m.parent && m.parent.remove(m);
+
+  // Масштаб: заданный рост, ступни на нуле
+  merged.computeBoundingBox();
+  const bb = merged.boundingBox.clone().applyMatrix4(ref.bindMatrix);
+  const k = targetHeight / (bb.max.y - bb.min.y);
+  const wrap = new THREE.Group();
+  root.scale.setScalar(k);
+  root.position.y = -bb.min.y * k;
+  wrap.add(root);
+  return wrap;
+}
+
+/** Оставляет в клипе только треки костей скелета (ИК-контроллеры не нужны — экономим CPU). */
+function trimClip(clip, allow, filter) {
+  const tracks = clip.tracks.filter((t) => {
+    const node = t.name.split('.')[0];
+    if (!allow.has(node) || t.name.endsWith('.scale')) return false;
+    return filter ? filter(node) : true;
+  });
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
+function clipsFor(gltf) {
+  let bones = null;
+  gltf.scene.traverse((o) => { if (o.isSkinnedMesh && !bones) bones = new Set(o.skeleton.bones.map((b) => b.name)); });
+  const map = {};
+  for (const c of gltf.animations) map[c.name] = trimClip(c, bones);
+  map.__bones = bones;
+  return map;
+}
+
+function mergeStatic(gltf) {
+  gltf.scene.updateMatrixWorld(true);
+  const geos = [];
+  let mat = null;
+  gltf.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = cleanGeometry(o.geometry);
+    g.applyMatrix4(o.matrixWorld);
+    geos.push(g);
+    mat = mat || o.material;
+  });
+  const g = mergeGeometries(geos, false);
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  g.computeBoundingSphere();
+  return { geometry: g, material: mat, height: bb.max.y - bb.min.y };
+}
+
+const ASSETS = {};
+
+async function loadAssets(onProgress) {
+  const loader = new GLTFLoader();
+  let done = 0;
+  const entries = await Promise.all(MODEL_NAMES.map(async (k) => {
+    const g = await loadPacked(loader, k);
+    onProgress(++done / MODEL_NAMES.length);
+    return [k, g];
+  }));
+  const G = Object.fromEntries(entries);
+
+  // Солдаты: для каждого типа и каждой команды свой шаблон
+  ASSETS.units = TYPES.map((t) => {
+    const keep = t.keep;
+    return TEAM.map((team) => prepareCharacter(G[t.model], t.model, keep, team, t.mount ? 1.75 : 1.9));
+  });
+  // Полководец (рыцарь с двуручным мечом) и гонец (разбойник в плаще) — тоже всадники
+  ASSETS.units[T_CMD] = TEAM.map((team) => prepareCharacter(G.Knight, 'Knight', COMMANDER.keep, team, 1.85));
+  ASSETS.units[T_MSG] = TEAM.map((team) => prepareCharacter(G.Rogue_Hooded, 'Rogue_Hooded', MESSENGER.keep, team, 1.7));
+  ASSETS.clips = { Knight: clipsFor(G.Knight), Barbarian: clipsFor(G.Barbarian), Rogue_Hooded: clipsFor(G.Rogue_Hooded) };
+
+  // Анимации всадника: ноги сидят, руки рубят
+  const kc = G.Knight.animations, kb = ASSETS.clips.Knight.__bones;
+  const find = (name) => kc.find((c) => c.name === name);
+  ASSETS.rider = {
+    sit: trimClip(find('Sit_Chair_Idle'), kb, (n) => !UPPER_BONES.test(n)),
+    arms: trimClip(find('Idle'), kb, (n) => UPPER_BONES.test(n)),
+    attack: TYPES[3].anim.attack.map((a) => trimClip(find(a), kb, (n) => UPPER_BONES.test(n))),
+  };
+
+  // Кони: нормализуем размер, ищем седло
+  ASSETS.horses = ['Horse', 'White_Horse'].map((name) => {
+    const g = G[name];
+    const root = SkeletonUtils.clone(g.scene);
+    root.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(root);
+    const size = bb.getSize(new THREE.Vector3());
+    const len = Math.max(size.x, size.z);
+    const k = 2.9 / len;
+    root.scale.multiplyScalar(k);
+    root.position.y = -bb.min.y * k;
+    root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) o.material.envMapIntensity = 0.6; } });
+    const wrap = new THREE.Group();
+    wrap.add(root);
+    wrap.updateMatrixWorld(true);
+    const bb2 = new THREE.Box3().setFromObject(wrap);
+    const clips = {};
+    for (const c of g.animations) if (!c.name.includes('|')) clips[c.name] = c;
+    return { template: wrap, clips, saddle: new THREE.Vector3(0, bb2.max.y * 0.8, (bb2.min.z + bb2.max.z) / 2 - 0.1), forwardX: size.x > size.z };
+  });
+
+  // Высота бёдер всадника в позе сидя (чтобы посадить его в седло)
+  {
+    const probe = SkeletonUtils.clone(ASSETS.units[3][0]);
+    const mixer = new THREE.AnimationMixer(probe);
+    mixer.clipAction(ASSETS.rider.sit).play();
+    mixer.update(0);
+    probe.updateMatrixWorld(true);
+    let hipsY = 0.8;
+    probe.traverse((o) => { if (o.name === 'hips') hipsY = o.getWorldPosition(new THREE.Vector3()).y; });
+    ASSETS.riderHipsY = hipsY;
+  }
+
+  // Болт для арбалета
+  const arrow = mergeStatic(G.arrow);
+  ASSETS.bolt = { geometry: arrow.geometry, material: arrow.material, norm: 0.95 / Math.max(arrow.height, 0.01) };
+  arrow.geometry.computeBoundingBox();
+  const ab = arrow.geometry.boundingBox.getSize(new THREE.Vector3());
+  ASSETS.bolt.axis = ab.x > ab.y && ab.x > ab.z ? 'x' : ab.z > ab.y ? 'z' : 'y';
+  ASSETS.bolt.norm = 0.95 / Math.max(ab.x, ab.y, ab.z);
+
+  // Природа и постройки
+  const treeTargets = { tree_single_A: 6.5, tree_single_B: 7, trees_A_large: 9, trees_A_medium: 7.5, trees_B_large: 9, trees_B_medium: 7.5, trees_B_small: 6 };
+  ASSETS.trees = Object.entries(treeTargets).map(([k, h]) => { const m = mergeStatic(G[k]); return { geometry: m.geometry, norm: h / m.height, material: m.material }; });
+  ASSETS.rocks = ['rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E'].map((k) => { const m = mergeStatic(G[k]); return { geometry: m.geometry, norm: 1 / m.height }; });
+  ASSETS.worldMat = ASSETS.trees[0].material;
+  ASSETS.worldMat.roughness = 0.9;
+  ASSETS.rockMat = ASSETS.worldMat.clone();
+  ASSETS.rockMat.color.set(0x8f877c);
+  const foliage = {};
+  ASSETS.treeMaterial = (style) => {
+    const key = style.leafShift || 'summer';
+    if (!foliage[key]) {
+      const m = ASSETS.worldMat.clone();
+      if (style.leafShift) m.map = recolorFoliage(ASSETS.worldMat.map, style.leafShift);
+      foliage[key] = m;
+    }
+    return foliage[key];
+  };
+  ASSETS.buildings = {};
+  for (const k of ['castle_blue', 'castle_red', 'windmill', 'tower']) {
+    const sc = G[k].scene;
+    const bb = new THREE.Box3().setFromObject(sc);
+    sc.position.y -= bb.min.y;
+    const wrap = new THREE.Group(); wrap.add(sc);
+    ASSETS.buildings[k] = { scene: wrap, height: bb.max.y - bb.min.y };
+  }
+}
+
+/** Знамя полководца: древко, полотнище цвета армии и золотое навершие. */
+function makeBanner(team) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 3.4, 6), new THREE.MeshStandardMaterial({ color: 0x5b3a22, roughness: 0.8 }));
+  pole.position.y = 1.7;
+  const flagGeo = new THREE.PlaneGeometry(1.25, 0.85, 8, 1);
+  flagGeo.translate(0.625, 0, 0);
+  const flag = new THREE.Mesh(flagGeo, new THREE.MeshStandardMaterial({ color: TEAM[team].css, roughness: 0.7, side: THREE.DoubleSide }));
+  flag.position.y = 2.95;
+  const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.11), new THREE.MeshStandardMaterial({ color: 0xe8c15a, metalness: 0.6, roughness: 0.35 }));
+  tip.position.y = 3.45;
+  for (const m of [pole, flag, tip]) { m.castShadow = true; g.add(m); }
+  g.userData.flag = flag;
+  g.userData.base = flagGeo.attributes.position.array.slice();
+  return g;
+}
+
+/** Колышем полотнище волной (по оси X полотнища), сила — от ветра. */
+function waveBanner(banner, time, wind) {
+  const flag = banner.userData.flag, pos = flag.geometry.attributes.position, base = banner.userData.base;
+  const amp = 0.06 + Math.min(wind, 7) * 0.02;
+  for (let i = 0; i < pos.count; i++) {
+    const x = base[i * 3];
+    pos.array[i * 3 + 2] = Math.sin(x * 4 - time * 5) * amp * x;
+  }
+  pos.needsUpdate = true;
+  flag.geometry.computeVertexNormals();
+}
+
+// ------------------------------------------------------------------ анимация
+
+/** Канал анимации: одно активное действие с плавными переходами. */
+class Channel {
+  constructor(mixer, clips) { this.mixer = mixer; this.clips = clips; this.cur = null; this.name = ''; this.actions = {}; }
+  get(name) {
+    if (!this.actions[name]) {
+      const c = this.clips[name];
+      if (!c) return null;
+      this.actions[name] = this.mixer.clipAction(c);
+    }
+    return this.actions[name];
+  }
+  play(name, { once = false, speed = 1, fade = 0.18, restart = false } = {}) {
+    const a = this.get(name);
+    if (!a) return;
+    if (this.cur === a && !restart) { a.timeScale = speed; return; }
+    a.reset();
+    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+    a.clampWhenFinished = once;
+    a.timeScale = speed;
+    a.setEffectiveWeight(1);
+    a.play();
+    if (this.cur && this.cur !== a) a.crossFadeFrom(this.cur, fade, false);
+    this.cur = a; this.name = name;
+  }
+}
+
+const HORSE_YAW = 0; // поправка, если модель коня смотрит не вдоль +Z
+
+function makeView(u) {
+  const root = new THREE.Group();
+  const v = { root, mixers: [] };
+  if (u.t.mount) {
+    const hv = u.t.special === 'commander' ? 1 : u.t.special === 'messenger' ? 0 : u.variant % ASSETS.horses.length;
+    const hd = ASSETS.horses[hv];
+    const horse = SkeletonUtils.clone(hd.template);
+    horse.rotation.y = HORSE_YAW;
+    root.add(horse);
+    const rider = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
+    v.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
+    rider.position.copy(v.riderBase);
+    root.add(rider);
+    v.rider = rider;
+    if (u.t.special === 'commander') {
+      v.banner = makeBanner(u.team);
+      v.banner.position.set(-0.3, ASSETS.riderHipsY, -0.38);
+      rider.add(v.banner);
+    }
+    const hm = new THREE.AnimationMixer(horse), rm = new THREE.AnimationMixer(rider);
+    v.mixers.push(hm, rm);
+    v.main = new Channel(hm, hd.clips);
+    const riderClips = { arms: ASSETS.rider.arms };
+    ASSETS.rider.attack.forEach((c, i) => (riderClips['atk' + i] = c));
+    v.upper = new Channel(rm, riderClips);
+    rm.clipAction(ASSETS.rider.sit).play();
+    v.upper.play('arms');
+    v.main.play('Idle');
+  } else {
+    const ch = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
+    root.add(ch);
+    const m = new THREE.AnimationMixer(ch);
+    v.mixers.push(m);
+    v.main = new Channel(m, ASSETS.clips[u.t.model]);
+    v.main.play(u.t.anim.idle, { fade: 0 });
+    // разные солдаты не должны двигаться в унисон
+    if (v.main.cur) v.main.cur.time = Math.random() * v.main.cur.getClip().duration;
+  }
+  root.scale.setScalar(u.scale);
+  unitLayer.add(root);
+  v.accum = 0; v.frame = (Math.random() * 4) | 0;
+  return v;
+}
+
+function disposeView(v) {
+  if (!v) return;
+  unitLayer.remove(v.root);
+  for (const m of v.mixers) m.stopAllAction();
+}
+
+/** Выбирает анимацию по состоянию солдата. */
+function animate(u, state) {
+  const v = u.view, a = u.t.anim;
+  const speed = u.curSpeed;
+  if (u.t.mount) {
+    if (!u.alive) { if (!u.deathShown) { v.main.play('Death', { once: true }); u.deathShown = true; } return; }
+    if (speed > 3.5) v.main.play('Gallop', { speed: clamp(speed / 7, 0.7, 1.4) });
+    else if (speed > 0.4) v.main.play('Walk', { speed: clamp(speed / 1.6, 0.6, 1.6) });
+    else v.main.play('Idle');
+    if (u.atkNew && a.attack.length) { u.atkNew = false; v.upper.play('atk' + ((Math.random() * a.attack.length) | 0), { once: true, restart: true, speed: 1.1, fade: 0.08 }); }
+    else if (u.atkT < 0 && v.upper.name !== 'arms') v.upper.play('arms', { fade: 0.25 });
+    const bob = speed > 3.5 ? Math.abs(Math.sin(u.phase)) * 0.12 : 0;
+    v.rider.position.set(v.riderBase.x, v.riderBase.y + bob, v.riderBase.z);
+    return;
+  }
+  if (!u.alive) {
+    if (!u.deathShown) { v.main.play(Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true, fade: 0.1 }); u.deathShown = true; }
+    return;
+  }
+  if (state === 'cheer') { v.main.play(a.cheer); return; }
+  if (u.atkNew) {
+    u.atkNew = false;
+    let name = a.attack[(Math.random() * a.attack.length) | 0];
+    if (u.t.ranged && !u.shot) name = a.melee;
+    const clip = v.main.get(name)?.getClip();
+    const sp = clip ? clamp(clip.duration / u.atkDur, 0.8, 2.2) : 1;
+    v.main.play(name, { once: true, restart: true, speed: sp, fade: 0.08 });
+    return;
+  }
+  if (u.atkT >= 0) return; // удар ещё идёт
+  if (u.t.ranged && u.aiming) { v.main.play(u.cooldown > 0.6 ? a.reload : a.aim); return; }
+  if (speed > 1.6) v.main.play(a.run, { speed: clamp(speed / 3.4, 0.6, 1.5) });
+  else if (speed > 0.3) v.main.play('Walking_A', { speed: clamp(speed / 1.4, 0.6, 1.4) });
+  else v.main.play(a.idle);
+}
+
+// ------------------------------------------------------------------ отряды
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+const d2d = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+
+/** Отряд: у него общий приказ, боевой дух и точки строя. */
+class Squad {
+  constructor(id, type, team, yaw) {
+    this.id = id; this.type = type; this.t = TYPES_ALL[type]; this.team = team; this.yaw = yaw;
+    this.units = []; this.size = 0; this.alive = 0;
+    this.center = new THREE.Vector3();
+    this.order = { kind: 'advance', mode: 'advance' }; this.orderT = 0; this.pending = null;
+    this.morale = 100; this.lastHitT = -99; this.lastShotT = -99; this.firstStrikeT = -99;
+    this.engaged = false; this.engagedFor = 0; this.hidden = false;
+    this.nextDecision = 0; this.labelT = 0;
+    this.special = !!this.t.special;
+  }
+  get name() {
+    const base = SQUAD_NAME[this.type] || this.t.name.toLowerCase();
+    return this.num ? base + ' ' + ROMAN[this.num] : base;
+  }
+  refresh(dt) {
+    let n = 0, eng = false;
+    this.center.set(0, 0, 0);
+    for (const u of this.units) if (u.alive) { this.center.add(u.pos); n++; if (u.engaged) eng = true; }
+    this.alive = n;
+    if (n) this.center.divideScalar(n);
+    this.engaged = eng;
+    this.engagedFor = eng ? this.engagedFor + dt : 0;
+    this.labelT -= dt;
+  }
+  /** Место солдата в строю вокруг точки приказа. */
+  slot(u) {
+    const o = this.order, fy = o.face ?? this.yaw, c = Math.cos(fy), s = Math.sin(fy);
+    const gx = o.x ?? this.center.x, gz = o.z ?? this.center.z;
+    return [gx + u.ox * c + u.oz * s, gz - u.ox * s + u.oz * c];
+  }
+}
+
+// ------------------------------------------------------------------ солдаты
+
+const GRID = 2.5, GRID_HALF = FIELD + 10, GRID_DIM = Math.ceil(GRID_HALF * 2 / GRID);
+
+class Unit {
+  constructor(plan) {
+    this.plan = plan;
+    this.type = plan.type; this.t = TYPES_ALL[plan.type]; this.team = plan.team; this.variant = plan.variant;
+    this.ox = plan.ox || 0; this.oz = plan.oz || 0;
+    this.pos = new THREE.Vector3(plan.x, world.heightAt(plan.x, plan.z), plan.z);
+    this.vel = new THREE.Vector3(); this.knock = new THREE.Vector3();
+    this.yaw = plan.yaw; this.hp = this.t.hp; this.alive = true;
+    this.target = null; this.retargetT = Math.random() * 0.5; this.cooldown = Math.random() * 0.8;
+    this.atkT = -1; this.atkDur = 0.6; this.shot = false; this.hitDone = false; this.aiming = false; this.atkNew = false; this.engaged = false;
+    this.chargeT = 0; this.deadT = 0; this.phase = Math.random() * 6; this.deathShown = false; this.curSpeed = 0;
+    this.losT = -9; this.losTarget = null; this.losOk = false; this.carry = null; this.gone = false; this.squad = null;
+    this.scale = this.t.special === 'commander' ? 1.12 : 0.95 + Math.random() * 0.1;
+    this.view = makeView(this);
+    this.sync();
+  }
+  get forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
+  face(dx, dz, dt, rate = 9.5) {
+    if (dx * dx + dz * dz < 1e-6) return;
+    let d = Math.atan2(dx, dz) - this.yaw;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    const step = rate * dt;
+    this.yaw += Math.abs(d) <= step ? d : Math.sign(d) * step;
+  }
+  sync() {
+    const r = this.view.root;
+    const sink = this.alive ? 0 : Math.max(0, this.deadT - 18) * 0.25;
+    r.position.set(this.pos.x, this.pos.y - sink, this.pos.z);
+    r.rotation.y = this.yaw;
+  }
+}
+
+// ------------------------------------------------------------------ бой
+
+class Battle {
+  constructor() {
+    this.units = []; this.plan = []; this.squads = [];
+    this.alive = [0, 0]; this.planCount = [0, 0];
+    this.fighting = false; this.useCommanders = true;
+    this.teams = [[], []];
+    this.head = new Int32Array(GRID_DIM * GRID_DIM);
+    this.next = new Int32Array(1024);
+    this.push = new Float32Array(2048);
+    this.time = 0; this.squadSeq = 0;
+    this.commanders = [null, null];
+    this.couriers = [null, null];
+    this.log = []; this.onLog = null; this.glareLogged = [false, false];
+    this.bolts = new Bolts(this);
+  }
+
+  addLog(team, text) {
+    const e = { t: this.time, team, text };
+    this.log.push(e);
+    if (this.onLog) this.onLog(e);
+  }
+
+  // ---------------------------------------------------------------- расстановка
+
+  placeSquad(type, team, cx, cz, yaw) {
+    const t = TYPES[type], cos = Math.cos(yaw), sin = Math.sin(yaw), id = ++this.squadSeq;
+    const sq = new Squad(id, type, team, yaw);
+    for (let r = 0; r < t.rows; r++) {
+      for (let c = 0; c < t.cols; c++) {
+        if (this.units.length >= MAX_UNITS) break;
+        const ox = (c - (t.cols - 1) / 2) * t.spacing, oz = -(r - (t.rows - 1) / 2) * t.spacing;
+        const jx = ox + (Math.random() - 0.5) * 0.2, jz = oz + (Math.random() - 0.5) * 0.2;
+        const x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
+        if (!World.inField(x, z, 1) || this.occupied(x, z, t.radius)) continue;
+        const plan = { type, team, x, z, yaw, variant: (Math.random() * 2) | 0, squad: id, ox, oz };
+        this.plan.push(plan);
+        const u = new Unit(plan);
+        u.squad = sq; sq.units.push(u);
+        this.units.push(u);
+      }
+    }
+    if (sq.units.length) { sq.size = sq.units.length; sq.refresh(0); this.squads.push(sq); }
+    this.numberSquads();
+    this.recount();
+    return sq.units.length;
+  }
+
+  occupied(x, z, radius) {
+    for (const u of this.units) {
+      const min = (radius + u.t.radius) * 0.9, dx = u.pos.x - x, dz = u.pos.z - z;
+      if (dx * dx + dz * dz < min * min) return true;
+    }
+    return false;
+  }
+
+  removeNear(x, z, radius) {
+    let n = 0;
+    this.units = this.units.filter((u) => {
+      const dx = u.pos.x - x, dz = u.pos.z - z;
+      if (dx * dx + dz * dz > radius * radius) return true;
+      disposeView(u.view); n++;
+      return false;
+    });
+    for (const sq of this.squads) sq.units = sq.units.filter((u) => this.units.includes(u));
+    this.squads = this.squads.filter((sq) => sq.units.length);
+    this.numberSquads();
+    this.plan = this.units.map((u) => u.plan);
+    this.recount();
+    return n;
+  }
+
+  clearUnits() {
+    for (const u of this.units) disposeView(u.view);
+    this.units = []; this.squads = [];
+    this.commanders = [null, null]; this.couriers = [null, null];
+    this.bolts.clear();
+    this.fighting = false;
+    this.time = 0; this.log = []; this.glareLogged = [false, false];
+  }
+
+  clearAll() { this.clearUnits(); this.plan = []; this.cmdSpec = null; this.recount(); }
+
+  resetToPlan() {
+    this.clearUnits();
+    const map = new Map();
+    for (const p of this.plan) {
+      const u = new Unit(p);
+      this.units.push(u);
+      const key = p.squad ?? 't' + p.team + '_' + p.type;
+      let sq = map.get(key);
+      if (!sq) { sq = new Squad(key, p.type, p.team, p.yaw); map.set(key, sq); this.squads.push(sq); }
+      sq.units.push(u); u.squad = sq;
+      if (typeof p.squad === 'number') this.squadSeq = Math.max(this.squadSeq, p.squad);
+    }
+    for (const sq of this.squads) { sq.size = sq.units.length; sq.refresh(0); }
+    this.numberSquads();
+    this.recount();
+  }
+
+  /** «Мечники I, II, III» — чтобы в летописи было понятно, кому какой приказ. */
+  numberSquads() {
+    for (let team = 0; team < 2; team++) for (let type = 0; type < TYPES.length; type++) {
+      const list = this.squads.filter((q) => q.team === team && q.type === type).sort((a, b) => a.center.x - b.center.x);
+      list.forEach((q, i) => (q.num = list.length > 1 ? i + 1 : 0));
+    }
+  }
+
+  setPlan(plan) { this.plan = plan.slice(); this.resetToPlan(); }
+
+  recount() {
+    this.planCount = [0, 0];
+    for (const p of this.plan) this.planCount[p.team]++;
+    this.alive = this.planCount.slice();
+  }
+
+  randomArmies() {
+    this.clearAll();
+    for (let team = 0; team < 2; team++) {
+      const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI, R = Math.random;
+      const front = 3 + ((R() * 3) | 0);
+      for (let i = 0; i < front; i++)
+        this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 9.5 + (R() - 0.5) * 3, dir * (30 + R() * 6), yaw);
+      const back = 2 + ((R() * 2) | 0);
+      for (let i = 0; i < back; i++)
+        this.placeSquad(2, team, (i - (back - 1) / 2) * 11 + (R() - 0.5) * 3, dir * (44 + R() * 5), yaw);
+      const flanks = 1 + ((R() * 2) | 0);
+      for (let i = 0; i < flanks; i++)
+        this.placeSquad(3, team, (i % 2 ? -1 : 1) * (36 + R() * 12), dir * (38 + R() * 8), yaw);
+    }
+  }
+
+  /** Имя и характер полководца армии (сохраняются между реваншами). */
+  commanderSpec(team) {
+    if (!this.cmdSpec) this.cmdSpec = [null, null];
+    if (!this.cmdSpec[team]) {
+      const keys = Object.keys(TRAITS);
+      this.cmdSpec[team] = { name: CMD_NAMES[team][(Math.random() * CMD_NAMES[team].length) | 0], trait: keys[(Math.random() * keys.length) | 0] };
+    }
+    return this.cmdSpec[team];
+  }
+
+  // ---------------------------------------------------------------- начало боя, полководцы, гонцы
+
+  startFight() {
+    this.fighting = true;
+    this.time = 0; this.log = []; this.glareLogged = [false, false];
+    for (const sq of this.squads) { sq.order = { kind: 'advance', mode: 'advance' }; sq.morale = 100; }
+    if (!this.useCommanders) { this.addLog(-1, 'Полководцев нет — каждый отряд бьётся сам по себе'); return; }
+    for (let team = 0; team < 2; team++) this.spawnCommander(team);
+  }
+
+  spawnCommander(team) {
+    const mine = this.units.filter((u) => u.team === team && u.alive && !u.t.special);
+    if (!mine.length) return;
+    const c = new THREE.Vector3();
+    for (const u of mine) c.add(u.pos);
+    c.divideScalar(mine.length);
+    const back = team === 0 ? -1 : 1;
+    const x = clamp(c.x, -FIELD + 4, FIELD - 4), z = clamp(c.z + back * 16, -FIELD + 4, FIELD - 4);
+    const plan = { type: T_CMD, team, x, z, yaw: team === 0 ? 0 : Math.PI, variant: 1 };
+    const u = new Unit(plan);
+    this.units.push(u);
+    const sq = new Squad('cmd' + team, T_CMD, team, plan.yaw);
+    sq.units.push(u); u.squad = sq; sq.size = 1;
+    sq.order = { kind: 'hold', mode: 'hold', x, z };
+    this.squads.push(sq);
+    this.couriers[team] = new Squad('msg' + team, T_MSG, team, plan.yaw);
+    const spec = this.commanderSpec(team);
+    this.commanders[team] = new Commander(this, team, u, spec.trait, spec.name);
+    this.addLog(team, `${spec.name}, ${TRAITS[spec.trait].name} полководец, ведёт ${team === 0 ? 'синих' : 'красных'}: ${TRAITS[spec.trait].note}`);
+  }
+
+  spawnMessenger(cmd, sq, order) {
+    const c = cmd.unit.pos, side = Math.random() < 0.5 ? -1.5 : 1.5;
+    const plan = { type: T_MSG, team: cmd.team, x: clamp(c.x + side, -FIELD + 1, FIELD - 1), z: c.z, yaw: cmd.unit.yaw, variant: 0 };
+    const u = new Unit(plan);
+    u.carry = { squad: sq, order, cmd, delivered: false };
+    u.squad = this.couriers[cmd.team];
+    this.couriers[cmd.team].units.push(u);
+    this.units.push(u);
+  }
+
+  applyOrder(sq, order) {
+    if (order.mode !== 'advance' && order.mode !== 'rout' && order.mode !== 'charge' && order.x == null) { order.x = sq.center.x; order.z = sq.center.z; }
+    if (order.x != null && order.face == null) {
+      const e = this.armyCenter(1 - sq.team);
+      if (e) order.face = Math.atan2(e.x - order.x, e.z - order.z);
+    }
+    sq.order = order;
+    sq.orderT = this.time;
+    sq.labelT = 4;
+  }
+
+  armyCenter(team) {
+    const c = new THREE.Vector3();
+    let n = 0;
+    for (const u of this.teams[team]) if (!u.t.special) { c.add(u.pos); n++; }
+    return n ? c.divideScalar(n) : null;
+  }
+
+  // ---------------------------------------------------------------- главный цикл
+
+  tick(dt) {
+    this.time += dt;
+    this.teams[0].length = 0; this.teams[1].length = 0;
+    const alive = [0, 0];
+    for (const u of this.units) if (u.alive) { this.teams[u.team].push(u); if (!u.t.special) alive[u.team]++; }
+    this.alive = alive;
+    this.buildGrid();
+    for (const sq of this.squads) sq.refresh(dt);
+    for (const cs of this.couriers) if (cs) cs.refresh(dt);
+
+    if (this.fighting && dt > 0) {
+      this.updateSquads(dt);
+      for (const c of this.commanders) if (c) c.tick(dt);
+      for (const u of this.units) if (u.alive) this.think(u, dt);
+      for (const u of this.units) if (u.alive) this.integrate(u, dt);
+      this.separate();
+    }
+    this.bolts.tick(dt);
+
+    for (let i = this.units.length - 1; i >= 0; i--) {
+      const u = this.units[i];
+      if (u.gone) { disposeView(u.view); u.alive = false; this.units.splice(i, 1); continue; }
+      if (!u.alive) {
+        u.deadT += dt;
+        if (u.deadT > 24) { disposeView(u.view); this.units.splice(i, 1); continue; }
+      }
+      u.sync();
+    }
+  }
+
+  /** Боевой дух, скрытность в низинах и смена фаз приказа. */
+  updateSquads(dt) {
+    for (const sq of this.squads) {
+      if (sq.special || sq.alive === 0) continue;
+      const o = sq.order, cmd = this.commanders[sq.team];
+      const cmdNear = cmd && cmd.unit.alive && d2d(cmd.unit.pos, sq.center) < 26;
+      if (!sq.engaged && this.time - sq.lastHitT > 3) sq.morale += dt * (cmdNear ? 4 : 1.2);
+      if (sq.alive < sq.size * 0.3) sq.morale = Math.min(sq.morale, 55);
+      sq.morale = clamp(sq.morale, 0, 100);
+
+      let enemyNear = false;
+      for (const e of this.squads)
+        if (e.team !== sq.team && !e.special && e.alive && d2d(e.center, sq.center) < 20) { enemyNear = true; break; }
+
+      if (o.mode !== 'rout' && sq.morale < 18) {
+        this.applyOrder(sq, { kind: 'rout', mode: 'rout' });
+        sq.pending = null;
+        this.addLog(sq.team, `${cap(sq.name)} дрогнули и бегут!`);
+        continue;
+      }
+      if (o.mode === 'rout') {
+        if (sq.morale > 45) {
+          const p = cmd && cmd.unit.alive ? cmd.unit.pos : { x: sq.center.x, z: (sq.team === 0 ? -1 : 1) * (FIELD - 12) };
+          this.applyOrder(sq, { kind: 'rally', mode: 'move', x: p.x, z: p.z, then: { kind: 'hold', mode: 'hold' } });
+          this.addLog(sq.team, `${cap(sq.name)} опомнились и собираются у знамени`);
+        }
+        continue;
+      }
+
+      sq.hidden = world.prominenceAt(sq.center.x, sq.center.z) < -0.9 && !sq.engaged && this.time - sq.lastShotT > 3 && !enemyNear;
+
+      if (o.mode === 'move' && (d2d(o, sq.center) < 4 || this.time - sq.orderT > 35)) {
+        const next = o.then ? { ...o.then } : { kind: 'advance', mode: 'advance' };
+        if (next.mode !== 'advance' && next.mode !== 'charge' && next.x == null) { next.x = o.x; next.z = o.z; next.face = o.face; }
+        this.applyOrder(sq, next);
+      } else if (o.mode === 'charge' && (!o.target || o.target.alive === 0)) {
+        this.applyOrder(sq, { kind: 'advance', mode: 'advance' });
+      } else if (o.mode === 'ambush' && enemyNear) {
+        sq.firstStrikeT = this.time;
+        this.applyOrder(sq, { kind: 'charge', mode: 'advance' });
+        this.addLog(sq.team, `Засада! ${cap(sq.name)} бьют из укрытия`);
+      }
+    }
+  }
+
+  think(u, dt) {
+    const t = u.t, sq = u.squad, o = sq.order;
+    u.cooldown -= dt; u.retargetT -= dt;
+    u.engaged = false; u.aiming = false;
+    if (t.special === 'messenger') { this.thinkMessenger(u, dt); return; }
+    if (o.mode === 'rout') { this.flee(u, dt); return; }
+
+    if (!u.target || !u.target.alive || u.retargetT <= 0) { u.retargetT = 0.45 + Math.random() * 0.45; u.target = this.pickTarget(u); }
+    const tg = u.target;
+    let dx = 0, dz = 0;
+    let wantSlot = o.mode === 'move' || o.mode === 'hold' || o.mode === 'ambush' || t.special === 'commander';
+    if (tg) {
+      const tx = tg.pos.x - u.pos.x, tz = tg.pos.z - u.pos.z, d = Math.hypot(tx, tz);
+      const nx = d > 1e-4 ? tx / d : Math.sin(u.yaw), nz = d > 1e-4 ? tz / d : Math.cos(u.yaw);
+      const contact = t.radius + tg.t.radius + t.reach;
+      if (t.ranged && d > contact + 1.5) {
+        if (d <= this.rangeOf(u, tg) && this.canSee(u, tg)) {
+          u.aiming = true; wantSlot = false;
+          u.face(nx, nz, dt);
+          if (u.cooldown <= 0 && u.atkT < 0) this.startAttack(u, true);
+        } else if (o.mode === 'advance' || o.mode === 'charge') { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+      } else if (d <= contact) {
+        u.engaged = true; wantSlot = false;
+        u.face(nx, nz, dt);
+        if (u.cooldown <= 0 && u.atkT < 0 && t.dmg > 0) this.startAttack(u, false);
+      } else if (this.mayChase(u, tg)) { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+    }
+    if (wantSlot) {
+      let gx, gz;
+      if (t.special === 'commander') { const c = this.commanders[u.team]; gx = c ? c.post.x : u.pos.x; gz = c ? c.post.z : u.pos.z; }
+      else [gx, gz] = sq.slot(u);
+      const sx = gx - u.pos.x, sz = gz - u.pos.z, sd = Math.hypot(sx, sz);
+      if (sd > 0.7) {
+        const k = (sd > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
+        dx = sx / sd * t.speed * k; dz = sz / sd * t.speed * k;
+      } else if (o.face != null && !u.aiming) u.face(Math.sin(o.face), Math.cos(o.face), dt, 3);
+    }
+    if (u.atkT >= 0 && !t.ranged && t.charge <= 1) { dx *= 0.3; dz *= 0.3; }
+    this.steer(u, dx, dz, dt, !u.engaged && !u.aiming);
+
+    if (t.charge > 1) {
+      if (u.curSpeed > t.speed * 0.7) u.chargeT += dt;
+      else if (!u.engaged) u.chargeT = Math.max(0, u.chargeT - dt * 2);
+    }
+    if (u.atkT >= 0) {
+      u.atkT += dt / u.atkDur;
+      if (!u.hitDone && u.atkT >= (u.shot ? 0.55 : 0.5)) { u.hitDone = true; this.resolveHit(u); }
+      if (u.atkT >= 1) u.atkT = -1;
+    }
+  }
+
+  steer(u, dx, dz, dt, faceMove) {
+    const ax = dx - u.vel.x, az = dz - u.vel.z, al = Math.hypot(ax, az), step = u.t.accel * dt;
+    if (al <= step) { u.vel.x = dx; u.vel.z = dz; } else { u.vel.x += ax / al * step; u.vel.z += az / al * step; }
+    if (faceMove && Math.hypot(u.vel.x, u.vel.z) > 0.2) u.face(u.vel.x, u.vel.z, dt, u.t.mount ? 3 : 9.5);
+  }
+
+  mayChase(u, tg) {
+    const o = u.squad.order;
+    if (u.t.special === 'commander') return d2d(u.pos, tg.pos) < 7;
+    if (o.mode === 'advance' || o.mode === 'charge') return true;
+    if (o.mode === 'hold' || o.mode === 'ambush') return d2d(o, tg.pos) < (o.leash ?? (u.t.mount ? 16 : 10));
+    return false;
+  }
+
+  /** Цель с учётом приказа, скрытности и прямой видимости. */
+  pickTarget(u) {
+    const o = u.squad.order, ranged = u.t.ranged, enemies = this.teams[1 - u.team];
+    const gx = o.x ?? u.pos.x, gz = o.z ?? u.pos.z, leash = o.leash ?? (u.t.mount ? 16 : 10);
+    const best = [];
+    for (const e of enemies) {
+      const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
+      if (e.squad && e.squad.hidden && d2 > 196) continue; // в низине не видно
+      let s = d2;
+      if (e.t.special === 'messenger') { if (!ranged && d2 > 64) continue; s *= 1.3; }
+      if (u.t.special === 'commander' && d2 > 64) continue;
+      if (o.mode === 'move' && d2 > 10) continue;
+      if ((o.mode === 'hold' || o.mode === 'ambush') && !ranged) {
+        const lx = e.pos.x - gx, lz = e.pos.z - gz;
+        if (lx * lx + lz * lz > leash * leash && d2 > 9) continue;
+      }
+      if (o.mode === 'charge' && o.target && e.squad === o.target) s *= 0.2;
+      if (best.length < 5 || s < best[best.length - 1].s) {
+        best.push({ e, s });
+        best.sort((a, b) => a.s - b.s);
+        if (best.length > 5) best.pop();
+      }
+    }
+    if (!best.length) return null;
+    if (!ranged) return best[0].e;
+    for (const c of best) if (d2d(c.e.pos, u.pos) <= this.rangeOf(u, c.e) && this.canSee(u, c.e)) return c.e;
+    return o.mode === 'advance' || o.mode === 'charge' ? best[0].e : null;
+  }
+
+  canSee(u, tg) {
+    if (u.losTarget === tg && this.time - u.losT < 0.5) return u.losOk;
+    u.losTarget = tg; u.losT = this.time;
+    return (u.losOk = world.los(u.pos.x, u.pos.y + 1.3, u.pos.z, tg.pos.x, tg.pos.y + 1.0, tg.pos.z));
+  }
+
+  /** Дальность выстрела: высота добавляет, ветер помогает или мешает, солнце слепит. */
+  rangeOf(u, tg) {
+    let r = u.t.range;
+    const dx = tg.pos.x - u.pos.x, dz = tg.pos.z - u.pos.z, d = Math.hypot(dx, dz) || 1;
+    r += clamp((u.pos.y - tg.pos.y) * 1.2, -6, 12);
+    r += (world.wind.x * dx + world.wind.y * dz) / d * 1.2;
+    if (this.glare(dx / d, dz / d)) r *= 0.85;
+    return r;
+  }
+
+  glare(nx, nz) {
+    if (!world.style || world.style.elev > 26) return false;
+    const sx = world.sunDir.x, sz = world.sunDir.z, l = Math.hypot(sx, sz) || 1;
+    return (nx * sx + nz * sz) / l > 0.77;
+  }
+
+  flee(u, dt) {
+    if (u.retargetT <= 0 || !u.fleeFrom || !u.fleeFrom.alive) {
+      u.retargetT = 0.5;
+      let best = null, bd = Infinity;
+      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
+      u.fleeFrom = bd < 30 ? best : null;
+    }
+    let fx = 0, fz = u.team === 0 ? -1 : 1;
+    if (u.fleeFrom) {
+      const ax = u.pos.x - u.fleeFrom.pos.x, az = u.pos.z - u.fleeFrom.pos.z, l = Math.hypot(ax, az) || 1;
+      fx += ax / l * 1.5; fz += az / l * 1.5;
+    }
+    const l = Math.hypot(fx, fz) || 1;
+    this.steer(u, fx / l * u.t.speed * 1.05, fz / l * u.t.speed * 1.05, dt, true);
+    if (u.atkT >= 0) { u.atkT += dt / u.atkDur; if (u.atkT >= 1) u.atkT = -1; }
+  }
+
+  thinkMessenger(u, dt) {
+    const c = u.carry;
+    let gx = u.pos.x, gz = u.pos.z;
+    if (!c.delivered) {
+      const sq = c.squad;
+      if (!sq || sq.alive === 0 || sq.order.mode === 'rout') { c.delivered = true; if (sq && sq.pending === c.order) sq.pending = null; }
+      else {
+        gx = sq.center.x; gz = sq.center.z;
+        if (d2d(sq.center, u.pos) < 6) {
+          c.delivered = true;
+          if (sq.pending === c.order) { sq.pending = null; this.applyOrder(sq, c.order); }
+        }
+      }
+    }
+    if (c.delivered) {
+      const cu = c.cmd.unit;
+      if (cu.alive) { gx = cu.pos.x; gz = cu.pos.z; if (d2d(cu.pos, u.pos) < 5) u.gone = true; }
+      else { gz = (u.team === 0 ? -1 : 1) * FIELD; if (Math.abs(u.pos.z) > FIELD - 3) u.gone = true; }
+    }
+    // Гонец объезжает врагов стороной
+    if (u.retargetT <= 0) {
+      u.retargetT = 0.3;
+      let best = null, bd = 12;
+      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
+      u.fleeFrom = best;
+    }
+    let vx = gx - u.pos.x, vz = gz - u.pos.z;
+    const l = Math.hypot(vx, vz) || 1;
+    vx /= l; vz /= l;
+    if (u.fleeFrom && u.fleeFrom.alive) {
+      const ax = u.pos.x - u.fleeFrom.pos.x, az = u.pos.z - u.fleeFrom.pos.z, al = Math.hypot(ax, az) || 1;
+      const k = clamp((12 - al) / 12, 0, 1) * 1.6;
+      vx += ax / al * k; vz += az / al * k;
+    }
+    const vl = Math.hypot(vx, vz) || 1;
+    this.steer(u, vx / vl * u.t.speed, vz / vl * u.t.speed, dt, true);
+  }
+
+  startAttack(u, shot) {
+    u.atkT = 0; u.hitDone = false; u.shot = shot; u.atkNew = true;
+    u.atkDur = shot || !u.t.ranged ? u.t.atkTime : 0.55;
+    const cd = shot || !u.t.ranged ? u.t.cd : 1.0;
+    u.cooldown = cd * (0.85 + Math.random() * 0.3);
+    if (shot) u.squad.lastShotT = this.time;
+  }
+
+  resolveHit(u) {
+    const tg = u.target;
+    if (!tg || !tg.alive) return;
+    if (u.shot) { this.bolts.fire(u, tg); return; }
+    const tx = tg.pos.x - u.pos.x, tz = tg.pos.z - u.pos.z, d = Math.hypot(tx, tz);
+    if (d > u.t.radius + tg.t.radius + u.t.reach + 0.6) return; // промах: цель отошла
+    const nx = d > 1e-4 ? tx / d : 0, nz = d > 1e-4 ? tz / d : 1;
+    let dmg = u.t.ranged ? 8 : u.t.dmg;
+    if (tg.t.mount) dmg *= u.t.vsCav;
+    dmg *= 1 + clamp((u.pos.y - tg.pos.y) * 0.1, -0.3, 0.35);   // сверху бить легче
+    const rear = Math.sin(tg.yaw) * nx + Math.cos(tg.yaw) * nz > 0.35; // цель смотрит от нас
+    if (rear) dmg *= 1.35;
+    if (this.time - u.squad.firstStrikeT < 2.5) dmg *= 1.6;          // удар из засады
+    const charge = u.t.charge > 1 && u.chargeT > 0.8;
+    if (charge) { dmg *= u.t.charge; u.chargeT = 0; this.trample(u, tg); }
+    const kb = (charge ? 5 : 1.3) / tg.t.mass;
+    this.damage(tg, dmg, nx * kb, nz * kb, false, u, rear);
+  }
+
+  /** Натиск рыцаря задевает и сбивает соседей цели. */
+  trample(k, main) {
+    const fx = Math.sin(k.yaw), fz = Math.cos(k.yaw);
+    for (const e of this.teams[1 - k.team]) {
+      if (e === main || !e.alive) continue;
+      const tx = e.pos.x - k.pos.x, tz = e.pos.z - k.pos.z, d = Math.hypot(tx, tz);
+      if (d > 2.6 || tx * fx + tz * fz < 0) continue;
+      const s = 2.5 / e.t.mass;
+      this.damage(e, k.t.dmg * 0.6, (tx / Math.max(d, 0.1) + fx) * s, (tz / Math.max(d, 0.1) + fz) * s, false, k);
+      if (e.squad) e.squad.morale -= 2;
+    }
+  }
+
+  damage(t, amount, kx, kz, arrow, src, rear) {
+    if (!t.alive) return;
+    amount *= 0.8 + Math.random() * 0.4;
+    if (arrow && !rear) amount *= 1 - t.t.arrowBlock;
+    amount *= 1 - t.t.armor;
+    t.hp -= amount;
+    t.knock.x += kx; t.knock.z += kz;
+    const sq = t.squad;
+    if (sq && !sq.special) {
+      if (arrow) { sq.lastHitT = this.time; sq.morale -= 0.6; }
+      if (rear) sq.morale -= 1.5;
+    }
+    if (t.hp <= 0) { this.kill(t); return; }
+    if (src && !arrow && t.target !== src && Math.random() < 0.5) t.target = src;
+  }
+
+  kill(u) {
+    u.alive = false; u.deadT = 0; u.target = null; u.atkT = -1;
+    u.vel.set(0, 0, 0); u.curSpeed = 0;
+    const sq = u.squad;
+    if (u.t.special === 'messenger') {
+      const c = u.carry;
+      if (c && !c.delivered) {
+        if (c.squad.pending === c.order) c.squad.pending = null;
+        this.addLog(u.team, `Гонец к отряду «${c.squad.name}» перехвачен — приказ «${ORDER_TEXT[c.order.kind].toLowerCase()}» не дошёл`);
+      }
+    } else if (u.t.special === 'commander') {
+      const cmd = this.commanders[u.team];
+      for (const s of this.squads) if (s.team === u.team && !s.special) s.morale -= 25;
+      this.addLog(u.team, `${cmd ? cmd.name : 'Полководец'} пал! Армия осталась без приказов`);
+    } else if (sq) sq.morale -= 6;
+    animate(u);
+  }
+
+  integrate(u, dt) {
+    const vx = u.vel.x, vz = u.vel.z, sp = Math.hypot(vx, vz);
+    let f = 1;
+    if (sp > 0.05) {
+      // в гору тяжело, под гору легче
+      const g = world.heightAt(u.pos.x + vx / sp, u.pos.z + vz / sp) - u.pos.y;
+      f = g > 0 ? Math.max(0.35, 1 - g * 1.4) : Math.min(1.2, 1 - g * 0.5);
+    }
+    if (world.inWall(u.pos.x, u.pos.z)) f *= 0.35; // перелезаем ограду
+    u.curSpeed = sp * f;
+    u.pos.x += (vx * f + u.knock.x) * dt;
+    u.pos.z += (vz * f + u.knock.z) * dt;
+    const k = Math.exp(-7 * dt);
+    u.knock.x *= k; u.knock.z *= k;
+    const lim = FIELD - 0.5;
+    u.pos.x = clamp(u.pos.x, -lim, lim); u.pos.z = clamp(u.pos.z, -lim, lim);
+    u.pos.y = world.heightAt(u.pos.x, u.pos.z);
+    u.phase += dt * u.curSpeed * (u.t.mount ? 1.4 : 3.3);
+  }
+
+  // ---------------------------------------------------------------- соседи
+
+  cellOf(x, z) {
+    return [clamp(((x + GRID_HALF) / GRID) | 0, 0, GRID_DIM - 1), clamp(((z + GRID_HALF) / GRID) | 0, 0, GRID_DIM - 1)];
+  }
+
+  buildGrid() {
+    this.head.fill(-1);
+    if (this.next.length < this.units.length) { this.next = new Int32Array(this.units.length * 2); this.push = new Float32Array(this.units.length * 4); }
+    for (let i = 0; i < this.units.length; i++) {
+      const u = this.units[i];
+      if (!u.alive) continue;
+      const [cx, cz] = this.cellOf(u.pos.x, u.pos.z), c = cz * GRID_DIM + cx;
+      this.next[i] = this.head[c]; this.head[c] = i;
+    }
+  }
+
+  separate() {
+    const U = this.units, P = this.push;
+    for (let i = 0; i < U.length; i++) {
+      P[i * 2] = 0; P[i * 2 + 1] = 0;
+      const u = U[i];
+      if (!u.alive) continue;
+      const [cx, cz] = this.cellOf(u.pos.x, u.pos.z);
+      for (let z = Math.max(cz - 1, 0); z <= Math.min(cz + 1, GRID_DIM - 1); z++) {
+        for (let x = Math.max(cx - 1, 0); x <= Math.min(cx + 1, GRID_DIM - 1); x++) {
+          for (let j = this.head[z * GRID_DIM + x]; j >= 0; j = this.next[j]) {
+            if (j === i) continue;
+            const o = U[j], dx = u.pos.x - o.pos.x, dz = u.pos.z - o.pos.z, min = u.t.radius + o.t.radius, d2 = dx * dx + dz * dz;
+            if (d2 >= min * min) continue;
+            const d = Math.sqrt(d2);
+            const nx = d > 1e-4 ? dx / d : Math.cos(i), nz = d > 1e-4 ? dz / d : Math.sin(i);
+            const s = (min - d) * (o.t.mass / (u.t.mass + o.t.mass)) * 0.5;
+            P[i * 2] += nx * s; P[i * 2 + 1] += nz * s;
+          }
+        }
+      }
+    }
+    const lim = FIELD - 0.5;
+    for (let i = 0; i < U.length; i++) {
+      const u = U[i];
+      let px = P[i * 2], pz = P[i * 2 + 1];
+      if (!u.alive || (px === 0 && pz === 0)) continue;
+      const l = Math.hypot(px, pz);
+      if (l > 0.4) { px *= 0.4 / l; pz *= 0.4 / l; }
+      u.pos.x = clamp(u.pos.x + px, -lim, lim); u.pos.z = clamp(u.pos.z + pz, -lim, lim);
+      u.pos.y = world.heightAt(u.pos.x, u.pos.z);
+    }
+  }
+
+  /** Ближайший живой враг команды team у точки (для попадания болтов). */
+  enemyNear(x, z, team, extra) {
+    const [cx, cz] = this.cellOf(x, z);
+    let best = null, bestD = Infinity;
+    for (let gz = Math.max(cz - 1, 0); gz <= Math.min(cz + 1, GRID_DIM - 1); gz++) {
+      for (let gx = Math.max(cx - 1, 0); gx <= Math.min(cx + 1, GRID_DIM - 1); gx++) {
+        for (let j = this.head[gz * GRID_DIM + gx]; j >= 0; j = this.next[j]) {
+          const o = this.units[j];
+          if (!o || !o.alive || o.team === team) continue;
+          const dx = o.pos.x - x, dz = o.pos.z - z, r = o.t.radius + extra, d2 = dx * dx + dz * dz;
+          if (d2 < r * r && d2 < bestD) { bestD = d2; best = o; }
+        }
+      }
+    }
+    return best;
+  }
+
+  centroid() {
+    const c = new THREE.Vector3();
+    let n = 0;
+    for (const u of this.units) if (u.alive && !u.t.special) { c.add(u.pos); n++; }
+    return n ? c.divideScalar(n) : null;
+  }
+}
+
+// ------------------------------------------------------------------ арбалетные болты
+
+class Bolts {
+  constructor(battle) { this.battle = battle; this.cap = 600; this.list = []; this.mesh = null; }
+  init() {
+    const b = ASSETS.bolt;
+    this.mesh = new THREE.InstancedMesh(b.geometry, b.material, this.cap);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    unitLayer.add(this.mesh);
+    this.axis = new THREE.Vector3(b.axis === 'x' ? 1 : 0, b.axis === 'y' ? 1 : 0, b.axis === 'z' ? 1 : 0).multiplyScalar(BOLT_TIP);
+  }
+  fire(src, dst) {
+    if (this.list.length >= this.cap) {
+      const i = this.list.findIndex((a) => !a.flying);
+      if (i < 0) return;
+      this.list.splice(i, 1);
+    }
+    const B = this.battle, f = src.forward;
+    const from = new THREE.Vector3(src.pos.x + f.x * 0.6, src.pos.y + 1.3, src.pos.z + f.z * 0.6);
+    const dx = dst.pos.x - src.pos.x, dz = dst.pos.z - src.pos.z, d = Math.hypot(dx, dz) || 1;
+    const dur = d / 42 + 0.22;
+    const glare = B.glare(dx / d, dz / d);
+    if (glare && !B.glareLogged[src.team]) {
+      B.glareLogged[src.team] = true;
+      B.addLog(src.team, 'Низкое солнце бьёт арбалетчикам в глаза — болты уходят мимо');
+    }
+    const spread = (0.3 + d * 0.03) * (glare ? 2.4 : 1), ang = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * spread;
+    const to = new THREE.Vector3(
+      dst.pos.x + dst.vel.x * dur + Math.cos(ang) * rad + world.wind.x * dur * 0.8, 0,
+      dst.pos.z + dst.vel.z * dur + Math.sin(ang) * rad + world.wind.y * dur * 0.8);
+    to.y = world.heightAt(to.x, to.z) + 0.9;
+    this.list.push({ from, to, age: 0, dur, arc: 0.4 + d * 0.07, team: src.team, dmg: src.t.dmg, flying: true, stuck: 0, pos: from.clone(), dir: new THREE.Vector3(dx, 0, dz) });
+  }
+  tick(dt) {
+    const L = this.list;
+    for (let i = L.length - 1; i >= 0; i--) {
+      const a = L[i];
+      if (a.flying) {
+        a.age += dt;
+        const s = Math.min(1, a.age / a.dur);
+        a.pos.lerpVectors(a.from, a.to, s); a.pos.y += a.arc * 4 * s * (1 - s);
+        a.dir.subVectors(a.to, a.from).divideScalar(a.dur); a.dir.y += a.arc * 4 * (1 - 2 * s) / a.dur;
+        // Болт врезается в склон или ограду — так и работает укрытие
+        if (s > 0.08 && s < 1 && (a.pos.y < world.heightAt(a.pos.x, a.pos.z) + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y)) {
+          a.flying = false; a.stuck = 8; a.dir.normalize();
+          continue;
+        }
+        if (s < 1) continue;
+        const hit = this.battle.enemyNear(a.to.x, a.to.z, a.team, 0.35);
+        if (hit) {
+          const l = Math.hypot(a.dir.x, a.dir.z) || 1;
+          const back = Math.sin(hit.yaw) * a.dir.x / l + Math.cos(hit.yaw) * a.dir.z / l > 0.35;
+          this.battle.damage(hit, a.dmg, a.dir.x / l * 0.6 / hit.t.mass, a.dir.z / l * 0.6 / hit.t.mass, true, null, back);
+          L.splice(i, 1);
+          continue;
+        }
+        a.flying = false; a.stuck = 8;
+        const g = world.heightAt(a.to.x, a.to.z);
+        a.dir.normalize();
+        const down = Math.max(0.3, -a.dir.y);
+        a.pos.copy(a.to).addScaledVector(a.dir, Math.max(0, a.to.y - g) / down - 0.25);
+      } else if ((a.stuck -= dt) <= 0) L.splice(i, 1);
+    }
+    if (!this.mesh) return;
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3().setScalar(ASSETS.bolt.norm), dn = new THREE.Vector3();
+    const n = Math.min(L.length, this.cap);
+    for (let i = 0; i < n; i++) {
+      const a = L[i];
+      q.setFromUnitVectors(this.axis, dn.copy(a.dir).normalize());
+      m4.compose(a.pos, q, sc);
+      this.mesh.setMatrixAt(i, m4);
+    }
+    this.mesh.count = n;
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+  clear() { this.list.length = 0; if (this.mesh) this.mesh.count = 0; }
+}
+let BOLT_TIP = 1; // направление наконечника вдоль оси модели (+1 или -1)
+
+// ------------------------------------------------------------------ полководец
+
+const STANCE_TEXT = {
+  defend: 'стоим на высотах — пусть враг лезет вверх под болтами',
+  attack: 'все вперёд, давим числом!',
+  maneuver: 'связать их фронт, а самим обойти фланги и ударить из засады',
+};
+
+const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return { x: x / l, z: z / l }; };
+const clampField = (p, m = 4) => ({ x: clamp(p.x, -FIELD + m, FIELD - m), z: clamp(p.z, -FIELD + m, FIELD - m) });
+
+/**
+ * Полководец видит поле (кроме затаившихся в низинах), раз в несколько секунд
+ * оценивает силы и рельеф и рассылает отрядам приказы через гонцов.
+ */
+class Commander {
+  constructor(battle, team, unit, trait, name) {
+    Object.assign(this, { battle, team, unit, trait, name });
+    this.post = unit.pos.clone();
+    this.nextThink = 1.2;
+    this.stance = null; this.stanceT = -99;
+    this.ambushSet = false;
+  }
+
+  mySquads() { return this.battle.squads.filter((s) => s.team === this.team && !s.special && s.alive > 0); }
+  foeSquads() { return this.battle.squads.filter((s) => s.team !== this.team && !s.special && s.alive > 0 && !s.hidden); }
+
+  static center(list) {
+    let x = 0, z = 0, n = 0;
+    for (const s of list) { x += s.center.x * s.alive; z += s.center.z * s.alive; n += s.alive; }
+    return n ? { x: x / n, z: z / n } : null;
+  }
+  static nearest(list, p) {
+    let best = null, bd = Infinity;
+    for (const s of list) { const d = d2d(s.center, p); if (d < bd) { bd = d; best = s; } }
+    return best;
+  }
+  static count(list, pred) { return list.reduce((s, q) => s + (pred(q) ? q.alive : 0), 0); }
+
+  tick(dt) {
+    if (!this.unit.alive) return;
+    const my = this.mySquads();
+    if (!my.length) return;
+    this.updatePost(my);
+    if ((this.nextThink -= dt) > 0) return;
+    this.nextThink = TRAITS[this.trait].think + Math.random() * 0.8;
+
+    const en = this.foeSquads();
+    if (!this.stance || this.battle.time - this.stanceT > 20) this.chooseStance(my, en);
+    // Роли, уже розданные отрядам: одну задачу не поручаем двоим
+    this.claims = new Set();
+    for (const q of my) { const o = q.pending || q.order; if (o.claim) this.claims.add(o.claim); }
+    this.outbox = [];
+    for (const sq of my) {
+      if (sq.order.mode === 'rout' || sq.pending || this.battle.time < sq.nextDecision) continue;
+      const order = this.decide(sq, my, en);
+      if (order && this.differs(sq.order, order)) {
+        if (order.claim) this.claims.add(order.claim);
+        if (this.send(sq, order)) sq.nextDecision = this.battle.time + 5 + Math.random() * 2;
+      }
+    }
+    this.flushLog();
+  }
+
+  /** Одинаковые приказы разным отрядам — одной строкой летописи. */
+  flushLog() {
+    const groups = new Map();
+    for (const e of this.outbox) {
+      const key = e.via + '|' + e.order.kind + '|' + (e.order.why || '');
+      if (!groups.has(key)) groups.set(key, { ...e, names: [] });
+      groups.get(key).names.push(e.sq.name);
+    }
+    for (const g of groups.values()) {
+      const who = g.names.join(', ');
+      const what = ORDER_TEXT[g.order.kind].toLowerCase() + (g.order.why ? ' (' + g.order.why + ')' : '');
+      this.battle.addLog(this.team, g.via === 'voice' ? `${this.name} → ${who}: ${what}` : `${this.name} шлёт ${g.names.length > 1 ? 'гонцов' : 'гонца'} → ${who}: ${what}`);
+    }
+    this.outbox = [];
+  }
+
+  /** Полководец держится позади войска, по возможности на высоте, и уходит от опасности. */
+  updatePost(my) {
+    const c = Commander.center(my), all = this.battle.squads.filter((s) => s.team !== this.team && !s.special && s.alive > 0);
+    const e = Commander.center(all) || { x: c.x, z: -(this.team === 0 ? -1 : 1) * FIELD };
+    const away = norm2(c.x - e.x, c.z - e.z);
+    let p = { x: c.x + away.x * 18, z: c.z + away.z * 18 };
+    const hill = world.an.high.find((h) => d2d(h, p) < 22 && !all.some((s) => d2d(s.center, h) < 20));
+    if (hill) p = { x: hill.x, z: hill.z };
+    const u = this.unit;
+    for (const foe of this.battle.teams[1 - this.team]) {
+      if (!foe.t.special && d2d(foe.pos, u.pos) < 14) {
+        const a = norm2(u.pos.x - foe.pos.x, u.pos.z - foe.pos.z);
+        p = { x: u.pos.x + a.x * 20, z: u.pos.z + a.z * 20 };
+        break;
+      }
+    }
+    p = clampField(p);
+    this.post.set(p.x, 0, p.z);
+  }
+
+  chooseStance(my, en) {
+    const myR = Commander.count(my, (q) => q.t.ranged), enR = Commander.count(en, (q) => q.t.ranged);
+    const myAll = Commander.count(my, () => true), enAll = Commander.count(en, () => true);
+    let st = this.trait === 'fierce' ? 'attack' : this.trait === 'cunning' ? 'maneuver' : myAll > enAll * 1.4 ? 'attack' : 'defend';
+    // Стоять под превосходящим обстрелом глупо — сближаемся
+    if (st === 'defend' && enR > myR * 1.5 && this.battle.time > 15) st = 'maneuver';
+    if (st !== this.stance) this.battle.addLog(this.team, `${this.name}: ${STANCE_TEXT[st]}`);
+    this.stance = st;
+    this.stanceT = this.battle.time;
+  }
+
+  decide(sq, my, en) {
+    if (!en.length) return sq.order.mode === 'advance' ? null : { kind: 'advance', mode: 'advance', why: 'враг скрылся — искать его' };
+    const ec = Commander.center(en);
+    if (sq.t.ranged) return this.decideRanged(sq, my, en, ec);
+    if (sq.t.mount) return this.decideCavalry(sq, my, en, ec);
+    return this.decideInfantry(sq, my, en, ec);
+  }
+
+  // ---------------------------------------------------------------- стрелки
+
+  decideRanged(sq, my, en, ec) {
+    const B = this.battle;
+    const threat = en.find((e) => !e.t.ranged && d2d(e.center, sq.center) < 22);
+    if (threat && !my.some((q) => !q.t.ranged && !q.t.mount && q.order.mode !== 'rout' && d2d(q.center, sq.center) < 12)) {
+      const guards = my.filter((q) => !q.t.ranged && !q.t.mount && q.order.mode !== 'rout');
+      const guard = Commander.nearest(guards, sq.center);
+      const away = norm2(sq.center.x - threat.center.x, sq.center.z - threat.center.z);
+      const p = guard ? { x: guard.center.x + away.x * 7, z: guard.center.z + away.z * 7 } : { x: sq.center.x + away.x * 20, z: sq.center.z + away.z * 20 };
+      return { kind: 'withdraw', mode: 'move', ...clampField(p), then: { kind: 'hold', mode: 'hold' }, why: `к ним рвутся ${threat.name}` };
+    }
+    const enR = Commander.count(en, (q) => q.t.ranged), myR = Commander.count(my, (q) => q.t.ranged);
+    const underFire = B.time - sq.lastHitT < 3;
+    if ((underFire && enR > myR * 1.1) || (this.trait === 'cautious' && enR > myR * 1.3)) {
+      const c = this.coverFor(sq, ec);
+      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: c.wall ? 'за ограду, от чужих болтов' : 'в низину, от чужих болтов' };
+    }
+    if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0 && sq.order.kind !== 'cover') {
+      const h = this.highNear(sq.center, 36, en, ec);
+      if (h) return { kind: 'high', mode: 'move', x: h.x, z: h.z, then: { kind: 'hold', mode: 'hold' }, why: 'с высоты бьют дальше' };
+    }
+    if (sq.order.mode === 'hold' && B.time - sq.lastShotT > 7 && B.time - sq.orderT > 7) {
+      const v = norm2(ec.x - sq.center.x, ec.z - sq.center.z);
+      return { kind: 'advance', mode: 'move', ...clampField({ x: sq.center.x + v.x * 14, z: sq.center.z + v.z * 14 }), then: { kind: 'hold', mode: 'hold' }, why: 'враг вне выстрела' };
+    }
+    if (sq.order.mode === 'advance') return { kind: 'hold', mode: 'hold', why: 'стоять и стрелять' };
+    return null;
+  }
+
+  // ---------------------------------------------------------------- конница
+
+  decideCavalry(sq, my, en, ec) {
+    const o = sq.order;
+    if (o.kind === 'charge' && sq.engagedFor > 3.5 && this.trait !== 'fierce') {
+      const back = norm2(sq.center.x - ec.x, sq.center.z - ec.z);
+      return { kind: 'withdraw', mode: 'move', ...clampField({ x: sq.center.x + back.x * 24, z: sq.center.z + back.z * 24 }), then: { kind: 'hold', mode: 'hold', leash: 14 }, why: 'выйти из свалки и разогнаться снова' };
+    }
+    const exposed = en.filter((e) => e.t.ranged && !en.some((q) => !q.t.ranged && q !== e && d2d(q.center, e.center) < 14));
+    if (exposed.length) {
+      const target = Commander.nearest(exposed, sq.center);
+      if (this.trait === 'cunning' && d2d(target.center, sq.center) > 30) {
+        const fp = this.flankPoint(target, sq.center, my);
+        return { kind: 'flank', mode: 'move', x: fp.x, z: fp.z, then: { kind: 'charge', mode: 'charge', target }, why: `в обход, цель — ${target.name}` };
+      }
+      return { kind: 'charge', mode: 'charge', target, why: `${target.name} остались без прикрытия` };
+    }
+    const pinned = en.filter((e) => e.engaged && !e.t.ranged);
+    if (pinned.length) {
+      const target = Commander.nearest(pinned, sq.center);
+      return { kind: 'charge', mode: 'charge', target, why: `${target.name} связаны боем — удар во фланг` };
+    }
+    if (this.stance === 'defend') {
+      const inf = my.filter((q) => !q.t.ranged && !q.t.mount), c = Commander.center(inf) || sq.center;
+      const back = norm2(c.x - ec.x, c.z - ec.z), side = sq.center.x >= c.x ? 1 : -1;
+      const p = clampField({ x: c.x + back.x * 10 - back.z * 14 * side, z: c.z + back.z * 10 + back.x * 14 * side });
+      return { kind: 'reserve', mode: 'hold', x: p.x, z: p.z, leash: 18, why: 'ждать, пока враг ввяжется' };
+    }
+    return { kind: 'advance', mode: 'advance' };
+  }
+
+  // ---------------------------------------------------------------- пехота
+
+  decideInfantry(sq, my, en, ec) {
+    const B = this.battle;
+    // 1. Закрыть стрелков от конницы (варвары — лучше всех)
+    for (const xb of my.filter((q) => q.t.ranged)) {
+      const cav = en.find((e) => e.t.mount && d2d(e.center, xb.center) < 34);
+      if (!cav || d2d(sq.center, xb.center) > 40) continue;
+      const barbNear = my.some((q) => q.type === 1 && q !== sq && d2d(q.center, xb.center) < 40 && !this.claims.has('screen:' + xb.id));
+      if (this.claims.has('screen:' + xb.id)) continue;
+      if (sq.type === 1 || !barbNear) {
+        const v = norm2(cav.center.x - xb.center.x, cav.center.z - xb.center.z);
+        return { kind: 'screen', mode: 'move', claim: 'screen:' + xb.id, ...clampField({ x: xb.center.x + v.x * 6, z: xb.center.z + v.z * 6 }), then: { kind: 'hold', mode: 'hold', leash: 12, claim: 'screen:' + xb.id }, why: `${cav.name} угрожают стрелкам (${xb.name})` };
+      }
+    }
+    // 2. Засада в низине (хитрый, в начале боя)
+    if (this.trait === 'cunning' && !this.ambushSet && B.time < 30 && !sq.engaged) {
+      const hollow = world.an.low
+        .filter((l) => d2d(l, sq.center) < 45 && d2d(l, ec) < d2d(sq.center, ec) + 5 && d2d(l, ec) > 25)
+        .sort((a, b) => b.depth - a.depth)[0];
+      if (hollow) {
+        this.ambushSet = true;
+        return { kind: 'ambush', mode: 'move', x: hollow.x, z: hollow.z, then: { kind: 'ambush', mode: 'ambush', leash: 14 }, why: 'затаиться в низине и ждать' };
+      }
+    }
+    // 3. Оборона: занять холм и ждать
+    if (this.stance === 'defend' && !sq.engaged) {
+      if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0) {
+        const h = this.highNear(sq.center, 32, en, ec);
+        if (h) return { kind: 'high', mode: 'move', x: h.x, z: h.z, then: { kind: 'hold', mode: 'hold', leash: 11 }, why: 'пусть враг лезет вверх' };
+      }
+      if (sq.order.mode === 'advance') return { kind: 'hold', mode: 'hold', leash: 11, why: 'держим строй' };
+      return null;
+    }
+    // 4. Свои связали врага боем — обойти и ударить во фланг
+    if (!sq.engaged && (this.trait !== 'fierce' || Math.random() < 0.3)) {
+      const pinned = en.filter((e) => e.engaged && !e.t.ranged && d2d(e.center, sq.center) > 14 && d2d(e.center, sq.center) < 70 && !this.claims.has('flank:' + e.id));
+      if (pinned.length) {
+        const target = Commander.nearest(pinned, sq.center);
+        const fp = this.flankPoint(target, sq.center, my);
+        return { kind: 'flank', mode: 'move', claim: 'flank:' + target.id, x: fp.x, z: fp.z, then: { kind: 'charge', mode: 'charge', target, claim: 'flank:' + target.id }, why: `${target.name} связаны боем` };
+      }
+    }
+    // 5. Враг засел на холме: не лезть в лоб, если есть чем стрелять
+    const target = Commander.nearest(en, sq.center);
+    if (this.trait !== 'fierce' && world.prominenceAt(target.center.x, target.center.z) > 1.2 && !sq.engaged) {
+      const myR = Commander.count(my, (q) => q.t.ranged), enR = Commander.count(en, (q) => q.t.ranged);
+      if (myR > enR && sq.order.kind !== 'hold') return { kind: 'hold', mode: 'hold', leash: 10, why: `${target.name} на холме — пусть их выбьют арбалеты` };
+      if (myR <= enR && sq.order.kind !== 'flank') {
+        const fp = this.flankPoint(target, sq.center, my);
+        return { kind: 'flank', mode: 'move', x: fp.x, z: fp.z, then: { kind: 'charge', mode: 'charge', target }, why: `${target.name} на холме — обойти склон` };
+      }
+    }
+    return sq.order.mode === 'advance' || sq.order.mode === 'charge' ? null : { kind: 'advance', mode: 'advance', why: 'в атаку' };
+  }
+
+  // ---------------------------------------------------------------- рельеф глазами полководца
+
+  highNear(p, maxD, en, ec) {
+    const dp = d2d(p, ec);
+    let best = null, bs = Infinity;
+    for (const h of world.an.high) {
+      const d = d2d(h, p);
+      if (d > maxD || en.some((e) => d2d(e.center, h) < 14)) continue;
+      if (d2d(h, ec) < dp - 25) continue; // не лезть к врагу в пасть
+      const s = d - h.prom * 3;
+      if (s < bs) { bs = s; best = h; }
+    }
+    return best;
+  }
+
+  /** Укрытие: низина или обратная сторона ограды, не ближе к врагу. */
+  coverFor(sq, ec) {
+    const dNow = d2d(sq.center, ec), cands = [];
+    for (const l of world.an.low) cands.push({ x: l.x, z: l.z, wall: false });
+    for (const w of world.features.walls) {
+      const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, n = norm2(-(w.bz - w.az), w.bx - w.ax);
+      const side = (n.x * (mx - ec.x) + n.z * (mz - ec.z)) > 0 ? 1 : -1;
+      cands.push({ x: mx + n.x * 1.6 * side, z: mz + n.z * 1.6 * side, wall: true });
+    }
+    let best = null, bd = Infinity;
+    for (const c of cands) {
+      const d = d2d(c, sq.center);
+      if (d > 32 || d2d(c, ec) < dNow - 8) continue;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
+  flankPoint(target, from, my) {
+    const mc = Commander.center(my) || from;
+    const v = norm2(target.center.x - mc.x, target.center.z - mc.z), perp = { x: -v.z, z: v.x };
+    const side = Math.sign(perp.x * (from.x - target.center.x) + perp.z * (from.z - target.center.z)) || 1;
+    return clampField({ x: target.center.x + perp.x * 16 * side + v.x * 6, z: target.center.z + perp.z * 16 * side + v.z * 6 });
+  }
+
+  differs(cur, next) {
+    if (cur.kind !== next.kind) return true;
+    if (next.target !== cur.target) return true;
+    if (next.x != null && cur.x != null && Math.hypot(next.x - cur.x, next.z - cur.z) > 8) return true;
+    return false;
+  }
+
+  /** Рядом — приказ голосом, далеко — с гонцом (его могут перехватить). */
+  send(sq, order) {
+    const B = this.battle;
+    if (d2d(this.unit.pos, sq.center) < 16) {
+      B.applyOrder(sq, order);
+      this.outbox.push({ sq, order, via: 'voice' });
+      return true;
+    }
+    const busy = B.units.filter((m) => m.alive && m.carry && m.carry.cmd === this && !m.carry.delivered).length;
+    if (busy >= 5) return false;
+    sq.pending = order;
+    B.spawnMessenger(this, sq, order);
+    this.outbox.push({ sq, order, via: 'messenger' });
+    return true;
+  }
+}
+
+// ------------------------------------------------------------------ камера и управление
+
+class CameraRig {
+  constructor(cam, dom) {
+    this.cam = cam; this.dom = dom;
+    this.yaw = 0; this.pitch = 34 * DEG; this.dist = 85; this.target = new THREE.Vector3(0, 0, -48);
+    this.goal = { yaw: this.yaw, pitch: this.pitch, dist: this.dist, target: this.target.clone() };
+    this.groundY = 0;
+    this.cinematic = false;
+    this.keys = new Set();
+    this.pointers = new Map();
+    this.multi = false;
+    this.onTap = null; this.onHover = null;
+    this.ray = new THREE.Raycaster();
+    this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.bind();
+  }
+
+  lookAt(x, z, yaw, pitch, dist, instant) {
+    Object.assign(this.goal, { yaw, pitch, dist });
+    this.goal.target.set(x, 0, z);
+    if (instant) { this.yaw = yaw; this.pitch = pitch; this.dist = dist; this.target.copy(this.goal.target); }
+  }
+
+  ndc(x, y) {
+    const r = this.dom.getBoundingClientRect();
+    return new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+  }
+
+  groundPoint(x, y) {
+    this.ray.setFromCamera(this.ndc(x, y), this.cam);
+    return world.raycast(this.ray.ray);
+  }
+
+  /** «Схватить землю» и протащить её за пальцем или мышью. */
+  dragPan(x0, y0, x1, y1) {
+    this.plane.constant = -this.groundY;
+    const a = new THREE.Vector3(), b = new THREE.Vector3();
+    this.ray.setFromCamera(this.ndc(x0, y0), this.cam);
+    if (!this.ray.ray.intersectPlane(this.plane, a)) return;
+    this.ray.setFromCamera(this.ndc(x1, y1), this.cam);
+    if (!this.ray.ray.intersectPlane(this.plane, b)) return;
+    const d = a.sub(b); d.y = 0;
+    d.clampLength(0, this.dist * 0.5 + 5);
+    this.goal.target.add(d); this.target.add(d);
+    this.cinematic = false;
+  }
+
+  bind() {
+    const el = this.dom;
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => {
+      el.setPointerCapture(e.pointerId);
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), button: e.button, type: e.pointerType, moved: false });
+      if (this.pointers.size > 1) this.multi = true;
+    });
+    el.addEventListener('pointermove', (e) => {
+      const p = this.pointers.get(e.pointerId);
+      if (!p) { if (e.pointerType === 'mouse' && this.onHover) this.onHover(e.clientX, e.clientY); return; }
+      const slop = p.type === 'touch' ? 14 : 6;
+      if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > slop) p.moved = true;
+      if (this.pointers.size >= 2) this.gesture(e.pointerId, e.clientX, e.clientY);
+      else if (p.moved) {
+        if (p.type === 'mouse' && p.button === 2) {
+          this.goal.yaw -= (e.clientX - p.x) * 0.005;
+          this.goal.pitch = clamp(this.goal.pitch + (e.clientY - p.y) * 0.004, 10 * DEG, 86 * DEG);
+          this.cinematic = false;
+        } else this.dragPan(p.x, p.y, e.clientX, e.clientY);
+      }
+      p.x = e.clientX; p.y = e.clientY;
+      if (e.pointerType === 'mouse' && this.onHover) this.onHover(e.clientX, e.clientY);
+    });
+    const end = (e) => {
+      const p = this.pointers.get(e.pointerId);
+      if (!p) return;
+      this.pointers.delete(e.pointerId);
+      const tap = !p.moved && !this.multi && performance.now() - p.t < 650 && (p.type !== 'mouse' || p.button === 0);
+      if (this.pointers.size === 0) this.multi = false;
+      if (tap && e.type === 'pointerup' && this.onTap) this.onTap(e.clientX, e.clientY);
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const s = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      this.goal.dist = clamp(this.goal.dist * Math.pow(1.0015, s), 6, 170);
+    }, { passive: false });
+    addEventListener('keydown', (e) => { if (!e.target.closest?.('input,textarea')) this.keys.add(e.code); });
+    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('blur', () => this.keys.clear());
+  }
+
+  gesture(id, x, y) {
+    const ids = [...this.pointers.keys()].slice(0, 2);
+    const [a, b] = ids.map((k) => this.pointers.get(k));
+    const na = id === ids[0] ? { x, y } : a, nb = id === ids[1] ? { x, y } : b;
+    const d0 = Math.hypot(b.x - a.x, b.y - a.y), d1 = Math.hypot(nb.x - na.x, nb.y - na.y);
+    if (d0 > 20 && d1 > 20) this.goal.dist = clamp(this.goal.dist * d0 / d1, 6, 170);
+    const a0 = Math.atan2(b.y - a.y, b.x - a.x), a1 = Math.atan2(nb.y - na.y, nb.x - na.x);
+    let da = a1 - a0; da = Math.atan2(Math.sin(da), Math.cos(da));
+    this.goal.yaw += da;
+    const dyA = na.y - a.y, dyB = nb.y - b.y;
+    if (dyA * dyB > 0) this.goal.pitch = clamp(this.goal.pitch + (dyA + dyB) * 0.5 * 0.004, 10 * DEG, 86 * DEG);
+    a.moved = b.moved = true;
+    this.cinematic = false;
+  }
+
+  update(dt, focus) {
+    const g = this.goal, k = this.keys;
+    const fx = Math.sin(g.yaw), fz = Math.cos(g.yaw);
+    let mx = 0, mz = 0;
+    if (k.has('KeyW') || k.has('ArrowUp')) mz += 1;
+    if (k.has('KeyS') || k.has('ArrowDown')) mz -= 1;
+    if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
+    if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
+    if (mx || mz) {
+      const sp = (g.dist * 0.9 + 10) * dt;
+      // вправо = (-cos, 0, sin) для камеры, смотрящей вдоль (sin, 0, cos)
+      g.target.x += (fx * mz - fz * mx) * sp;
+      g.target.z += (fz * mz + fx * mx) * sp;
+      this.cinematic = false;
+    }
+    if (k.has('KeyQ')) g.yaw += 1.6 * dt;
+    if (k.has('KeyE')) g.yaw -= 1.6 * dt;
+    if (k.has('KeyR')) g.pitch = clamp(g.pitch + 0.8 * dt, 10 * DEG, 86 * DEG);
+    if (k.has('KeyF')) g.pitch = clamp(g.pitch - 0.8 * dt, 10 * DEG, 86 * DEG);
+
+    if (this.cinematic) {
+      g.yaw += 0.12 * dt;
+      if (focus) g.target.lerp(focus, 1 - Math.exp(-0.8 * dt));
+    }
+    const lim = FIELD + 25;
+    g.target.x = clamp(g.target.x, -lim, lim); g.target.z = clamp(g.target.z, -lim, lim);
+
+    const s = 1 - Math.exp(-12 * dt);
+    let dy = g.yaw - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.yaw += dy * s;
+    this.pitch += (g.pitch - this.pitch) * s;
+    this.dist += (g.dist - this.dist) * s;
+    this.target.x += (g.target.x - this.target.x) * s;
+    this.target.z += (g.target.z - this.target.z) * s;
+    this.groundY += (world.heightAt(this.target.x, this.target.z) - this.groundY) * (1 - Math.exp(-6 * dt));
+
+    const cp = Math.cos(this.pitch);
+    const look = new THREE.Vector3(this.target.x, this.groundY + 1, this.target.z);
+    const pos = look.clone().sub(new THREE.Vector3(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp).multiplyScalar(this.dist));
+    const minY = world.heightAt(pos.x, pos.z) + 1.5;
+    if (pos.y < minY) pos.y = minY;
+    this.cam.position.copy(pos);
+    this.cam.lookAt(look);
+  }
+}
+
+// ------------------------------------------------------------------ сцена
+
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW_END, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, LOW_END ? 1.25 : 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(48, 1, 0.5, 3000);
+const SKY = new Sky();
+SKY.scale.setScalar(2500);
+scene.add(SKY);
+const PMREM = new THREE.PMREMGenerator(renderer);
+
+const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(LOW_END ? 1024 : 2048, LOW_END ? 1024 : 2048);
+Object.assign(sunLight.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 500 });
+sunLight.shadow.bias = -0.0004;
+sunLight.shadow.normalBias = 0.05;
+scene.add(sunLight, sunLight.target);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x445533, 0.35);
+scene.add(hemiLight);
+
+const unitLayer = new THREE.Group();
+scene.add(unitLayer);
+const world = new World();
+const battle = new Battle();
+const rig = new CameraRig(camera, canvas);
+
+// Кольца цвета команды под солдатами
+const rings = new THREE.InstancedMesh(new THREE.RingGeometry(0.78, 1, 28).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), 1000);
+rings.count = 0; rings.frustumCulled = false; rings.renderOrder = 1;
+scene.add(rings);
+const ringColors = TEAM.map((t) => new THREE.Color(t.css));
+const ringHidden = TEAM.map((t) => new THREE.Color(t.css).lerp(new THREE.Color(0x222222), 0.65));
+const ringRout = new THREE.Color(0xf2e6b0);
+
+function updateRings() {
+  const m4 = new THREE.Matrix4();
+  let n = 0;
+  for (const u of battle.units) {
+    if (!u.alive || n >= 1000) continue;
+    const k = u.t.radius * 1.25;
+    m4.makeScale(k, 1, k).setPosition(u.pos.x, u.pos.y + 0.07, u.pos.z);
+    rings.setMatrixAt(n, m4);
+    const sq = u.squad;
+    const col = sq && sq.hidden ? ringHidden[u.team] : sq && sq.order.mode === 'rout' ? ringRout : ringColors[u.team];
+    rings.setColorAt(n, col);
+    n++;
+  }
+  rings.count = n;
+  rings.instanceMatrix.needsUpdate = true;
+  if (rings.instanceColor) rings.instanceColor.needsUpdate = true;
+}
+
+// Призрак отряда под курсором
+const ghost = new THREE.InstancedMesh(new THREE.CircleGeometry(0.55, 18).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5, depthWrite: false }), 24);
+ghost.count = 0; ghost.frustumCulled = false; ghost.renderOrder = 2;
+scene.add(ghost);
+
+// ------------------------------------------------------------------ состояние игры
+
+const game = {
+  phase: 'loading', type: 0, team: 0, eraser: false, speed: 1, paused: false,
+  winner: -1, battleTime: 0, resultDelay: 0, seed: 1, style: null, lastBiome: -1,
+};
+
+function newMap(seed) {
+  game.seed = seed ?? ((Math.random() * 99999) | 1);
+  const r = mulberry32(game.seed);
+  let biome = (r() * BIOMES.length) | 0;
+  if (biome === game.lastBiome) biome = (biome + 1 + ((r() * (BIOMES.length - 1)) | 0)) % BIOMES.length;
+  game.lastBiome = biome;
+  game.style = makeStyle(biome, (r() * TIMES.length) | 0);
+  world.generate(game.seed, game.style, ASSETS);
+  battle.resetToPlan();
+  game.phase = 'setup';
+  rig.cinematic = false;
+  rig.lookAt(0, -48, 0, 34 * DEG, 85, true);
+  $('mapName').textContent = game.style.title + ' · карта №' + game.seed;
+  updateWind();
+  refreshUI();
+}
+
+function startBattle() {
+  if (battle.planCount[0] === 0 || battle.planCount[1] === 0) { toast('Нужны обе армии: поставьте и синих, и красных'); return; }
+  if (game.phase !== 'setup') battle.resetToPlan();
+  $('chronicle').innerHTML = '';
+  battle.startFight();
+  Object.assign(game, { phase: 'fight', paused: false, speed: 1, winner: -1, battleTime: 0, resultDelay: 0, eraser: false });
+  ghost.count = 0;
+  refreshUI();
+}
+
+function stopBattle() {
+  battle.resetToPlan();
+  game.phase = 'setup';
+  game.paused = false;
+  rig.cinematic = false;
+  refreshUI();
+}
+
+function placeAt(p) {
+  if (game.phase !== 'setup' || !p) return;
+  if (game.eraser) {
+    if (battle.removeNear(p.x, p.z, 4) === 0) toast('Здесь никого нет');
+    refreshUI();
+    return;
+  }
+  if (!World.inField(p.x, p.z, 1)) { toast('Ставить отряды можно только на поле боя'); return; }
+  const n = battle.placeSquad(game.type, game.team, p.x, p.z, game.team === 0 ? 0 : Math.PI);
+  if (n === 0) toast(battle.units.length >= MAX_UNITS ? `Предел — ${MAX_UNITS} солдат` : 'Здесь тесно — выберите другое место');
+  refreshUI();
+}
+
+rig.onTap = (x, y) => placeAt(rig.groundPoint(x, y));
+rig.onHover = (x, y) => {
+  if (game.phase !== 'setup' || game.eraser) { ghost.count = 0; return; }
+  const p = rig.groundPoint(x, y);
+  if (!p || !World.inField(p.x, p.z, 1)) { ghost.count = 0; return; }
+  const t = TYPES[game.type], yaw = game.team === 0 ? 0 : Math.PI, cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const m4 = new THREE.Matrix4();
+  let i = 0;
+  for (let r = 0; r < t.rows; r++) for (let c = 0; c < t.cols; c++) {
+    const ox = (c - (t.cols - 1) / 2) * t.spacing, oz = -(r - (t.rows - 1) / 2) * t.spacing;
+    const gx = p.x + ox * cos + oz * sin, gz = p.z - ox * sin + oz * cos;
+    const k = t.radius * 1.6;
+    m4.makeScale(k, 1, k).setPosition(gx, world.heightAt(gx, gz) + 0.06, gz);
+    ghost.setMatrixAt(i++, m4);
+  }
+  ghost.count = i;
+  ghost.instanceMatrix.needsUpdate = true;
+  ghost.material.color.set(TEAM[game.team].css);
+};
+
+// ------------------------------------------------------------------ интерфейс
+
+function toast(text, ms = 2600) {
+  const el = $('toast');
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => (el.hidden = true), ms);
+}
+
+function buildUI() {
+  const cards = $('cards');
+  TYPES.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.className = 'card';
+    b.id = 'type-' + t.key;
+    b.innerHTML = `<span class="card-key">${i + 1}</span><b>${t.name}</b><small>${t.hp} ОЗ · урон ${t.dmg}${t.ranged ? ' · ' + t.range + ' м' : ''}</small><small class="note">${t.note}</small>`;
+    b.onclick = () => { game.type = i; game.eraser = false; refreshUI(); };
+    cards.appendChild(b);
+  });
+  TEAM.forEach((tm, i) => { $('team-' + i).onclick = () => { game.team = i; game.eraser = false; refreshUI(); }; });
+  $('eraser').onclick = () => { game.eraser = !game.eraser; ghost.count = 0; refreshUI(); };
+  $('fight').onclick = startBattle;
+  $('newMap').onclick = () => { newMap(); toast('Карта: ' + game.style.title); };
+  $('random').onclick = () => { battle.randomArmies(); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  $('clear').onclick = () => { battle.clearAll(); refreshUI(); };
+  $('pause').onclick = () => { game.paused = !game.paused; refreshUI(); };
+  [['slow', 0.25], ['normal', 1], ['fast', 2]].forEach(([id, s]) => ($(id).onclick = () => { game.speed = s; game.paused = false; refreshUI(); }));
+  $('orbit').onclick = () => { rig.cinematic = !rig.cinematic; refreshUI(); };
+  $('stop').onclick = stopBattle;
+  $('rematch').onclick = () => { startBattle(); };
+  $('edit').onclick = stopBattle;
+  $('resultMap').onclick = () => { stopBattle(); newMap(); };
+  $('cmdToggle').onclick = () => { battle.useCommanders = !battle.useCommanders; refreshUI(); };
+  for (const id of ['helpBtn', 'helpBtn2']) $(id).onclick = () => { $('helpBox').hidden = false; game.pausedByHelp = game.phase === 'fight' && !game.paused; if (game.pausedByHelp) game.paused = true; refreshUI(); };
+  $('helpClose').onclick = () => { $('helpBox').hidden = true; if (game.pausedByHelp) game.paused = false; game.pausedByHelp = false; refreshUI(); };
+  battle.onLog = pushLog;
+
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && game.phase === 'fight') { game.paused = !game.paused; refreshUI(); e.preventDefault(); }
+    if (e.code === 'Tab') { rig.cinematic = !rig.cinematic; refreshUI(); e.preventDefault(); }
+    if (game.phase === 'setup' && /^Digit[1-4]$/.test(e.code)) { game.type = +e.code.slice(5) - 1; game.eraser = false; refreshUI(); }
+    if (game.phase === 'setup' && e.code === 'KeyT') { game.team = 1 - game.team; refreshUI(); }
+    if (game.phase === 'setup' && e.code === 'Enter') startBattle();
+  });
+}
+
+const pressed = (id, on) => $(id).setAttribute('aria-pressed', on ? 'true' : 'false');
+
+function refreshUI() {
+  const setup = game.phase === 'setup', fight = game.phase === 'fight', result = game.phase === 'result';
+  $('setupTop').hidden = !setup; $('setupBar').hidden = !setup;
+  $('fightTop').hidden = setup; $('fightBar').hidden = !fight;
+  $('result').hidden = !result;
+  TYPES.forEach((t, i) => pressed('type-' + t.key, !game.eraser && game.type === i));
+  TEAM.forEach((_, i) => pressed('team-' + i, game.team === i));
+  pressed('eraser', game.eraser);
+  document.body.dataset.team = game.team;
+  $('fight').disabled = !(battle.planCount[0] > 0 && battle.planCount[1] > 0);
+  pressed('pause', game.paused); $('pause').textContent = game.paused ? 'Дальше' : 'Пауза';
+  pressed('slow', game.speed === 0.25); pressed('normal', game.speed === 1); pressed('fast', game.speed === 2);
+  pressed('orbit', rig.cinematic);
+  pressed('cmdToggle', battle.useCommanders);
+  $('cmdToggle').textContent = battle.useCommanders ? 'Полководцы: есть' : 'Полководцы: нет';
+  $('chronicle').hidden = setup;
+  if (setup && battle.useCommanders && battle.planCount[0] && battle.planCount[1]) {
+    const a = battle.commanderSpec(0), b = battle.commanderSpec(1);
+    $('cmdInfo').textContent = `Синих ведёт ${a.name} (${TRAITS[a.trait].name}), красных — ${b.name} (${TRAITS[b.trait].name})`;
+  } else $('cmdInfo').textContent = setup ? 'Без полководцев отряды бьются кто во что горазд' : '';
+  $('hint').textContent = game.eraser ? 'Нажмите на солдат, чтобы убрать отряд'
+    : IS_TOUCH ? 'Нажмите на землю — поставить отряд. Один палец двигает карту, два — зум и поворот'
+    : 'Клик — поставить отряд · WASD — двигать · правая кнопка — вращать · колесо — зум · T — сменить армию';
+  if (result) {
+    const w = game.winner;
+    $('resultTitle').textContent = w === 0 ? 'Победа синих' : w === 1 ? 'Победа красных' : 'Ничья';
+    $('resultTitle').dataset.team = w;
+    $('resultText').textContent = w >= 0
+      ? `Выжило ${battle.alive[w]} из ${battle.planCount[w]} · бой длился ${Math.round(game.battleTime)} с`
+      : 'Никто не выжил';
+  }
+  updateTally();
+}
+
+function updateTally() {
+  const f = game.phase !== 'setup';
+  const a = f ? battle.alive : battle.planCount;
+  $('nBlue').textContent = f ? `${a[0]} / ${battle.planCount[0]}` : a[0];
+  $('nRed').textContent = f ? `${a[1]} / ${battle.planCount[1]}` : a[1];
+  const total = Math.max(1, a[0] + a[1]);
+  $('barBlue').style.width = (a[0] / total * 100) + '%';
+  $('barRed').style.width = (a[1] / total * 100) + '%';
+}
+
+// ------------------------------------------------------------------ летопись, подписи, ветер
+
+const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+function pushLog(e) {
+  const list = $('chronicle');
+  const li = document.createElement('li');
+  li.dataset.team = e.team;
+  li.innerHTML = `<time>${fmtTime(e.t)}</time><span></span>`;
+  li.lastChild.textContent = e.text;
+  list.prepend(li);
+  while (list.children.length > (innerHeight < 500 ? 3 : 6)) list.lastChild.remove();
+}
+
+const labelPool = new Map();
+const projV = new THREE.Vector3();
+
+function labelFor(key, cls) {
+  let el = labelPool.get(key);
+  if (!el) { el = document.createElement('div'); el.className = 'olabel ' + cls; $('labels').appendChild(el); labelPool.set(key, el); }
+  return el;
+}
+
+function placeLabel(el, x, y, z, text, opacity) {
+  projV.set(x, y, z).project(camera);
+  if (projV.z > 1 || Math.abs(projV.x) > 1.1 || Math.abs(projV.y) > 1.1) { el.hidden = true; return; }
+  el.hidden = false;
+  if (el.textContent !== text) el.textContent = text;
+  el.style.opacity = opacity;
+  el.style.transform = `translate(${(projV.x + 1) / 2 * innerWidth}px, ${(1 - projV.y) / 2 * innerHeight}px) translate(-50%, -100%)`;
+}
+
+/** Над отрядами — свежие приказы, над полководцами — имя. */
+function updateLabels() {
+  const seen = new Set();
+  if (game.phase !== 'setup') {
+    for (const sq of battle.squads) {
+      if (sq.alive === 0) continue;
+      if (sq.special) {
+        const c = battle.commanders[sq.team];
+        if (!c || !c.unit.alive) continue;
+        const el = labelFor('c' + sq.team, 'cmd team' + sq.team);
+        placeLabel(el, c.unit.pos.x, c.unit.pos.y + 4.9, c.unit.pos.z, '★ ' + c.name, 1);
+        seen.add('c' + sq.team);
+        continue;
+      }
+      let text = null, op = 1;
+      if (sq.labelT > 0) { text = ORDER_TEXT[sq.order.kind] || ''; op = Math.min(1, sq.labelT); }
+      else if (sq.hidden) { text = 'затаились'; op = 0.7; }
+      if (!text) continue;
+      const el = labelFor(sq.id, 'team' + sq.team);
+      placeLabel(el, sq.center.x, sq.center.y + (sq.t.mount ? 4 : 3.2), sq.center.z, text, op);
+      seen.add(sq.id);
+    }
+  }
+  for (const [k, el] of labelPool) if (!seen.has(k)) el.hidden = true;
+}
+
+function updateWind() {
+  const w = world.wind, s = w.length();
+  $('windText').textContent = s < 0.5 ? 'Безветрие' : `Ветер ${s.toFixed(0)} м/с`;
+  $('windArrow').hidden = s < 0.5;
+  const low = game.style && game.style.elev < 26;
+  $('sunText').hidden = !low;
+}
+
+/** Стрелка ветра повёрнута относительно камеры: вверх = от зрителя вглубь сцены. */
+function updateWindArrow() {
+  const w = world.wind, yaw = rig.yaw;
+  const sx = -w.x * Math.cos(yaw) + w.y * Math.sin(yaw), sy = w.x * Math.sin(yaw) + w.y * Math.cos(yaw);
+  $('windArrow').style.transform = `rotate(${Math.atan2(sx, sy) * 180 / Math.PI}deg)`;
+}
+
+// ------------------------------------------------------------------ цикл
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+let last = performance.now(), frameNo = 0, tallyT = 0;
+const frustum = new THREE.Frustum(), projView = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 2.5);
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  if (game.phase === 'loading') return;
+  frameNo++;
+
+  rig.update(dt, rig.cinematic ? battle.centroid() : null);
+
+  const simDt = game.phase === 'setup' || game.paused ? 0 : dt * game.speed;
+  const steps = Math.max(1, Math.ceil(simDt / 0.034));
+  for (let i = 0; i < steps; i++) battle.tick(simDt / steps);
+  if (game.phase === 'fight') {
+    game.battleTime += simDt;
+    if (battle.alive[0] === 0 || battle.alive[1] === 0) {
+      game.resultDelay += simDt;
+      if (game.resultDelay > 1.5) {
+        game.winner = battle.alive[0] > 0 ? 0 : battle.alive[1] > 0 ? 1 : -1;
+        game.phase = 'result';
+        rig.cinematic = true;
+        refreshUI();
+      }
+    }
+  }
+
+  // Анимации: дальние и невидимые солдаты обновляются реже
+  const animDt = game.phase === 'setup' ? dt : game.paused ? 0 : dt * game.speed;
+  projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(projView);
+  const cp = camera.position, state = game.phase === 'result' ? 'cheer' : null;
+  for (const u of battle.units) {
+    const v = u.view;
+    if (u.alive) animate(u, state && u.team === game.winner ? 'cheer' : null);
+    v.accum += animDt;
+    const d2 = cp.distanceToSquared(u.pos);
+    sphere.center.copy(u.pos);
+    let every = !frustum.intersectsSphere(sphere) ? 8 : d2 < 70 * 70 ? 1 : d2 < 140 * 140 ? 2 : 4;
+    if (!u.alive && u.deadT > 3) every = 0;
+    if (every && (frameNo + v.frame) % every === 0) { for (const m of v.mixers) m.update(v.accum); v.accum = 0; }
+  }
+
+  // Тени следуют за камерой
+  const tgt = rig.target;
+  sunLight.target.position.set(tgt.x, rig.groundY, tgt.z);
+  sunLight.position.copy(sunLight.target.position).addScaledVector(world.sunDir, 200);
+  const sh = clamp(rig.dist * 0.9, 45, 120);
+  const sc = sunLight.shadow.camera;
+  if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
+
+  updateRings();
+  for (const c of battle.commanders) if (c && c.unit.view.banner) waveBanner(c.unit.view.banner, now / 1000, world.wind.length());
+  updateLabels();
+  updateWindArrow();
+  if ((tallyT += dt) > 0.12) { tallyT = 0; updateTally(); }
+  renderer.render(scene, camera);
+}
+
+// ------------------------------------------------------------------ запуск
+
+async function start(saved) {
+  resize();
+  buildUI();
+  requestAnimationFrame(frame);
+  try {
+    await loadAssets((p) => { $('loadBar').style.width = Math.round(p * 100) + '%'; });
+  } catch (err) {
+    $('loadText').textContent = 'Не удалось загрузить модели: ' + (err?.message || err);
+    return;
+  }
+  initSharedWorldResources();
+  battle.bolts.init();
+  const probe = ASSETS.bolt; // наконечник болта: выбираем сторону, где модель шире у кончика
+  BOLT_TIP = probe.tip || 1;
+  newMap(saved?.seed);
+  if (saved?.plan?.length) battle.setPlan(saved.plan);
+  else battle.randomArmies();
+  refreshUI();
+  $('loading').hidden = true;
+  toast('Карта: ' + game.style.title + '. Расставьте армии и жмите «В бой!»', 4200);
+}
+
+window.claude?.hot?.snapshot?.(() => ({ seed: game.seed, plan: battle.plan }));
+if (window.claude?.hot?.ready) window.claude.hot.ready(start);
+else start(window.claude?.hot?.data ?? {});
+window.sechaDebug = { rig, battle, game, world, ASSETS, camera };
+// Отладка: прокрутить симуляцию вперёд без отрисовки (для проверки в среде без полноценного rAF)
+window.sechaDebug.step = (sec, dt = 1 / 30) => {
+  for (let t = 0; t < sec; t += dt) {
+    battle.tick(game.phase === 'setup' ? 0 : dt);
+    if (game.phase === 'fight') game.battleTime += dt;
+    for (const u of battle.units) { if (u.alive) animate(u, null); for (const m of u.view.mixers) m.update(dt); }
+  }
+  updateTally();
+  return { alive: battle.alive.slice(), bolts: battle.bolts.list.length };
+};
+
+</script>
