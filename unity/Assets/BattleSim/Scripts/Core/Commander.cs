@@ -354,7 +354,7 @@ namespace BattleSim.Core
         Order DecideRanged(Squad sq, List<Squad> my, List<Squad> en, V2 ec)
         {
             var B = Battle;
-            var threat = en.FirstOrDefault(e => !e.T.Ranged && D(e.C, sq.C) < 20);
+            var threat = en.FirstOrDefault(e => !e.T.Ranged && D(e.C, sq.C) < 20 && MathF.Abs(e.Center.y - sq.Center.y) < 3);
             if (threat != null && !my.Any(q => !q.T.Ranged && !q.T.Mount && q.Order.Mode != Mode.Rout && D(q.C, sq.C) < 12))
             {
                 var guards = my.Where(q => !q.T.Ranged && !q.T.Mount && q.Order.Mode != Mode.Rout).ToList();
@@ -394,6 +394,12 @@ namespace BattleSim.Core
                 float d = D(new V2(h.X, h.Z), tc);
                 if (d < range * 0.95f && d > range * 0.35f) cands.Add(new V2(h.X, h.Z));
             }
+            // боевой ход стен и башни — лучшие места для стрелков
+            foreach (var ws in W.WallSpots)
+            {
+                float d = D(ws.P, tc);
+                if (d < range * 1.05f && d > range * 0.2f && ws.Out.x * (tc.x - ws.P.x) + ws.Out.z * (tc.z - ws.P.z) > 0) cands.Add(ws.P);
+            }
             var melee = en.Where(e => !e.T.Ranged).ToList();
             FirePos best = null;
             float bs = float.NegativeInfinity;
@@ -404,7 +410,7 @@ namespace BattleSim.Core
                 float dt = D(p, tc);
                 if (dt > range * 0.92f || dt < range * 0.35f) continue;
                 float gy = W.GroundAt(p.x, p.z);
-                if (!W.Los(p.x, gy + 1.4f, p.z, tc.x, ty + 1.0f, tc.z)) continue;
+                if (!W.Los(p.x, gy + 1.5f, p.z, tc.x, ty + 1.0f, tc.z, 2.5f)) continue;
                 float s = M.Clamp((gy - ty) * 1.2f, -6, 10);
                 float danger = float.PositiveInfinity;
                 foreach (var e in melee) danger = MathF.Min(danger, D(e.C, p));

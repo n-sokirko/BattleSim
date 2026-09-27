@@ -104,6 +104,7 @@ namespace BattleSim
             string shots = Arg("-shots");
             if (shots != null)
             {
+                if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-uncapped") >= 0) Application.targetFrameRate = -1;
                 if (Arg("-map") != null) MapSel = int.Parse(Arg("-map"));
                 if (Arg("-size") != null) ArmySize = int.Parse(Arg("-size"));
                 if (Arg("-seed") != null) Seed = int.Parse(Arg("-seed"));
@@ -131,6 +132,7 @@ namespace BattleSim
             yield return new WaitForSeconds(1f);
             StartBattle();
             Speed = 2;
+            Perf.Clear();
             foreach (int t in new[] { 8, 20, 35 })
             {
                 while (BattleTime < t && Phase == Phase.Fight) yield return null;
@@ -147,11 +149,36 @@ namespace BattleSim
             yield return new WaitForSeconds(1f);
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
+                $"perf: {Perf}\n" +
                 string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")));
             Application.Quit();
         }
 
         public void ShowToast(string text, float sec = 2.6f) { Toast = text; ToastT = sec; }
+
+        const float SimStep = 1f / 30;
+        float simAcc;
+        /// <summary>Доля пути между прошлым и текущим шагом расчёта — для плавной отрисовки.</summary>
+        public static float Alpha = 1;
+
+        /// <summary>Замер кадров в бою: полный кадр, расчёт боя, подготовка толпы (остальное — видеокарта и интерфейс).</summary>
+        public readonly PerfStats Perf = new PerfStats();
+
+        public sealed class PerfStats
+        {
+            readonly List<float> frame = new List<float>();
+            double sim, crowd;
+            public void Clear() { frame.Clear(); sim = crowd = 0; }
+            public void Add(float frameMs, double simMs, double crowdMs) { frame.Add(frameMs); sim += simMs; crowd += crowdMs; }
+            public override string ToString()
+            {
+                if (frame.Count == 0) return "нет данных";
+                var f = new List<float>(frame); f.Sort();
+                float avg = 0; foreach (var x in f) avg += x; avg /= f.Count;
+                return $"кадров {f.Count}, кадр в среднем {avg:F1} мс ({1000 / avg:F0} fps), 95% {f[(int)(f.Count * 0.95f)]:F1} мс, худший {f[f.Count - 1]:F1} мс; " +
+                       $"расчёт боя {sim / f.Count:F2} мс, толпа {crowd / f.Count:F2} мс";
+            }
+        }
 
         public string MapTypeName => Defs.Maps[(int)MapType].Name;
 
@@ -281,9 +308,20 @@ namespace BattleSim
                 }
             }
 
+            // Расчёт боя — ровными шагами по 1/30 с (не зависит от частоты кадров);
+            // между шагами солдаты рисуются плавно (Alpha — доля пути до следующего шага)
             float simDt = Phase == Phase.Setup || Paused ? 0 : dt * Speed;
-            int steps = Mathf.Max(1, Mathf.CeilToInt(simDt / 0.034f));
-            for (int i = 0; i < steps; i++) Battle.Tick(simDt / steps);
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (simDt <= 0) { Battle.Tick(0); simAcc = 0; Alpha = 1; }
+            else
+            {
+                simAcc += simDt;
+                int n = 0;
+                while (simAcc >= SimStep && n < 4) { Battle.Tick(SimStep); simAcc -= SimStep; n++; }
+                if (n == 4) simAcc = 0; // не успеваем — лучше замедлить бой, чем копить отставание
+                Alpha = simAcc / SimStep;
+            }
+            long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (Phase == Phase.Fight)
             {
                 BattleTime += simDt;
@@ -311,6 +349,8 @@ namespace BattleSim
             bool cheer = Phase == Phase.Result;
             foreach (var u in Battle.Units) if (u.Alive) Battle.Animate(u, cheer && u.Team == Winner);
             RenderCrowd(animDt);
+            long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (Phase == Phase.Fight && !Paused) Perf.Add(Time.unscaledDeltaTime * 1000, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
             overlays.DrawRings(Battle);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
@@ -332,11 +372,11 @@ namespace BattleSim
             {
                 u.Anim.Step(animDt);
                 u.Ride?.Step(animDt);
-                var p = Conv.U(u.Pos);
+                var p = Conv.U(u.RenderPos(Alpha));
                 if (!GeometryUtility.TestPlanesAABB(frustum, new Bounds(p + Vector3.up, Vector3.one * 5))) continue;
                 int l = (p - cp).sqrMagnitude < lod2 ? 0 : 1;
                 float sink = u.Alive ? 0 : Mathf.Max(0, u.DeadT - 18) * 0.25f;
-                var m = Matrix4x4.TRS(new Vector3(p.x, p.y - sink, p.z), Conv.Yaw(u.Yaw), Vector3.one * u.Scale);
+                var m = Matrix4x4.TRS(new Vector3(p.x, p.y - sink, p.z), Conv.Yaw(u.RenderYaw(Alpha)), Vector3.one * u.Scale);
                 if (u.T.Mount)
                 {
                     var hm = Lib.Horse[u.Horse];

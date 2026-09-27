@@ -73,6 +73,8 @@ namespace BattleSim.Core
         public float[] PathMask;
         public List<Deck> Bridges = new List<Deck>();
         public List<Watchtower> Watchtowers = new List<Watchtower>();
+        /// <summary>Места для стрелков на боевом ходу стен (у зубцов) и на башнях; Out — куда смотрит стена.</summary>
+        public List<(V2 P, V2 Out)> WallSpots = new List<(V2, V2)>();
         public Features Features;
         public V2 Wind;
         public Obstacles Obs;
@@ -409,8 +411,12 @@ namespace BattleSim.Core
             return false;
         }
 
-        /// <summary>Прямая видимость: мешают склоны, ограды, стены, дома и густая чаща.</summary>
-        public bool Los(float ax, float ay, float az, float bx, float by, float bz)
+        /// <summary>
+        /// Прямая видимость: мешают склоны, ограды, стены, дома и густая чаща. lean — стрелок стоит
+        /// у бойницы или за низкой оградой: в пределах lean метров от него зубцы и ограда не мешают
+        /// (он выглядывает между зубцами, поверх плетня); так же и цель у самого края стены видна.
+        /// </summary>
+        public bool Los(float ax, float ay, float az, float bx, float by, float bz, float lean = 0)
         {
             float dx = bx - ax, dz = bz - az, d = M.Hypot(dx, dz);
             int n = Math.Max(2, (int)Math.Ceiling(d / 1.4f));
@@ -420,8 +426,9 @@ namespace BattleSim.Core
             {
                 float t = (float)i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t, g = HeightAt(x, z);
                 if (g > y - 0.1f) return false;
-                if (Decks.SolidTop(x, z, g) > y || Decks.ThinBlocks(x, z, y)) return false;
-                if (WallTop(x, z) > y) return false;
+                bool nearA = t * d < lean, nearB = lean > 0 && (1 - t) * d < 1.2f;
+                if (Decks.SolidTop(x, z, g, !(nearA || nearB)) > y || Decks.ThinBlocks(x, z, y)) return false;
+                if (WallTop(x, z) > y + (nearA ? 0.5f : 0)) return false;
                 if (houses && Obs.Blocks(x, z, y)) return false;
                 if (forest && y < g + 7 && Nav.CanopyAt(x, z) && (canopy += step) > 7) return false;
             }
@@ -585,6 +592,19 @@ namespace BattleSim.Core
         void AddFortress()
         {
             var F = Town.Fort;
+            WallSpots = new List<(V2, V2)>();
+            foreach (var w in F.Walls)
+            {
+                float len = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);
+                if (len < 6) continue;
+                float ux = (w.Bx - w.Ax) / len, uz = (w.Bz - w.Az) / len;
+                for (float t = 4; t <= len - 4; t += 7)
+                {
+                    float x = w.Ax + ux * t + w.Out.x * w.W * 0.15f, z = w.Az + uz * t + w.Out.z * w.W * 0.15f;
+                    if (F.Towers.Any(tw => MathF.Abs(tw.X - x) < tw.S / 2 + 1.5f && MathF.Abs(tw.Z - z) < tw.S / 2 + 1.5f)) continue;
+                    WallSpots.Add((new V2(x, z), w.Out));
+                }
+            }
             foreach (var w in F.Walls)
             {
                 float len = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);

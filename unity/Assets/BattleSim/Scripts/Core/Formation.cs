@@ -18,6 +18,10 @@ namespace BattleSim.Core
         /// <summary>Как далеко вперёд по пути точка отряда высматривает узкие места.</summary>
         const float ChokeLook = 30f;
         readonly List<Choke> Chokes = new List<Choke>();
+        public int StatAnchorPaths;
+#if PROF
+        public static readonly double[] FormProf = new double[4];
+#endif
 
         /// <summary>Строй на марше: точка отряда впереди, шеренги — по её следу.</summary>
         static bool Marching(Squad sq) => sq.FormMarch;
@@ -25,6 +29,7 @@ namespace BattleSim.Core
         void UpdateFormations(float dt)
         {
             var nav = World.Nav;
+            ProcessPaths();
             foreach (var sq in Squads)
             {
                 if (sq.Special || sq.Alive == 0) { if (sq.Choke != null) LeaveChoke(sq); continue; }
@@ -37,7 +42,7 @@ namespace BattleSim.Core
                     sq.Anchor = sq.C;
                     sq.Facing = sq.Yaw;
                     sq.Trail.Clear();
-                    sq.FormT = 0;
+                    sq.FormT = Rng.Rand() * FormEvery; // отряды пересчитывают строй вразнобой, не все в один шаг
                     sq.APath = null;
                 }
 
@@ -135,8 +140,19 @@ namespace BattleSim.Core
                 if ((sq.FormT -= dt) <= 0)
                 {
                     sq.FormT = FormEvery + Rng.Rand() * 0.1f;
+#if PROF
+                    long fp1 = System.Diagnostics.Stopwatch.GetTimestamp();
+#endif
                     UpdateChoke(sq, cls, goal, stop, contact);
+#if PROF
+                    long fp2 = System.Diagnostics.Stopwatch.GetTimestamp();
+#endif
                     AssignSlots(sq, cls);
+#if PROF
+                    long fp3 = System.Diagnostics.Stopwatch.GetTimestamp();
+                    FormProf[1] += (fp2 - fp1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    FormProf[2] += (fp3 - fp2) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+#endif
                 }
             }
             // пустые очереди больше не нужны
@@ -305,28 +321,80 @@ namespace BattleSim.Core
             return -1;
         }
 
-        /// <summary>Путь точки отряда: напрямую, если свободно, иначе по A* (пересчёт раз в 3 с).</summary>
+        /// <summary>
+        /// Путь точки отряда: напрямую, если свободно, иначе по A*. Путь не ищется сразу: отряд
+        /// ставит заявку в очередь, а поиск идёт понемногу каждый шаг (PathSlice клеток) — пока
+        /// новый путь считается, отряд идёт по старому.
+        /// </summary>
         V2 AnchorWaypoint(Squad sq, V2 g, int cls)
         {
             var nav = World.Nav;
             if (nav.Barriers == 0) return g;
-            if (sq.APath == null || Time - sq.APathT > 3 || V2.Dist(g, sq.APathGoal) > 5)
+            // цель сдвинулась заметно относительно расстояния до неё (далёкую цель не гоняем за каждым шагом)
+            bool stale = V2.Dist(g, sq.APathGoal) > MathF.Max(5, V2.Dist(sq.Anchor, g) * 0.15f);
+            // цель чуть сдвинулась, а от предпоследней точки пути до неё прямая дорога — поправляем только конец пути
+            if (stale && sq.APath != null && sq.APath.Count >= 2)
+            {
+                var pre = sq.APath[sq.APath.Count - 2];
+                if (nav.LineClear(pre.x, pre.z, g.x, g.z, cls)) { sq.APath[sq.APath.Count - 1] = g; sq.APathGoal = g; stale = false; }
+            }
+            bool need = sq.APath == null ? Time - sq.APathT > (stale ? 0.5f : 1.5f) : Time - sq.APathT > 6 || stale;
+            if (need && !sq.APathQueued)
             {
                 bool avoid = Time < sq.AvoidUntil;
                 if (!avoid && nav.LineClear(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls)) { sq.APath = null; sq.APathT = Time; sq.APathGoal = g; return g; }
-                if (PathBudget > 0 || sq.APath == null && Time - sq.APathT > 1)
-                {
-                    PathBudget--;
-                    // пути других отрядов «дороже» — армия расходится по разным подъёмам, мостам и воротам
-                    sq.APath = nav.FindPath(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls, 0.9f, sq.AvoidP.x, sq.AvoidP.z, avoid ? 14 : 0);
-                    nav.MarkCrowd(sq.APath, sq.Alive / 12f);
-                    sq.APathT = Time; sq.APathGoal = g; sq.APathI = 1;
-                }
+                sq.APathQueued = true; sq.APathWant = g;
+                pathQueue.Enqueue(sq);
             }
             var P = sq.APath;
             if (P == null) return g;
             while (sq.APathI < P.Count - 1 && V2.Dist(P[sq.APathI], sq.Anchor) < 1.2f) sq.APathI++;
             return P[Math.Min(sq.APathI, P.Count - 1)];
+        }
+
+        /// <summary>Сколько клеток поиск путей отрядов перебирает за один шаг боя.</summary>
+        const int PathSlice = 2500;
+        readonly Queue<Squad> pathQueue = new Queue<Squad>();
+        NavGrid.Search pathSearch;
+        Squad pathFor;
+
+        /// <summary>Ведём поиск путей по очереди заявок, не больше PathSlice клеток за шаг.</summary>
+        void ProcessPaths()
+        {
+            var nav = World.Nav;
+            if (pathSearch == null) pathSearch = nav.NewSearch();
+            int budget = PathSlice;
+            while (budget > 0)
+            {
+                if (!pathSearch.Active)
+                {
+                    if (pathQueue.Count == 0) return;
+                    var sq = pathQueue.Dequeue();
+                    if (sq.Alive == 0 || sq.Special || sq.Order.Mode == Mode.Rout) { sq.APathQueued = false; continue; }
+                    pathFor = sq;
+                    StatAnchorPaths++;
+                    bool avoid = Time < sq.AvoidUntil;
+                    // пути других отрядов «дороже» — армия расходится по разным подъёмам, мостам и воротам
+                    if (!nav.Begin(pathSearch, sq.Anchor.x, sq.Anchor.z, sq.APathWant.x, sq.APathWant.z, sq.T.Mount ? 1 : 0, 0.9f,
+                                   sq.AvoidP.x, sq.AvoidP.z, avoid ? 14 : 0, 16000, 2f))
+                    {
+                        PathDone(sq, null);
+                        continue;
+                    }
+                    budget -= 100;
+                }
+                int before = pathSearch.Expanded;
+                bool finished = nav.Continue(pathSearch, budget, out var path);
+                budget -= Math.Max(1, pathSearch.Expanded - before);
+                if (finished) PathDone(pathFor, path);
+            }
+        }
+
+        void PathDone(Squad sq, List<V2> path)
+        {
+            sq.APathQueued = false;
+            sq.APath = path; sq.APathT = Time; sq.APathGoal = sq.APathWant; sq.APathI = 1;
+            if (path != null) World.Nav.MarkCrowd(path, sq.Alive / 12f);
         }
 
         /// <summary>Точка на следе отряда в s метрах позади точки отряда и направление следа там.</summary>
@@ -469,7 +537,19 @@ namespace BattleSim.Core
             if (!sq.FormInit || u.Row < 0) return sq.Slot(u);
             if (sq.FormMarch)
             {
-                TrailAt(sq, u.SlotBack, out var p, out var fw);
+                int r = u.Row;
+                if (sq.RowTick != tickNo || sq.RowP.Length <= r)
+                {
+                    if (sq.RowP.Length <= r)
+                    {
+                        int n = Math.Max(r + 1, sq.Rows);
+                        sq.RowP = new V2[n]; sq.RowF = new V2[n]; sq.RowOk = new bool[n];
+                    }
+                    else Array.Clear(sq.RowOk, 0, sq.RowOk.Length);
+                    sq.RowTick = tickNo;
+                }
+                if (!sq.RowOk[r]) { TrailAt(sq, u.SlotBack, out sq.RowP[r], out sq.RowF[r]); sq.RowOk[r] = true; }
+                V2 p = sq.RowP[r], fw = sq.RowF[r];
                 return new V2(p.x + fw.z * u.SlotLat, p.z - fw.x * u.SlotLat);
             }
             // строем вокруг точки отряда: шеренги симметрично вперёд и назад

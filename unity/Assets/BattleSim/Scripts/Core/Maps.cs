@@ -157,7 +157,7 @@ namespace BattleSim.Core
         }
 
         /// <summary>Верх сплошной кладки в точке (с зубцами на внешнем краю стены) — для обзора и болтов.</summary>
-        public float SolidTop(float x, float z, float ground)
+        public float SolidTop(float x, float z, float ground, bool parapet = true)
         {
             var L = Grid.Near(x, z);
             float best = float.NegativeInfinity;
@@ -167,7 +167,7 @@ namespace BattleSim.Core
                     var d = L[i];
                     if (!d.Solid || !Locate(d, x, z, out float t, out float lat)) continue;
                     float h = HeightOf(d, t, ground);
-                    if (d.Parapet > 0 && lat * d.OutSign > d.W * 0.25f) h += d.Parapet;
+                    if (parapet && d.Parapet > 0 && lat * d.OutSign > d.W * 0.25f) h += d.Parapet;
                     if (h > best) best = h;
                 }
             return best;
@@ -253,10 +253,7 @@ namespace BattleSim.Core
         public readonly float[] Crowd;
         public int Barriers;
 
-        readonly MinHeap heap = new MinHeap();
-        readonly float[] gs;
-        readonly int[] came, seen, done;
-        int run;
+        readonly Search main;
 
         public NavGrid(World w)
         {
@@ -269,7 +266,8 @@ namespace BattleSim.Core
             Crowd = new float[n];
             Canopy = new byte[n];
             Build(w);
-            gs = new float[n]; came = new int[n]; seen = new int[n]; done = new int[n];
+            main = new Search(n);
+            Region = new[] { Label(0), Label(1) };
         }
 
         void Build(World w)
@@ -313,6 +311,82 @@ namespace BattleSim.Core
                     if (iz + 1 < D && !Step(i, i + D, false)) b++;
                 }
             Barriers = b;
+        }
+
+        /// <summary>
+        /// Связные области для пехоты [0] и конницы [1]: из клетки можно дойти только до клеток
+        /// с тем же номером. Так недостижимая цель (другой уступ, остров) видна сразу, без поиска.
+        /// </summary>
+        public int[][] Region;
+
+        int[] Label(int cls)
+        {
+            int D = Dim, n = D * D;
+            var sp = Speed[cls];
+            var R = new int[n];
+            for (int i = 0; i < n; i++) R[i] = -1;
+            var q = new int[n];
+            int label = 0;
+            for (int s0 = 0; s0 < n; s0++)
+            {
+                if (sp[s0] == 0 || R[s0] >= 0) continue;
+                int qh = 0, qt = 0;
+                q[qt++] = s0; R[s0] = label;
+                while (qh < qt)
+                {
+                    int c = q[qh++], cx = c % D, cz = c / D;
+                    for (int dz = -1; dz <= 1; dz++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dz == 0) continue;
+                            int nx = cx + dx, nz = cz + dz;
+                            if (nx < 0 || nz < 0 || nx >= D || nz >= D) continue;
+                            int ni = nz * D + nx;
+                            if (R[ni] >= 0 || sp[ni] == 0) continue;
+                            bool diag = dx != 0 && dz != 0;
+                            if (!Step(c, ni, diag)) continue;
+                            if (diag)
+                            {
+                                int a = cz * D + nx, b = nz * D + cx;
+                                if (sp[a] == 0 || sp[b] == 0 || !Step(c, a, false) || !Step(c, b, false)) continue;
+                            }
+                            R[ni] = label; q[qt++] = ni;
+                        }
+                }
+                label++;
+            }
+            return R;
+        }
+
+        /// <summary>Ближайшая к клетке g клетка области reg (или -1, если такой нет в радиусе 60 клеток).</summary>
+        int NearestInRegion(int g, int reg, int cls)
+        {
+            int D = Dim, x0 = g % D, z0 = g / D;
+            var R = Region[cls];
+            for (int r = 1; r <= 60; r++)
+            {
+                int best = -1, bd = int.MaxValue;
+                for (int dz = -r; dz <= r; dz++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != r) continue;
+                        int x = x0 + dx, z = z0 + dz;
+                        if (x < 0 || z < 0 || x >= D || z >= D) continue;
+                        int i = z * D + x;
+                        if (R[i] != reg) continue;
+                        int dd = dx * dx + dz * dz;
+                        if (dd < bd) { bd = dd; best = i; }
+                    }
+                if (best >= 0) return best;
+            }
+            return -1;
+        }
+
+        /// <summary>Можно ли дойти из (ax, az) в (bx, bz) — одна связная область.</summary>
+        public bool Reachable(float ax, float az, float bx, float bz, int cls)
+        {
+            int a = Idx(ax, az), b = Idx(bx, bz);
+            return a >= 0 && b >= 0 && Region[cls][a] >= 0 && Region[cls][a] == Region[cls][b];
         }
 
         /// <summary>Можно ли шагнуть между соседними клетками по высоте.</summary>
@@ -360,30 +434,92 @@ namespace BattleSim.Core
             return -1;
         }
 
-        /// <summary>A* по сетке с учётом перепадов высот; путь сглаживается до точек поворота.</summary>
-        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0)
+        /// <summary>Счётчики для замеров: сколько поисков пути и раскрытых клеток.</summary>
+        public int StatCalls, StatExpanded, StatFailed;
+        /// <summary>Сколько клеток перебрал последний законченный поиск.</summary>
+        public int LastExpanded;
+
+        /// <summary>
+        /// Состояние поиска A*. Поиск можно провести разом (FindPath) или понемногу, по нескольку
+        /// тысяч клеток за шаг боя (Begin + Continue), — тогда длинные пути в горах не дают рывков.
+        /// </summary>
+        public sealed class Search
         {
-            int D = Dim;
+            internal readonly float[] gs;
+            internal readonly int[] came, seen, done;
+            internal readonly MinHeap heap = new MinHeap();
+            internal int run, s, g, gx, gz, cls, maxExpand, bestC;
+            internal float bestH, crowdCost, avoidX, avoidZ, avoidR, greed, bx, bz;
+            internal bool goalOpen;
+            public int Expanded;
+            public bool Active;
+            internal Search(int n) { gs = new float[n]; came = new int[n]; seen = new int[n]; done = new int[n]; }
+        }
+
+        public Search NewSearch() => new Search(Dim * Dim);
+
+        /// <summary>A* по сетке с учётом перепадов высот; путь сглаживается до точек поворота.</summary>
+        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f)
+        {
+            if (!Begin(main, ax, az, bx, bz, cls, crowdCost, avoidX, avoidZ, avoidR, maxExpand, greed)) return null;
+            Continue(main, int.MaxValue, out var path);
+            return path;
+        }
+
+        /// <summary>Начать поиск пути; false — идти некуда (старт или цель вне поля, нет достижимого места рядом с целью).</summary>
+        public bool Begin(Search q, float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f)
+        {
+            StatCalls++;
+            q.Active = false;
             var sp = Speed[cls];
-            var S = Surf;
             int s = Idx(ax, az), g = Idx(bx, bz);
-            if (s < 0 || g < 0) return null;
+            if (s < 0 || g < 0) return false;
             if (sp[s] == 0) s = NearestOpen(s, sp);
+            if (s < 0) return false;
             bool goalOpen = sp[g] > 0;
-            if (!goalOpen) g = NearestOpen(g, sp);
-            if (s < 0 || g < 0) return null;
-            int rn = ++run;
-            int gx = g % D, gz = g / D;
-            heap.Clear();
-            gs[s] = 0; came[s] = -1; seen[s] = rn;
-            heap.Push(s, H(s, gx, gz, D));
-            int expanded = 0;
-            while (heap.Size > 0 && expanded < 40000)
+            // цель недостижима (на другом уступе, за обрывом) — идём к ближайшему месту, куда дойти можно
+            if (!goalOpen || Region[cls][g] != Region[cls][s])
             {
+                goalOpen = false;
+                g = NearestInRegion(g, Region[cls][s], cls);
+            }
+            if (g < 0) { StatFailed++; return false; }
+            q.run++;
+            q.s = s; q.g = g; q.gx = g % Dim; q.gz = g / Dim; q.cls = cls; q.maxExpand = maxExpand;
+            q.crowdCost = crowdCost; q.avoidX = avoidX; q.avoidZ = avoidZ; q.avoidR = avoidR; q.greed = greed;
+            q.bx = bx; q.bz = bz; q.goalOpen = goalOpen;
+            q.heap.Clear();
+            q.gs[s] = 0; q.came[s] = -1; q.seen[s] = q.run;
+            q.bestC = s; q.bestH = H(s, q.gx, q.gz, Dim);
+            q.heap.Push(s, q.bestH);
+            q.Expanded = 0;
+            q.Active = true;
+            return true;
+        }
+
+        /// <summary>
+        /// Продолжить поиск, перебрав не больше budget клеток. true — поиск закончен: path — путь
+        /// (или путь к самому близкому к цели месту, если не уложились в maxExpand) либо null.
+        /// </summary>
+        public bool Continue(Search q, int budget, out List<V2> path)
+        {
+            path = null;
+            if (!q.Active) return true;
+            int D = Dim, rn = q.run, g = q.g, gx = q.gx, gz = q.gz;
+            var sp = Speed[q.cls];
+            var S = Surf;
+            var gs = q.gs; var came = q.came; var seen = q.seen; var done = q.done; var heap = q.heap;
+            float crowdCost = q.crowdCost, avoidR = q.avoidR, avoidX = q.avoidX, avoidZ = q.avoidZ, greed = q.greed;
+            bool reached = false;
+            while (heap.Size > 0 && q.Expanded < q.maxExpand)
+            {
+                if (budget <= 0) return false; // продолжим на следующем шаге
                 int c = heap.Pop();
                 if (done[c] == rn) continue;
-                done[c] = rn; expanded++;
-                if (c == g) break;
+                done[c] = rn; q.Expanded++; budget--;
+                if (c == g) { reached = true; break; }
+                float hc = H(c, gx, gz, D);
+                if (hc < q.bestH) { q.bestH = hc; q.bestC = c; }
                 int cx = c % D, cz = c / D;
                 for (int dz = -1; dz <= 1; dz++)
                     for (int dx = -1; dx <= 1; dx++)
@@ -405,25 +541,33 @@ namespace BattleSim.Core
                             float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;
                             if (ox * ox + oz * oz < avoidR * avoidR) ng += 6;
                         }
-                        if (seen[ni] != rn || ng < gs[ni]) { seen[ni] = rn; gs[ni] = ng; came[ni] = c; heap.Push(ni, ng + H(ni, gx, gz, D)); }
+                        if (seen[ni] != rn || ng < gs[ni]) { seen[ni] = rn; gs[ni] = ng; came[ni] = c; heap.Push(ni, ng + H(ni, gx, gz, D) * greed); }
                     }
             }
-            if (done[g] != rn) return null;
+            q.Active = false;
+            StatExpanded += q.Expanded; LastExpanded = q.Expanded;
+            bool goalOpen = q.goalOpen;
+            if (!reached)
+            { // не уложились в перебор — путь до клетки, ближе всех подошедшей к цели (следующий поиск продолжит)
+                if (q.maxExpand >= 40000 || q.bestC == q.s) { StatFailed++; return true; }
+                g = q.bestC; goalOpen = false;
+            }
             var cells = new List<int>();
             for (int c = g; c != -1; c = came[c]) cells.Add(c);
             cells.Reverse();
             var pts = new List<V2>(cells.Count);
             foreach (int i in cells) pts.Add(Center(i));
-            if (goalOpen) pts[pts.Count - 1] = new V2(bx, bz);
+            if (goalOpen) pts[pts.Count - 1] = new V2(q.bx, q.bz);
             var output = new List<V2> { pts[0] };
             for (int i = 0; i < pts.Count - 1;)
             {
                 int j = Math.Min(pts.Count - 1, i + 24);
-                while (j > i + 1 && !LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, cls)) j--;
+                while (j > i + 1 && !LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, q.cls)) j--;
                 output.Add(pts[j]);
                 i = j;
             }
-            return output;
+            path = output;
+            return true;
         }
 
         /// <summary>Отряд пойдёт этим путём: отмечаем загрузку полосой шириной ~6 м.</summary>

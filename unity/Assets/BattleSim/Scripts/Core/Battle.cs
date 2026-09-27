@@ -28,6 +28,8 @@ namespace BattleSim.Core
         public readonly Bolts Bolts;
         public V2?[] ArmyC = new V2?[2];
         public int PathBudget;
+        /// <summary>Бюджет перебора клеток поиском пути на один шаг: длинные поиски разносим по шагам, без рывков.</summary>
+        public int PathWork;
         /// <summary>Когда кого-то последний раз ранили (для правила «армии разошлись»).</summary>
         public float LastHitT;
 
@@ -270,7 +272,28 @@ namespace BattleSim.Core
             foreach (var e in town.SouthEntries) Put(Rng.Rand() < 0.5f ? 0 : 1, new V2(e.x, e.z + 10), 14);
             for (int i = town.SouthEntries.Count; i < def; i++) Put(Rng.Rand() < 0.55f ? 0 : 1, new V2((Rng.Rand() - 0.5f) * town.CX * 1.6f, -town.CZ * 0.3f), 60);
             int dx = Pick(xbow);
-            for (int i = 0; i < dx; i++) Put(2, new V2((i - (dx - 1) / 2f) * town.CX * 1.6f / Math.Max(1, dx), -town.CZ + 9), 30);
+            // стрелки гарнизона — на боевом ходу южной стены, у зубцов; кому не хватило места — на улицах у стены
+            var wallSpots = World.WallSpots.Where(w => w.Out.z < -0.5f).Select(w => w.P).OrderBy(p => p.x).ToList();
+            var usedWall = new List<V2>();
+            for (int i = 0; i < dx; i++)
+            {
+                var want = new V2((i - (dx - 1) / 2f) * town.CX * 1.6f / Math.Max(1, dx), -town.CZ);
+                bool ok = false;
+                foreach (var p in wallSpots.OrderBy(q => V2.Dist(q, want)))
+                {
+                    if (usedWall.Any(q => V2.Dist(q, p) < 9)) continue;
+                    int placed = PlaceSquad(2, 1, p.x, p.z, M.PI);
+                    if (placed >= Defs.Types[2].Cols * Defs.Types[2].Rows * 0.6f)
+                    {
+                        usedWall.Add(p);
+                        Squads[Squads.Count - 1].Order = new Order(OrderKind.Fire, Mode.Hold) { Why = "держать стену" }.At(p);
+                        ok = true;
+                        break;
+                    }
+                    if (placed > 0) RemoveSquadAt(p);
+                }
+                if (!ok) Put(2, new V2(want.x, -town.CZ + 9), 30);
+            }
             int dc = Math.Max(1, Pick(cav) / 2);
             var sq = town.Squares.Count > 0 ? new V2(town.Squares[0].X, town.Squares[0].Z) : new V2(0, 0);
             for (int i = 0; i < dc; i++) Put(3, sq, 40);
@@ -424,10 +447,22 @@ namespace BattleSim.Core
 
         // ---------------------------------------------------------------- главный цикл
 
+        /// <summary>Сколько миллисекунд ушло на каждую часть шага (накопительно) — для замеров.</summary>
+        public readonly double[] Prof = new double[8];
+        public static readonly string[] ProfNames = { "подготовка", "враги", "приказы", "строй", "решения", "движение", "расталкивание", "болты" };
+        long profT;
+        void Lap(int k) { long now = System.Diagnostics.Stopwatch.GetTimestamp(); Prof[k] += (now - profT) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; profT = now; }
+
+        int tickNo;
+
         public void Tick(float dt)
         {
+            profT = System.Diagnostics.Stopwatch.GetTimestamp();
+            tickNo++;
+            foreach (var u in Units) { u.PrevPos = u.Pos; u.PrevYaw = u.Yaw; }
             Time += dt;
             PathBudget = 4;
+            PathWork = 6000;
             Teams[0].Clear(); Teams[1].Clear();
             int a0 = 0, a1 = 0;
             foreach (var u in Units)
@@ -446,18 +481,27 @@ namespace BattleSim.Core
             }
             foreach (var cs in Couriers) cs?.Refresh(dt);
 
+            Lap(0);
             if (Fighting && dt > 0)
             {
                 if ((foesT -= dt) <= 0) { foesT = 0.8f; UpdateFoes(); World.Nav.DecayCrowd(0.93f); }
+                Lap(1);
                 UpdateSquads(dt);
                 foreach (var c in Commanders) c?.Tick(dt);
                 foreach (var list in Captains) foreach (var c in list) c.Tick(dt);
+                Lap(2);
                 UpdateFormations(dt);
-                for (int i = 0; i < Units.Count; i++) if (Units[i].Alive) Think(Units[i], dt);
+                Lap(3);
+                // решения — через шаг (половина армии на чётных шагах, половина на нечётных), движение — каждый шаг
+                for (int i = 0; i < Units.Count; i++) if (Units[i].Alive && ((i + tickNo) & 1) == 0) Think(Units[i], dt * 2);
+                Lap(4);
                 for (int i = 0; i < Units.Count; i++) if (Units[i].Alive) Integrate(Units[i], dt);
+                Lap(5);
                 Separate();
+                Lap(6);
             }
             Bolts.Tick(dt);
+            Lap(7);
 
             for (int i = Units.Count - 1; i >= 0; i--)
             {
@@ -539,7 +583,17 @@ namespace BattleSim.Core
             if (t.Special == Special.Messenger) { ThinkMessenger(u, dt); return; }
             if (o.Mode == Mode.Rout) { Flee(u, dt); return; }
 
-            if (u.Target == null || !u.Target.Alive || u.RetargetT <= 0) { u.RetargetT = 0.45f + Rng.Rand() * 0.45f; u.Target = PickTarget(u); }
+#if PROF
+            SubLap(-1);
+#endif
+            if (u.Target == null || !u.Target.Alive || u.RetargetT <= 0)
+            { // враг далеко — цель можно пересматривать реже
+                u.RetargetT = sq.FoeDist > 60 ? 1.2f + Rng.Rand() * 0.6f : 0.45f + Rng.Rand() * 0.45f;
+                u.Target = PickTarget(u);
+            }
+#if PROF
+            SubLap(0);
+#endif
             var tg = u.Target;
             float dx = 0, dz = 0;
             bool advance = o.Mode == Mode.Advance || o.Mode == Mode.Charge;
@@ -569,7 +623,9 @@ namespace BattleSim.Core
                     u.Face(nx, nz, dt);
                     if (u.Cooldown <= 0 && u.AtkT < 0 && t.Dmg > 0) StartAttack(u, false);
                 }
-                else if (d <= engageR && MayChase(u, tg))
+                // стрелок бросается врукопашную, только если враг рядом и на одном с ним уровне —
+                // не бежит со стены к тем, кто стоит под ней
+                else if (d <= engageR && MayChase(u, tg) && (!t.Ranged || (d <= contact + 3 && MathF.Abs(tg.Pos.y - u.Pos.y) < 1.8f)))
                 {
                     wantSlot = false; chasing = true;
                     if (d > 6)
@@ -583,6 +639,9 @@ namespace BattleSim.Core
                     YieldAhead(u, ref dx, ref dz);
                 }
             }
+#if PROF
+            SubLap(1);
+#endif
             if (wantSlot)
             {
                 if (u.IsLeader)
@@ -601,6 +660,9 @@ namespace BattleSim.Core
                     if (dx * dx + dz * dz < 0.04f && !u.Aiming) u.Face(MathF.Sin(sq.Facing), MathF.Cos(sq.Facing), dt, 3);
                 }
             }
+#if PROF
+            SubLap(2);
+#endif
             if (u.AtkT >= 0 && !t.Ranged && t.Charge <= 1) { dx *= 0.3f; dz *= 0.3f; }
             Steer(u, dx, dz, dt, !u.Engaged && !u.Aiming && dx * dx + dz * dz > 0.04f);
             // Бежим к врагу, а с места не сдвинулись: цель недостижима (обрыв, стена, река) — выбираем другую
@@ -627,7 +689,15 @@ namespace BattleSim.Core
                 if (!u.HitDone && u.AtkT >= (u.Shot ? 0.55f : 0.5f)) { u.HitDone = true; ResolveHit(u); }
                 if (u.AtkT >= 1) u.AtkT = -1;
             }
+#if PROF
+            SubLap(3);
+#endif
         }
+#if PROF
+        public static readonly double[] SubProf = new double[4];
+        static long subT;
+        static void SubLap(int k) { long now = System.Diagnostics.Stopwatch.GetTimestamp(); if (k >= 0) SubProf[k] += (now - subT) * 1000.0 / System.Diagnostics.Stopwatch.Frequency; subT = now; }
+#endif
 
         /// <summary>
         /// Куда идти сейчас, чтобы добраться до (gx, gz): прямо, если путь свободен,
@@ -649,7 +719,7 @@ namespace BattleSim.Core
                     var pc = sq.PathCache;
                     List<V2> path;
                     if (pc != null && pc.Cls == cls && M.Hypot(pc.Gx - gx, pc.Gz - gz) < 6 && Time - pc.T < 3 && D2d(sq.Center, u.Pos) < 12) path = pc.Path;
-                    else if (PathBudget <= 0)
+                    else if (PathBudget <= 0 || PathWork <= 0)
                     {
                         u.NavT = Time + 0.2f;
                         return u.Path != null ? u.Path[Math.Min(u.PathI, u.Path.Count - 1)] : new V2(gx, gz);
@@ -660,7 +730,8 @@ namespace BattleSim.Core
                         PathBudget--;
                         bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0;
                         float fx = fromCenter ? sq.Center.x : u.Pos.x, fz = fromCenter ? sq.Center.z : u.Pos.z;
-                        path = nav.FindPath(fx, fz, gx, gz, cls);
+                        path = nav.FindPath(fx, fz, gx, gz, cls, 0, 0, 0, 0, 8000);
+                        PathWork -= nav.LastExpanded;
                         if (fromCenter) sq.PathCache = new PathCache { Cls = cls, Gx = gx, Gz = gz, T = Time, Path = path };
                     }
                     u.Path = path;
@@ -709,6 +780,8 @@ namespace BattleSim.Core
             if (e.Squad != null && e.Squad == u.IgnoreSquad && Time < u.IgnoreT) return false;
             // враг на мосту над головой или на стене — рукой не достать, ищем другого
             if (!ranged && MathF.Abs(e.Pos.y - u.Pos.y) > 1.8f + 0.5f * MathF.Sqrt(d2)) return false;
+            // стрелку отвесно вниз из-за кладки не выстрелить (мёртвая зона под стеной)
+            if (ranged && MathF.Abs(e.Pos.y - u.Pos.y) > 1.8f && MathF.Abs(e.Pos.y - u.Pos.y) > MathF.Sqrt(d2) * 0.9f) return false;
             if (o.Mode == Mode.Move && d2 > 10) return false;
             if ((o.Mode == Mode.Hold || o.Mode == Mode.Ambush) && !ranged)
             {
@@ -730,7 +803,8 @@ namespace BattleSim.Core
             var o = u.Squad.Order;
             bool ranged = u.T.Ranged;
             float gx = o.HasPos ? o.X : u.Pos.x, gz = o.HasPos ? o.Z : u.Pos.z, leash = o.HasLeash ? o.Leash : u.T.Mount ? 16 : 10;
-            var near = GridNearest(u, ranged ? 4 : 10, true, o, gx, gz, leash);
+            // соседей по сетке перебираем, только если вражеский отряд где-то рядом
+            var near = u.Squad.FoeDist < (ranged ? 4 : 10) + 30 ? GridNearest(u, ranged ? 4 : 10, true, o, gx, gz, leash) : null;
             if (near != null) return near;
             if (u.T.Special != Special.None) return null;
 
@@ -805,7 +879,7 @@ namespace BattleSim.Core
         {
             if (u.LosTarget == tg && Time - u.LosT < 0.5f) return u.LosOk;
             u.LosTarget = tg; u.LosT = Time;
-            return u.LosOk = World.Los(u.Pos.x, u.Pos.y + 1.3f, u.Pos.z, tg.Pos.x, tg.Pos.y + 1.0f, tg.Pos.z);
+            return u.LosOk = World.Los(u.Pos.x, u.Pos.y + 1.5f, u.Pos.z, tg.Pos.x, tg.Pos.y + 1.0f, tg.Pos.z, 2.5f);
         }
 
         /// <summary>Дальность выстрела: высота добавляет, ветер помогает или мешает, солнце слепит.</summary>

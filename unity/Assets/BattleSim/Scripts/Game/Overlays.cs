@@ -73,7 +73,8 @@ namespace BattleSim
             {
                 if (!u.Alive) continue;
                 float k = u.T.Radius * 1.25f;
-                rm[n] = Matrix4x4.TRS(Conv.U(u.Pos.x, u.Pos.y + 0.07f, u.Pos.z), Quaternion.identity, new Vector3(k, 1, k));
+                var rp = u.RenderPos(GameMain.Alpha);
+                rm[n] = Matrix4x4.TRS(Conv.U(rp.x, rp.y + 0.07f, rp.z), Quaternion.identity, new Vector3(k, 1, k));
                 var sq = u.Squad;
                 rc[n] = sq != null && sq.Hidden ? hiddenCol[u.Team] : sq != null && sq.Order.Mode == Mode.Rout ? routCol : teamCol[u.Team];
                 if (++n == CrowdModel.Batch) { Flush(n); n = 0; }

@@ -65,6 +65,13 @@ namespace BattleSim.Core
         public bool ChokeGo;
         public V2 ChokeE, ChokeDir, AvoidP;
         public float ChokeD, ChokeHold, ChokeWaitT, ChokeGoT, AvoidUntil, LagT;
+        // места шеренг на следе колонны: считаются один раз за шаг на шеренгу, а не на каждого солдата
+        // заявка на путь точки отряда: считается понемногу за несколько шагов
+        public bool APathQueued;
+        public V2 APathWant;
+        public int RowTick = -1;
+        public V2[] RowP = new V2[0], RowF = new V2[0];
+        public bool[] RowOk = new bool[0];
         /// <summary>Сдвиг от назначенной точки, чтобы не стоять на месте соседнего отряда.</summary>
         public V2 Offset;
 
@@ -116,6 +123,11 @@ namespace BattleSim.Core
         public UnitDef T;
         public float Ox, Oz;
         public V3 Pos, Vel, Knock;
+        /// <summary>Положение и поворот на начало шага — для плавной отрисовки между шагами расчёта.</summary>
+        public V3 PrevPos;
+        public float PrevYaw;
+        public V3 RenderPos(float a) => new V3(PrevPos.x + (Pos.x - PrevPos.x) * a, PrevPos.y + (Pos.y - PrevPos.y) * a, PrevPos.z + (Pos.z - PrevPos.z) * a);
+        public float RenderYaw(float a) => PrevYaw + M.WrapAngle(Yaw - PrevYaw) * a;
         public float Yaw, Hp;
         public bool Alive = true;
         public Unit Target, FleeFrom;
