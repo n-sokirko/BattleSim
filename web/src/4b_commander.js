@@ -133,7 +133,7 @@ class Commander {
     const underFire = B.time - sq.lastHitT < 3;
     if ((underFire && enR > myR * 1.1) || (this.trait === 'cautious' && enR > myR * 1.3)) {
       const c = this.coverFor(sq, ec);
-      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: c.wall ? 'за ограду, от чужих болтов' : 'в низину, от чужих болтов' };
+      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: { wall: 'за ограду', house: 'за дома', low: world.type === 'forest' ? 'в чащу' : world.type === 'swamp' ? 'в камыши' : 'в низину' }[c.kind] + ', от чужих болтов' };
     }
     if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0 && sq.order.kind !== 'cover') {
       const h = this.highNear(sq.center, 36, en, ec);
@@ -195,12 +195,12 @@ class Commander {
     }
     // 2. Засада в низине (хитрый, в начале боя)
     if (this.trait === 'cunning' && !this.ambushSet && B.time < 30 && !sq.engaged) {
-      const hollow = world.an.low
+      const hollow = world.an.hide
         .filter((l) => d2d(l, sq.center) < 45 && d2d(l, ec) < d2d(sq.center, ec) + 5 && d2d(l, ec) > 25)
         .sort((a, b) => b.depth - a.depth)[0];
       if (hollow) {
         this.ambushSet = true;
-        return { kind: 'ambush', mode: 'move', x: hollow.x, z: hollow.z, then: { kind: 'ambush', mode: 'ambush', leash: 14 }, why: 'затаиться в низине и ждать' };
+        return { kind: 'ambush', mode: 'move', x: hollow.x, z: hollow.z, then: { kind: 'ambush', mode: 'ambush', leash: 14 }, why: world.type === 'forest' ? 'затаиться в чаще и ждать' : world.type === 'swamp' ? 'затаиться в камышах' : 'затаиться в низине и ждать' };
       }
     }
     // 3. Оборона: занять холм и ждать
@@ -249,21 +249,16 @@ class Commander {
     return best;
   }
 
-  /** Укрытие: низина или обратная сторона ограды, не ближе к врагу. */
+  /** Укрытие: низина, чаща, камыш, обратная сторона ограды или дома — не ближе к врагу. */
   coverFor(sq, ec) {
-    const dNow = d2d(sq.center, ec), cands = [];
-    for (const l of world.an.low) cands.push({ x: l.x, z: l.z, wall: false });
-    for (const w of world.features.walls) {
-      const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, n = norm2(-(w.bz - w.az), w.bx - w.ax);
-      const side = (n.x * (mx - ec.x) + n.z * (mz - ec.z)) > 0 ? 1 : -1;
-      cands.push({ x: mx + n.x * 1.6 * side, z: mz + n.z * 1.6 * side, wall: true });
-    }
+    const dNow = d2d(sq.center, ec);
     let best = null, bd = Infinity;
-    for (const c of cands) {
+    for (const c of world.coverCandidates(ec)) {
       const d = d2d(c, sq.center);
-      if (d > 32 || d2d(c, ec) < dNow - 8) continue;
+      if (d > 34 || d2d(c, ec) < dNow - 8 || !world.walkable(c.x, c.z, 0.5)) continue;
       if (d < bd) { bd = d; best = c; }
     }
+    if (best) best.wall = best.kind !== 'low';
     return best;
   }
 

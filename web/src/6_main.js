@@ -71,6 +71,17 @@ const game = {
   winner: -1, battleTime: 0, resultDelay: 0, seed: 1, style: null, lastBiome: -1,
 };
 
+/** Под местность подстраиваем погоду и краски: над болотом туман, на грядах снег. */
+function tweakStyle(st, type) {
+  if (type === 'swamp') {
+    st.fogD *= 1.7; st.waterAlpha = 0.88;
+    st.water = new THREE.Color(0x3d4a2c); st.underwater = new THREE.Color(0x3c3f26);
+    st.grassA.lerp(new THREE.Color(0x6b7a3a), 0.5); st.grassB.lerp(new THREE.Color(0x7d8a40), 0.5);
+  }
+  if (type === 'mountains') st.snowLine = Math.min(st.snowLine, 13);
+  if (type === 'forest') st.treeDensity *= 1.2;
+}
+
 function newMap(seed) {
   game.seed = seed ?? ((Math.random() * 99999) | 1);
   const r = mulberry32(game.seed);
@@ -78,12 +89,17 @@ function newMap(seed) {
   if (biome === game.lastBiome) biome = (biome + 1 + ((r() * (BIOMES.length - 1)) | 0)) % BIOMES.length;
   game.lastBiome = biome;
   game.style = makeStyle(biome, (r() * TIMES.length) | 0);
-  world.generate(game.seed, game.style, ASSETS);
+  const sel = $('mapType').value;
+  game.mapType = sel === 'random' ? MAP_TYPES[(r() * MAP_TYPES.length) | 0].key : sel;
+  tweakStyle(game.style, game.mapType);
+  game.big = $('armySize').value === '3';
+  world.generate(game.seed, game.style, ASSETS, game.mapType, game.big);
   battle.resetToPlan();
   game.phase = 'setup';
   rig.cinematic = false;
-  rig.lookAt(0, -48, 0, 34 * DEG, 85, true);
-  $('mapName').textContent = game.style.title + ' · карта №' + game.seed;
+  rig.lookAt(0, -(world.spawnZ + 22), 0, 36 * DEG, game.big ? 115 : 85, true);
+  const tn = MAP_TYPES.find((t) => t.key === game.mapType).name;
+  $('mapName').textContent = `${tn} · ${game.style.title} · карта №${game.seed}`;
   updateWind();
   refreshUI();
 }
@@ -162,10 +178,22 @@ function buildUI() {
   TEAM.forEach((tm, i) => { $('team-' + i).onclick = () => { game.team = i; game.eraser = false; refreshUI(); }; });
   $('eraser').onclick = () => { game.eraser = !game.eraser; ghost.count = 0; refreshUI(); };
   $('fight').onclick = startBattle;
-  $('newMap').onclick = () => { newMap(); toast('Карта: ' + game.style.title); };
-  const makeArmies = () => { battle.randomArmies(+$('armySize').value); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  $('newMap').onclick = () => { newMap(); if (!battle.plan.length || game.mapType === 'city') battle.randomArmies(+$('armySize').value); refreshUI(); toast($('mapName').textContent); };
+  const makeArmies = () => {
+    if (($('armySize').value === '3') !== game.big) newMap(game.seed); // для великой сечи — большое поле
+    battle.randomArmies(+$('armySize').value);
+    refreshUI();
+    toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`);
+  };
   $('random').onclick = makeArmies;
   $('armySize').onchange = makeArmies;
+  $('mapType').onchange = () => {
+    newMap();
+    battle.randomArmies(+$('armySize').value);
+    refreshUI();
+    const t = MAP_TYPES.find((m) => m.key === game.mapType);
+    toast(`${t.name}: ${t.note}`, 3600);
+  };
   $('clear').onclick = () => { battle.clearAll(); refreshUI(); };
   $('pause').onclick = () => { game.paused = !game.paused; refreshUI(); };
   [['slow', 0.25], ['normal', 1], ['fast', 2]].forEach(([id, s]) => ($(id).onclick = () => { game.speed = s; game.paused = false; refreshUI(); }));
@@ -449,10 +477,10 @@ async function start(saved) {
   battle.bolts.init();
   const probe = ASSETS.bolt; // наконечник болта: выбираем сторону, где модель шире у кончика
   BOLT_TIP = probe.tip || 1;
+  $('armySize').value = LOW_END ? '1' : '2';
   newMap(saved?.seed);
   if (saved?.plan?.length) battle.setPlan(saved.plan);
-  else battle.randomArmies(LOW_END ? 1 : 2);
-  $('armySize').value = LOW_END ? '1' : '2';
+  else battle.randomArmies(+$('armySize').value);
   refreshUI();
   $('loading').hidden = true;
   toast('Карта: ' + game.style.title + '. Расставьте армии и жмите «В бой!»', 4200);

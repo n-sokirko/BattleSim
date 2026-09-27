@@ -167,7 +167,17 @@
     <div class="map-name" id="cmdInfo"></div>
   </div>
   <div class="row" id="setupTop">
-    <button class="btn" id="newMap">Новая карта</button>
+    <span class="pair">
+      <button class="btn" id="newMap">Новая карта</button>
+      <select class="btn select" id="mapType" aria-label="Местность">
+        <option value="random" selected>Любая местность</option>
+        <option value="field">Поле</option>
+        <option value="forest">Лес</option>
+        <option value="mountains">Горы</option>
+        <option value="swamp">Болото</option>
+        <option value="city">Город</option>
+      </select>
+    </span>
     <span class="pair">
       <button class="btn" id="random">Случайные армии</button>
       <select class="btn select" id="armySize" aria-label="Размер армий">
@@ -236,6 +246,16 @@
           <li><b>Укрытия.</b> Болт — настоящий снаряд: он врезается в склон или каменную ограду. Без прямой видимости стрелок не стреляет.</li>
           <li><b>Ограды и проёмы.</b> Через ограду лезут втрое медленнее, через проём проходят свободно.</li>
           <li><b>Низины.</b> Отряд в овраге издали не виден, пока не выстрелит или враг не подойдёт ближе 20 м. Кольцо под ним темнеет.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Местности</h3>
+        <ul>
+          <li><b>Поле.</b> Холмы, овраг между армиями, каменные ограды с проёмами.</li>
+          <li><b>Лес.</b> Чаща прячет отряды, глушит болты и вдвое замедляет конницу. Хитрый полководец устроит там засаду.</li>
+          <li><b>Горы.</b> Гряды с перевалами. Крутые склоны не пройти — войска ищут обход.</li>
+          <li><b>Болото.</b> Глубокую воду не перейти, по топи и броду идут медленно, кони вязнут. В камышах легко затаиться.</li>
+          <li><b>Город.</b> Улицы, кварталы, площадь с церковью, баррикады. Дома закрывают от болтов, бой идёт в переулках.</li>
         </ul>
       </section>
       <section>

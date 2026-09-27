@@ -1,6 +1,16 @@
 // ------------------------------------------------------------------ мир
 
-const SIZE = 440, RES = 256, HALF = SIZE / 2, CELL = SIZE / RES, FIELD = 80, WATER = 0, TEX = 512;
+let SIZE = 440, RES = 256, HALF = SIZE / 2, CELL = SIZE / RES, FIELD = 80;
+const WATER = 0, TEX = 512;
+
+/** Размер поля боя: обычное 160×160 м или большое (для великой сечи). */
+function setWorldScale(big) {
+  FIELD = big ? 118 : 80;
+  SIZE = FIELD * 2 + 280;
+  RES = big ? 300 : 256;
+  HALF = SIZE / 2;
+  CELL = SIZE / RES;
+}
 
 class World {
   constructor() {
@@ -8,11 +18,15 @@ class World {
     this.group = null;
     this.owned = [];
     this.sunDir = new THREE.Vector3(0, 1, 0);
+    this.type = 'field';
+    this.features = { hills: [], ridges: [], ravine: null, walls: [] };
   }
 
-  generate(seed, style, assets) {
+  generate(seed, style, assets, type = 'field', big = false) {
     this.dispose();
-    this.style = style;
+    setWorldScale(big);
+    this.type = type; this.big = big; this.style = style;
+    this.h = new Float32Array((RES + 1) * (RES + 1));
     this.group = new THREE.Group();
     scene.add(this.group);
     const rand = mulberry32(seed);
@@ -20,7 +34,8 @@ class World {
     this.pn = new Perlin(rand);
     const o = () => rand() * 200;
     this.o = { hx: o(), hz: o(), lx: o(), lz: o(), mx: o(), mz: o(), cx: o(), cz: o() };
-    this.features = this.makeFeatures(rand);
+    this.town = type === 'city' && assets ? makeTown(rand, assets.cityDefs) : null;
+    this.features = this.makeFeatures(rand, type);
     const wa = rand() * Math.PI * 2, ws = rand() < 0.2 ? 0 : 1 + rand() * 6;
     this.wind = new THREE.Vector2(Math.cos(wa) * ws, Math.sin(wa) * ws);
 
@@ -28,6 +43,29 @@ class World {
     for (let z = 0; z <= RES; z++)
       for (let x = 0; x <= RES; x++)
         h[z * (RES + 1) + x] = this.rawHeight(x * CELL - HALF, z * CELL - HALF);
+
+    // Препятствия: стволы леса, дома, мелочи; ограды — отдельной сеткой (их перелезают)
+    this.obs = new Obstacles(FIELD);
+    this.wallGrid = new Obstacles(FIELD);
+    for (const w of this.features.walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az);
+      this.wallGrid.insert({ wall: w, x: (w.ax + w.bx) / 2, z: (w.az + w.bz) / 2 }, len / 2 + w.t);
+    }
+    this.trees = type === 'forest' ? this.plantForest(rand) : [];
+    for (const t of this.trees) this.obs.addCircle(t.x, t.z, t.trunk, 7, this.heightAt(t.x, t.z));
+    if (this.town) {
+      for (const b of this.town.buildings) {
+        b.y = this.footprintY(b);
+        if (b.def.kind === 'well') this.obs.addCircle(b.x, b.z, Math.max(b.hx, b.hz), b.top, b.y);
+        else this.obs.addRect(b.x, b.z, b.hx, b.hz, b.rot, b.top, b.y);
+      }
+      for (const p of this.town.props) {
+        const s = 1.1 / p.def.h;
+        p.s = s; p.y = this.heightAt(p.x, p.z);
+        this.obs.addCircle(p.x, p.z, Math.max(p.def.w, p.def.d) * s * 0.5, 1.1, p.y);
+      }
+    }
+    this.nav = new NavGrid(this);
     this.analyze();
 
     this.buildTerrain(style);
@@ -35,124 +73,6 @@ class World {
     this.applyAtmosphere(style);
     this.buildWalls();
     if (assets) this.buildDecor(style, assets);
-  }
-
-  // ---------------------------------------------------------------- тактический рельеф
-
-  /** Холмы, овраг, гряда и развалины каменных оград — всё, за что можно воевать. */
-  makeFeatures(R) {
-    const f = { hills: [], ridges: [], ravine: null, walls: [] };
-    for (const side of [-1, 1])
-      f.hills.push({ x: lerp(-45, 45, R()), z: side * lerp(20, 42, R()), r: lerp(11, 16, R()), h: lerp(4.5, 7.5, R()) });
-    if (R() < 0.65)
-      f.hills.push({ x: (R() < 0.5 ? -1 : 1) * lerp(38, 60, R()), z: lerp(-10, 10, R()), r: lerp(9, 13, R()), h: lerp(3.5, 6, R()) });
-
-    // Овраг поперёк поля между армиями
-    const z0 = lerp(-10, 10, R()), tilt = lerp(-0.22, 0.22, R()), x0 = lerp(-58, -22, R()), x1 = lerp(22, 60, R()), ph = R() * 6;
-    const pts = [];
-    for (let i = 0; i <= 16; i++) { const x = lerp(x0, x1, i / 16); pts.push([x, z0 + x * tilt + Math.sin(x * 0.06 + ph) * 6]); }
-    f.ravine = { pts, w: lerp(6.5, 9, R()), d: lerp(3.4, 4.4, R()) };
-
-    if (R() < 0.7) {
-      const s = R() < 0.5 ? -1 : 1, x = s * lerp(42, 64, R());
-      f.ridges.push({ ax: x, az: lerp(-38, -8, R()), bx: x + lerp(-10, 10, R()), bz: lerp(8, 38, R()), r: 4.5, h: lerp(2.6, 3.6, R()) });
-    }
-
-    // Каменные ограды с проёмами
-    const nW = 3 + ((R() * 3) | 0);
-    for (let i = 0; i < nW; i++) {
-      const cx = lerp(-62, 62, R()), cz = lerp(-34, 34, R());
-      const ang = R() < 0.6 ? lerp(-0.35, 0.35, R()) : Math.PI / 2 + lerp(-0.35, 0.35, R());
-      const len = lerp(10, 22, R()), dx = Math.cos(ang), dz = Math.sin(ang);
-      let s = -len / 2;
-      while (s < len / 2) {
-        const e = Math.min(len / 2, s + lerp(3.5, 7, R()));
-        f.walls.push({ ax: cx + dx * s, az: cz + dz * s, bx: cx + dx * e, bz: cz + dz * e, h: 1.35, t: 0.5 });
-        s = e + lerp(1.7, 2.6, R());
-      }
-    }
-    return f;
-  }
-
-  /** Карта «выпуклости» поля: где высоты, где низины. По ней думают полководцы. */
-  analyze() {
-    const step = 4, n = Math.floor((FIELD * 2) / step) + 1, prom = new Float32Array(n * n);
-    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
-      const x = -FIELD + ix * step, z = -FIELD + iz * step;
-      let s = 0;
-      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
-      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
-    }
-    const high = [], low = [];
-    for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
-      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
-      if (p > 1.4) {
-        let top = true;
-        for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
-          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
-        if (top) high.push({ x, z, h, prom: p });
-      }
-      if (p < -1.0) low.push({ x, z, h, depth: -p });
-    }
-    high.sort((a, b) => b.prom - a.prom);
-    this.an = { step, n, prom, high: high.slice(0, 12), low };
-  }
-
-  prominenceAt(x, z) {
-    const a = this.an, ix = clamp(Math.round((x + FIELD) / a.step), 0, a.n - 1), iz = clamp(Math.round((z + FIELD) / a.step), 0, a.n - 1);
-    return a.prom[iz * a.n + ix];
-  }
-
-  /** Верх ограды в точке (или -Infinity, если ограды нет). */
-  wallTop(x, z) {
-    for (const w of this.features.walls) {
-      if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.1) return this.heightAt(x, z) + w.h;
-    }
-    return -Infinity;
-  }
-
-  inWall(x, z) {
-    for (const w of this.features.walls) if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.35) return true;
-    return false;
-  }
-
-  /** Прямая видимость между двумя точками: мешают склоны и ограды. */
-  los(ax, ay, az, bx, by, bz) {
-    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz), n = Math.max(2, Math.ceil(d / 1.4));
-    for (let i = 1; i < n; i++) {
-      const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t;
-      if (this.heightAt(x, z) > y - 0.1) return false;
-      if (this.wallTop(x, z) > y) return false;
-    }
-    return true;
-  }
-
-  buildWalls() {
-    const walls = this.features.walls;
-    const stones = [];
-    const R = mulberry32(991);
-    for (const w of walls) {
-      const len = Math.hypot(w.bx - w.ax, w.bz - w.az), dx = (w.bx - w.ax) / len, dz = (w.bz - w.az) / len, yaw = Math.atan2(dx, dz);
-      for (let course = 0; course < 3; course++) {
-        const sy = course === 2 ? 0.3 : 0.52, y0 = course === 0 ? 0.26 : course === 1 ? 0.78 : 1.2;
-        for (let s = (course % 2) * 0.35; s < len; s += lerp(0.62, 0.8, R())) {
-          if (course === 2 && R() < 0.35) continue; // верх ограды местами осыпался
-          const x = w.ax + dx * s, z = w.az + dz * s;
-          stones.push({ x, z, y: this.heightAt(x, z) + y0, yaw: yaw + lerp(-0.12, 0.12, R()), sx: lerp(0.62, 0.82, R()), sy, sz: w.t * lerp(0.9, 1.1, R()), c: lerp(0.78, 1.05, R()) });
-        }
-      }
-    }
-    if (!stones.length) return;
-    const mesh = new THREE.InstancedMesh(this.own(new THREE.BoxGeometry(1, 1, 1)), this.own(new THREE.MeshStandardMaterial({ color: 0x8c8479, roughness: 0.95 })), stones.length);
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
-    stones.forEach((st, i) => {
-      q.setFromEuler(e.set(lerp(-0.05, 0.05, R()), st.yaw + Math.PI / 2, lerp(-0.05, 0.05, R())));
-      m4.compose(p.set(st.x, st.y, st.z), q, sc.set(st.sx, st.sy, st.sz));
-      mesh.setMatrixAt(i, m4);
-      mesh.setColorAt(i, c.setScalar(st.c));
-    });
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    this.group.add(mesh);
   }
 
   dispose() {
@@ -164,18 +84,207 @@ class World {
 
   own(o) { this.owned.push(o); return o; }
 
+  /** Где армии выстраиваются перед боем (расстояние от центра до первой линии). */
+  get spawnZ() { return this.town ? this.town.TZ + 8 : FIELD * (this.big ? 0.3 : 0.28); }
+
+  // ---------------------------------------------------------------- тактический рельеф
+
+  /** Холмы, овраги, гряды, островки и развалины — всё, за что можно воевать. */
+  makeFeatures(R, type) {
+    const f = { hills: [], ridges: [], ravine: null, walls: [], islands: [] };
+    const F = FIELD, S = F / 80;
+    const ruins = (count) => {
+      for (let i = 0; i < count; i++) {
+        const cx = lerp(-F * 0.78, F * 0.78, R()), cz = lerp(-F * 0.42, F * 0.42, R());
+        const ang = R() < 0.6 ? lerp(-0.35, 0.35, R()) : Math.PI / 2 + lerp(-0.35, 0.35, R());
+        const len = lerp(10, 22, R()), dx = Math.cos(ang), dz = Math.sin(ang);
+        let s = -len / 2;
+        while (s < len / 2) {
+          const e = Math.min(len / 2, s + lerp(3.5, 7, R()));
+          f.walls.push({ ax: cx + dx * s, az: cz + dz * s, bx: cx + dx * e, bz: cz + dz * e, h: 1.35, t: 0.5 });
+          s = e + lerp(1.7, 2.6, R());
+        }
+      }
+    };
+
+    if (type === 'city') { f.walls = this.town ? this.town.walls.slice() : []; return f; }
+
+    if (type === 'mountains') {
+      // Две гряды поперёк поля, в каждой — перевалы
+      for (const zc of [lerp(-F * 0.22, -F * 0.05, R()), lerp(F * 0.08, F * 0.25, R())]) {
+        const gaps = 1 + ((R() * 2) | 0), cuts = [...Array(gaps)].map(() => lerp(-F * 0.6, F * 0.6, R())).sort((a, b) => a - b);
+        let x = -F * 1.05;
+        for (const c of [...cuts, F * 1.05]) {
+          const e = c - 7;
+          if (e - x > 8) f.ridges.push({ ax: x, az: zc + lerp(-6, 6, R()), bx: e, bz: zc + lerp(-6, 6, R()), r: lerp(6.5, 8.5, R()), h: lerp(11, 16, R()) });
+          x = c + 7;
+        }
+      }
+      for (let i = 0; i < 3; i++) f.hills.push({ x: lerp(-F * 0.7, F * 0.7, R()), z: lerp(-F * 0.45, F * 0.45, R()), r: lerp(8, 12, R()) * S, h: lerp(6, 10, R()) });
+      return f;
+    }
+
+    if (type === 'swamp') {
+      const n = Math.round(lerp(6, 9, R()) * S);
+      for (let i = 0; i < n; i++) f.hills.push({ x: lerp(-F * 0.75, F * 0.75, R()), z: lerp(-F * 0.4, F * 0.4, R()), r: lerp(6, 10, R()), h: lerp(1.8, 3.2, R()) });
+      ruins(1 + ((R() * 2) | 0));
+      return f;
+    }
+
+    // Поле и лес: холмы по сторонам, овраг между армиями, гряда на фланге
+    for (const side of [-1, 1])
+      f.hills.push({ x: lerp(-F * 0.56, F * 0.56, R()), z: side * lerp(F * 0.25, F * 0.52, R()), r: lerp(11, 16, R()), h: lerp(4.5, 7.5, R()) });
+    if (R() < 0.65) f.hills.push({ x: (R() < 0.5 ? -1 : 1) * lerp(F * 0.48, F * 0.75, R()), z: lerp(-10, 10, R()), r: lerp(9, 13, R()), h: lerp(3.5, 6, R()) });
+    if (type === 'field' || R() < 0.5) {
+      const z0 = lerp(-10, 10, R()), tilt = lerp(-0.22, 0.22, R()), x0 = lerp(-F * 0.72, -F * 0.28, R()), x1 = lerp(F * 0.28, F * 0.75, R()), ph = R() * 6;
+      const pts = [];
+      for (let i = 0; i <= 16; i++) { const x = lerp(x0, x1, i / 16); pts.push([x, z0 + x * tilt + Math.sin(x * 0.06 + ph) * 6]); }
+      f.ravine = { pts, w: lerp(6.5, 9, R()), d: type === 'forest' ? lerp(2.2, 3, R()) : lerp(3.4, 4.4, R()) };
+    }
+    if (R() < 0.7) {
+      const s = R() < 0.5 ? -1 : 1, x = s * lerp(F * 0.52, F * 0.8, R());
+      f.ridges.push({ ax: x, az: lerp(-F * 0.48, -F * 0.1, R()), bx: x + lerp(-10, 10, R()), bz: lerp(F * 0.1, F * 0.48, R()), r: 4.5, h: lerp(2.6, 3.6, R()) });
+    }
+    ruins(type === 'forest' ? 1 + ((R() * 2) | 0) : Math.round((3 + ((R() * 3) | 0)) * S));
+    return f;
+  }
+
+  /** Лес: плотность чащи 0..1 (у мест построения армий — поляны). */
+  forestAt(x, z) {
+    if (this.type !== 'forest' || !World.inField(x, z)) return 0;
+    const d = this.pn.n01(x * 0.024 + this.o.cx, z * 0.024 + this.o.cz);
+    const mask = 1 - 0.8 * smooth(FIELD * 0.46, FIELD * 0.72, Math.abs(z));
+    return smooth(0.4, 0.6, d) * mask;
+  }
+
+  /** Болото: камыш в мелкой воде и на топких берегах. */
+  reedsAt(x, z) {
+    if (this.type !== 'swamp') return false;
+    const h = this.heightAt(x, z);
+    return h < 0.45 && h > -0.9 && this.pn.n01(x * 0.09 + this.o.lx, z * 0.09 + this.o.lz) > 0.42;
+  }
+
+  plantForest(R) {
+    const out = [], tries = Math.round(FIELD * FIELD * 0.26);
+    for (let i = 0; i < tries; i++) {
+      const x = lerp(-FIELD + 2, FIELD - 2, R()), z = lerp(-FIELD + 2, FIELD - 2, R());
+      const f = this.forestAt(x, z);
+      if (f < 0.3 || R() > f * 0.85) continue;
+      const cluster = R() < 0.22;
+      out.push({ x, z, kind: cluster ? 2 + ((R() * 5) | 0) : (R() * 2) | 0, rot: R() * Math.PI * 2, k: lerp(0.95, 1.4, R()), trunk: cluster ? 1.5 : 0.45 });
+    }
+    return out;
+  }
+
+  /** Высота основания дома: по самому низкому углу, чтобы он не висел над землёй. */
+  footprintY(b) {
+    let lo = Infinity;
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) lo = Math.min(lo, this.heightAt(b.x + sx * b.hx, b.z + sz * b.hz));
+    return lo - 0.15;
+  }
+
+  /** Карта «выпуклости» поля и укромные места: по ним думают полководцы. */
+  analyze() {
+    const step = 4, n = Math.floor((FIELD * 2) / step) + 1, prom = new Float32Array(n * n);
+    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
+      const x = -FIELD + ix * step, z = -FIELD + iz * step;
+      let s = 0;
+      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
+      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
+    }
+    const high = [], low = [], hide = [];
+    for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
+      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
+      if (this.nav.speedAt(x, z, 0) === 0) continue;
+      if (p > 1.4) {
+        let top = true;
+        for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
+          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
+        if (top) high.push({ x, z, h, prom: p });
+      }
+      if (p < -1.0 && h > WATER - 0.3) { low.push({ x, z, h, depth: -p }); hide.push({ x, z, depth: -p }); }
+      else if ((ix + iz) % 2 === 0 && this.nav.concealAt(x, z)) hide.push({ x, z, depth: 1.5 });
+    }
+    high.sort((a, b) => b.prom - a.prom);
+    this.an = { step, n, prom, high: high.slice(0, 16), low, hide };
+  }
+
+  prominenceAt(x, z) {
+    const a = this.an, ix = clamp(Math.round((x + FIELD) / a.step), 0, a.n - 1), iz = clamp(Math.round((z + FIELD) / a.step), 0, a.n - 1);
+    return a.prom[iz * a.n + ix];
+  }
+
+  /** Отряд укрыт от глаз: в низине, в чаще или в камыше. */
+  concealedAt(x, z) { return this.prominenceAt(x, z) < -0.9 || this.nav.concealAt(x, z); }
+
+  walkable(x, z, pad = 0.3) { return this.nav.speedAt(x, z, 0) > 0 && !this.obs.hit(x, z, pad); }
+
+  /** Верх ограды в точке (или -Infinity, если ограды нет). */
+  wallTop(x, z) {
+    const L = this.wallGrid.near(x, z);
+    if (L) for (const o of L) {
+      const w = o.wall;
+      if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.1) return this.heightAt(x, z) + w.h;
+    }
+    return -Infinity;
+  }
+
+  inWall(x, z) {
+    const L = this.wallGrid.near(x, z);
+    if (L) for (const o of L) { const w = o.wall; if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.35) return true; }
+    return false;
+  }
+
+  /** Прямая видимость: мешают склоны, ограды, дома и густая чаща. */
+  los(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz), n = Math.max(2, Math.ceil(d / 1.4)), step = d / n;
+    let canopy = 0;
+    const forest = this.type === 'forest', houses = this.obs.list.length > 0;
+    for (let i = 1; i < n; i++) {
+      const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t, g = this.heightAt(x, z);
+      if (g > y - 0.1) return false;
+      if (this.wallTop(x, z) > y) return false;
+      if (houses && this.obs.blocks(x, z, y)) return false;
+      if (forest && y < g + 7 && this.nav.canopyAt(x, z) && (canopy += step) > 7) return false;
+    }
+    return true;
+  }
+
+  /** Места, где можно укрыться от стрелков врага (ec — центр вражеской армии). */
+  coverCandidates(ec) {
+    const out = [];
+    for (const l of this.an.hide) out.push({ x: l.x, z: l.z, kind: 'low' });
+    for (const w of this.features.walls) {
+      const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, l = Math.hypot(w.bx - w.ax, w.bz - w.az) || 1;
+      const nx = -(w.bz - w.az) / l, nz = (w.bx - w.ax) / l, side = nx * (mx - ec.x) + nz * (mz - ec.z) > 0 ? 1 : -1;
+      out.push({ x: mx + nx * 1.6 * side, z: mz + nz * 1.6 * side, kind: 'wall' });
+    }
+    if (this.town) for (const b of this.town.buildings) {
+      const v = norm2(b.x - ec.x, b.z - ec.z), r = Math.max(b.hx, b.hz) + 2;
+      out.push({ x: b.x + v.x * r, z: b.z + v.z * r, kind: 'house' });
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------- высоты
 
   rawHeight(x, z) {
-    const n = this.pn, o = this.o;
+    const n = this.pn, o = this.o, T = this.type, F = this.features;
     const dist = Math.max(Math.abs(x), Math.abs(z)) * 0.6 + Math.hypot(x, z) * 0.4;
     const hills = n.fbm(x * 0.006 + o.hx, z * 0.006 + o.hz, 4);
     const detail = n.fbm(x * 0.05 + o.hx + 31.7, z * 0.05 + o.hz - 11.3, 2);
 
-    // Поле боя: мягкие холмы, всегда выше воды
-    let field = 2.6 + hills * 3.2 + detail * 0.35;
-    const F = this.features;
-    if (F && dist < FIELD + 30) {
+    let field;
+    if (T === 'swamp') {
+      field = 0.35 + hills * 1.4 + detail * 0.35;
+      const pool = n.n01(x * 0.028 + o.lx, z * 0.028 + o.lz);
+      field -= Math.max(0, pool - 0.42) * 7;
+      field += smooth(FIELD * 0.42, FIELD * 0.72, Math.abs(z)) * 1.9; // у армий суше
+    } else if (T === 'city') field = 2.2 + hills * 1.0 + detail * 0.12;
+    else if (T === 'mountains') field = 3 + hills * 5 + detail * 0.5 + n.ridged(x * 0.02 + o.mx, z * 0.02 + o.mz, 3) * 4 * (1 - smooth(FIELD * 0.5, FIELD * 0.75, Math.abs(z)));
+    else field = 2.6 + hills * 3.2 + detail * 0.35;
+
+    if (dist < FIELD + 30) {
       for (const hl of F.hills) {
         const d2 = ((x - hl.x) ** 2 + (z - hl.z) ** 2) / (hl.r * hl.r);
         if (d2 < 9) field += hl.h * Math.exp(-d2);
@@ -184,19 +293,21 @@ class World {
         const d = segDist(x, z, r.ax, r.az, r.bx, r.bz);
         if (d < r.r * 3) field += r.h * Math.exp(-((d / r.r) ** 2));
       }
-      const rv = F.ravine;
-      const d = polyDist(x, z, rv.pts);
-      if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
+      if (F.ravine) {
+        const rv = F.ravine, d = polyDist(x, z, rv.pts);
+        if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
+      }
     }
-    if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
+    if (T === 'swamp') field = Math.max(field, -2.2);
+    else if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
 
     // Окрестности: холмы крупнее, озёра, горы по краям
     let outer = 3 + hills * 16 + detail * 0.9;
     const lake = n.n01(x * 0.011 + o.lx, z * 0.011 + o.lz);
-    outer -= Math.max(0, lake - 0.58) * 70 * smooth(105, 135, dist);
-    const floor = lerp(1.0, -30, smooth(100, 125, dist));
+    outer -= Math.max(0, lake - 0.58) * 70 * smooth(FIELD + 25, FIELD + 55, dist);
+    const floor = lerp(1.0, -30, smooth(FIELD + 20, FIELD + 45, dist));
     if (outer < floor) outer = floor;
-    const mt = smooth(115, 215, dist);
+    const mt = smooth(FIELD + 35, FIELD + 135, dist);
     outer += mt * mt * (30 + n.ridged(x * 0.009 + o.mx, z * 0.009 + o.mz, 4) * 60);
 
     return lerp(field, outer, smooth(FIELD - 5, FIELD + 40, dist));
@@ -239,12 +350,23 @@ class World {
     return null;
   }
 
+  /** Мощёные улицы и площадь города: 0 — трава, 1 — камень. */
+  paving(x, z) {
+    const T = this.town;
+    if (!T || Math.abs(x) > T.TX + 12 || Math.abs(z) > T.TZ + 12) return 0;
+    for (const sq of T.squares) if (Math.abs(x - sq.x) < sq.hx && Math.abs(z - sq.z) < sq.hz) return 1;
+    let best = Infinity;
+    for (const s of T.streets) best = Math.min(best, segDist(x, z, s.ax, s.az, s.bx, s.bz) - s.w / 2);
+    return smooth(0.8, -0.4, best);
+  }
+
   // ---------------------------------------------------------------- рельеф
 
   buildTerrain(s) {
     const n = this.pn, o = this.o;
     const data = new Uint8Array(TEX * TEX * 4);
     const c = new THREE.Color(), t = new THREE.Color();
+    const mud = new THREE.Color(0x4f4a2c), cobble = new THREE.Color(0x8b8274), floorC = new THREE.Color(0x3f5328);
     for (let ty = 0; ty < TEX; ty++) {
       for (let tx = 0; tx < TEX; tx++) {
         const x = (tx + 0.5) / TEX * SIZE - HALF, z = (ty + 0.5) / TEX * SIZE - HALF;
@@ -256,12 +378,19 @@ class World {
         c.copy(s.grassA).lerp(s.grassB, n1);
         c.lerp(s.dry, smooth(0.55, 0.8, n3) * 0.75);
         c.lerp(s.dirt, smooth(0.72, 0.85, n2 * 0.6 + n1 * 0.4) * 0.6);
+        if (this.type === 'forest') c.lerp(floorC, this.forestAt(x, z) * 0.7);
         const shore = y - WATER;
-        t.copy(s.sand).lerp(c, smooth(0.2, 1.4, shore + (n2 - 0.5) * 0.6)); c.copy(t);
-        if (shore < 0) c.copy(s.sand).lerp(s.underwater, smooth(0, -5, shore));
+        if (this.type === 'swamp') {
+          c.lerp(mud, smooth(0.9, 0.1, shore) * 0.8);
+          if (shore < 0) c.copy(mud).lerp(s.underwater, smooth(0, -1.5, shore));
+        } else {
+          t.copy(s.sand).lerp(c, smooth(0.2, 1.4, shore + (n2 - 0.5) * 0.6)); c.copy(t);
+          if (shore < 0) c.copy(s.sand).lerp(s.underwater, smooth(0, -5, shore));
+        }
         c.lerp(s.rock, smooth(0.07, 0.16, slope + (n2 - 0.5) * 0.04));
         c.lerp(s.rock, smooth(32, 48, y + (n1 - 0.5) * 12));
         c.lerp(s.snow, smooth(s.snowLine, s.snowLine + 6, y + (n2 - 0.5) * 10) * (1 - smooth(0.2, 0.3, slope)));
+        if (this.town) c.lerp(cobble, this.paving(x, z) * (0.75 + n2 * 0.2));
         const k = 0.9 + n2 * 0.18;
         const i = (ty * TEX + tx) * 4;
         data[i] = clamp(c.r * k * 255, 0, 255); data[i + 1] = clamp(c.g * k * 255, 0, 255); data[i + 2] = clamp(c.b * k * 255, 0, 255); data[i + 3] = 255;
@@ -357,7 +486,38 @@ class World {
     scene.environment = this.envRT.texture;
   }
 
-  // ---------------------------------------------------------------- деревья, камни, трава, замки
+  buildWalls() {
+    const walls = this.features.walls;
+    const stones = [];
+    const R = mulberry32(991);
+    for (const w of walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az);
+      if (len < 0.3) continue;
+      const dx = (w.bx - w.ax) / len, dz = (w.bz - w.az) / len, yaw = Math.atan2(dx, dz);
+      const courses = w.h > 1.2 ? 3 : 2;
+      for (let course = 0; course < courses; course++) {
+        const sy = course === 2 ? 0.3 : 0.52, y0 = course === 0 ? 0.26 : course === 1 ? 0.78 : 1.2;
+        for (let s = (course % 2) * 0.35; s < len; s += lerp(0.62, 0.8, R())) {
+          if (course === courses - 1 && R() < 0.35) continue; // верх ограды местами осыпался
+          const x = w.ax + dx * s, z = w.az + dz * s;
+          stones.push({ x, z, y: this.heightAt(x, z) + y0, yaw: yaw + lerp(-0.12, 0.12, R()), sx: lerp(0.62, 0.82, R()), sy, sz: w.t * lerp(0.9, 1.1, R()), c: lerp(0.78, 1.05, R()) });
+        }
+      }
+    }
+    if (!stones.length) return;
+    const mesh = new THREE.InstancedMesh(this.own(new THREE.BoxGeometry(1, 1, 1)), this.own(new THREE.MeshStandardMaterial({ color: 0x8c8479, roughness: 0.95 })), stones.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
+    stones.forEach((st, i) => {
+      q.setFromEuler(e.set(lerp(-0.05, 0.05, R()), st.yaw + Math.PI / 2, lerp(-0.05, 0.05, R())));
+      m4.compose(p.set(st.x, st.y, st.z), q, sc.set(st.sx, st.sy, st.sz));
+      mesh.setMatrixAt(i, m4);
+      mesh.setColorAt(i, c.setScalar(st.c));
+    });
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
+  }
+
+  // ---------------------------------------------------------------- деревья, камни, трава, постройки
 
   flatSpot(xMin, xMax, zMin, zMax, radius, tries) {
     let best = null, bestScore = Infinity;
@@ -377,11 +537,12 @@ class World {
 
   buildDecor(s, assets) {
     const r = this.rand, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const T = this.type;
     const treeKinds = assets.trees;
     const lists = treeKinds.map(() => []);
 
-    // Деревья рощами, вне поля боя
-    const tries = Math.floor(2400 * s.treeDensity);
+    // Деревья рощами вокруг поля боя
+    const tries = Math.floor(2400 * s.treeDensity * (T === 'forest' ? 1.4 : T === 'mountains' ? 0.7 : 1) * (this.big ? 1.4 : 1));
     for (let i = 0; i < tries; i++) {
       const x = lerp(-HALF + 6, HALF - 6, r()), z = lerp(-HALF + 6, HALF - 6, r());
       if (Math.abs(x) < FIELD + 7 && Math.abs(z) < FIELD + 7) continue;
@@ -389,43 +550,54 @@ class World {
       if (y < WATER + 0.8 || y > s.snowLine + 4 || this.slopeAt(x, z) > 0.12) continue;
       const forest = this.pn.n01(x * 0.013 + this.o.mx, z * 0.013 + this.o.mz);
       if (forest < 0.45 && r() > 0.06) continue;
-      const kind = Math.floor(r() * treeKinds.length);
-      lists[kind].push([x, y - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.3, r())]);
+      lists[Math.floor(r() * treeKinds.length)].push([x, y - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.3, r())]);
+    }
+    // Лес на самом поле боя
+    for (const t of this.trees) lists[t.kind].push([t.x, this.heightAt(t.x, t.z) - 0.2, t.z, t.rot, t.k]);
+    // Горы: редкие сосны на пологих склонах
+    if (T === 'mountains') for (let i = 0; i < FIELD * 3; i++) {
+      const x = lerp(-FIELD, FIELD, r()), z = lerp(-FIELD, FIELD, r());
+      if (this.slopeAt(x, z) > 0.1 || this.nav.speedAt(x, z, 0) === 0) continue;
+      lists[(r() * 2) | 0].push([x, this.heightAt(x, z) - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.2, r())]);
+      this.obs.addCircle(x, z, 0.45, 7, this.heightAt(x, z));
     }
     const treeMat = assets.treeMaterial(s);
     treeKinds.forEach((kind, i) => this.instanced(kind, treeMat, lists[i], true));
 
-    // Камни: крупные снаружи, мелкие на поле
+    // Камни: крупные снаружи, мелкие на поле (в горах — побольше)
     const rockLists = assets.rocks.map(() => []);
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < (T === 'mountains' ? 420 : 260) * (this.big ? 1.5 : 1); i++) {
       const x = lerp(-HALF + 5, HALF - 5, r()), z = lerp(-HALF + 5, HALF - 5, r());
       const inField = Math.abs(x) < FIELD + 4 && Math.abs(z) < FIELD + 4;
-      if (inField && r() > 0.3) continue;
+      if (inField && (r() > (T === 'mountains' ? 0.6 : 0.3) || this.paving(x, z) > 0 || this.obs.hit(x, z, 1))) continue;
       const y = this.heightAt(x, z);
       if (y < WATER - 1.5 || y > 40) continue;
-      const size = inField ? lerp(0.5, 1.1, r()) : lerp(1.2, 4, r());
+      const size = inField ? lerp(0.5, T === 'mountains' ? 2.5 : 1.1, r()) : lerp(1.2, 4, r());
       rockLists[Math.floor(r() * rockLists.length)].push([x, y - size * 0.3, z, r() * Math.PI * 2, size]);
     }
     assets.rocks.forEach((kind, i) => this.instanced(kind, assets.rockMat, rockLists[i], true));
 
-    // Трава и цветы
-    const tuftCount = Math.floor((LOW_END ? 3500 : 7000) * s.grassDensity);
+    // Трава и цветы (на болоте — камыш)
+    const tuftCount = Math.floor((LOW_END ? 3500 : 7000) * s.grassDensity * (this.big ? 1.6 : 1));
     const grass = new THREE.InstancedMesh(GRASS_GEO, GRASS_MAT, tuftCount);
     const flowerCount = Math.floor(tuftCount * s.flowers);
     const flowers = new THREE.InstancedMesh(FLOWER_GEO, FLOWER_MAT, Math.max(1, flowerCount));
-    const col = new THREE.Color();
+    const col = new THREE.Color(), reedA = new THREE.Color(0x8a8f45), reedB = new THREE.Color(0xa99a55);
     let gi = 0, fi = 0;
     for (let tries2 = 0; gi < tuftCount && tries2 < tuftCount * 3; tries2++) {
       const x = lerp(-FIELD - 30, FIELD + 30, r()), z = lerp(-FIELD - 30, FIELD + 30, r());
       const y = this.heightAt(x, z);
-      if (y < WATER + 0.4 || this.pn.n01(x * 0.05 + this.o.lx, z * 0.05 + this.o.lz) < 0.33) continue;
+      const reed = this.reedsAt(x, z);
+      if (!reed && (y < WATER + 0.4 || this.pn.n01(x * 0.05 + this.o.lx, z * 0.05 + this.o.lz) < 0.33)) continue;
+      if (this.town && (this.paving(x, z) > 0.2 || this.obs.hit(x, z, 0.3))) continue;
       q.setFromAxisAngle(up, r() * Math.PI * 2);
       const k = lerp(0.7, 1.4, r());
-      m4.compose(p.set(x, y - 0.03, z), q, sc.set(k, k * lerp(0.8, 1.3, r()), k));
+      if (reed) m4.compose(p.set(x, Math.max(y, WATER - 0.2) - 0.05, z), q, sc.set(k * 1.1, k * lerp(3, 4.5, r()), k * 1.1));
+      else m4.compose(p.set(x, y - 0.03, z), q, sc.set(k, k * lerp(0.8, 1.3, r()), k));
       grass.setMatrixAt(gi, m4);
-      grass.setColorAt(gi, col.copy(s.grass1).lerp(s.grass2, r()));
+      grass.setColorAt(gi, reed ? col.copy(reedA).lerp(reedB, r()) : col.copy(s.grass1).lerp(s.grass2, r()));
       gi++;
-      if (fi < flowerCount && r() < s.flowers * 1.2) {
+      if (!reed && fi < flowerCount && r() < s.flowers * 1.2) {
         m4.compose(p.set(x + 0.1, y + 0.33 * k, z), q, sc.set(1, 1, 1));
         flowers.setMatrixAt(fi, m4);
         flowers.setColorAt(fi, s.flower[Math.floor(r() * 3)]);
@@ -437,15 +609,37 @@ class World {
     this.group.add(grass);
     if (fi > 0) this.group.add(flowers);
 
+    if (this.town) this.buildTown(assets);
+
     // Замки армий за их спинами, мельница и башни на холмах
-    const blue = this.flatSpot(-35, 35, -150, -104, 9, 60), red = this.flatSpot(-35, 35, 104, 150, 9, 60);
+    const F = FIELD;
+    const blue = this.flatSpot(-35, 35, -(F + 70), -(F + 24), 9, 60), red = this.flatSpot(-35, 35, F + 24, F + 70, 9, 60);
     if (blue) this.placeBuilding(assets.buildings.castle_blue, blue, 0, 24);
     if (red) this.placeBuilding(assets.buildings.castle_red, red, Math.PI, 24);
     for (let i = 0; i < 3; i++) {
       const side = r() < 0.5 ? -1 : 1;
-      const spot = this.flatSpot(side * 150, side * 100, -120, 120, 5, 40);
+      const spot = this.flatSpot(side * (F + 70), side * (F + 20), -(F + 40), F + 40, 5, 40);
       if (spot) this.placeBuilding(i === 0 ? assets.buildings.windmill : assets.buildings.tower, spot, r() * Math.PI * 2, i === 0 ? 15 : 13);
     }
+  }
+
+  /** Все дома города сливаются в один меш: одна текстура, один вызов отрисовки. */
+  buildTown(assets) {
+    const geos = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const put = (def, x, y, z, rot, k) => {
+      q.setFromAxisAngle(up, rot);
+      m4.compose(p.set(x, y, z), q, s.set(k, k, k));
+      geos.push(def.geometry.clone().applyMatrix4(m4));
+    };
+    for (const b of this.town.buildings) put(b.def, b.x, b.y, b.z, b.rot, b.s);
+    for (const pr of this.town.props) put(pr.def, pr.x, pr.y, pr.z, pr.rot, pr.s);
+    if (!geos.length) return;
+    const merged = this.own(mergeGeometries(geos, false));
+    geos.forEach((g) => g.dispose());
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, assets.cityMat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
   }
 
   instanced(kind, mat, list, shadow) {

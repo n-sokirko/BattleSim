@@ -5,6 +5,13 @@ const MODEL_NAMES = ['Knight', 'Barbarian', 'Rogue_Hooded', 'Horse', 'White_Hors
   'tree_single_A', 'tree_single_B', 'trees_A_large', 'trees_A_medium', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
   'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
   'castle_blue', 'castle_red', 'windmill', 'tower'];
+// Город: дома четырёх цветов, общественные здания и мелочи для улиц
+const CITY_MODELS = {
+  home: ['home_A_red', 'home_A_blue', 'home_A_yellow', 'home_A_green', 'home_B_red', 'home_B_blue', 'home_B_yellow', 'home_B_green'],
+  church: ['church'], tavern: ['tavern'], blacksmith: ['blacksmith'], market: ['market'], well: ['well'], tower_B: ['tower_B'], destroyed: ['destroyed'],
+  prop: ['barrel', 'crate_A_big', 'crate_B_small', 'crate_long_A', 'wheelbarrow', 'sack'],
+};
+for (const list of Object.values(CITY_MODELS)) for (const n of list) MODEL_NAMES.push('city_' + n);
 
 async function loadPacked(loader, name) {
   const res = await fetch('pack/' + name + '.txt');
@@ -318,6 +325,14 @@ async function loadAssets(onProgress) {
     }
     return foliage[key];
   };
+  ASSETS.cityDefs = [];
+  for (const [kind, list] of Object.entries(CITY_MODELS)) for (const n of list) {
+    const m = mergeStatic(G['city_' + n]);
+    const bb = m.geometry.boundingBox;
+    ASSETS.cityDefs.push({ kind, name: n, geometry: m.geometry, w: bb.max.x - bb.min.x, d: bb.max.z - bb.min.z, h: m.height });
+    ASSETS.cityMat = ASSETS.cityMat || m.material;
+  }
+  ASSETS.cityMat.roughness = 0.85;
   ASSETS.buildings = {};
   for (const k of ['castle_blue', 'castle_red', 'windmill', 'tower']) {
     const sc = G[k].scene;

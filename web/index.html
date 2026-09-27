@@ -167,7 +167,17 @@
     <div class="map-name" id="cmdInfo"></div>
   </div>
   <div class="row" id="setupTop">
-    <button class="btn" id="newMap">Новая карта</button>
+    <span class="pair">
+      <button class="btn" id="newMap">Новая карта</button>
+      <select class="btn select" id="mapType" aria-label="Местность">
+        <option value="random" selected>Любая местность</option>
+        <option value="field">Поле</option>
+        <option value="forest">Лес</option>
+        <option value="mountains">Горы</option>
+        <option value="swamp">Болото</option>
+        <option value="city">Город</option>
+      </select>
+    </span>
     <span class="pair">
       <button class="btn" id="random">Случайные армии</button>
       <select class="btn select" id="armySize" aria-label="Размер армий">
@@ -236,6 +246,16 @@
           <li><b>Укрытия.</b> Болт — настоящий снаряд: он врезается в склон или каменную ограду. Без прямой видимости стрелок не стреляет.</li>
           <li><b>Ограды и проёмы.</b> Через ограду лезут втрое медленнее, через проём проходят свободно.</li>
           <li><b>Низины.</b> Отряд в овраге издали не виден, пока не выстрелит или враг не подойдёт ближе 20 м. Кольцо под ним темнеет.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Местности</h3>
+        <ul>
+          <li><b>Поле.</b> Холмы, овраг между армиями, каменные ограды с проёмами.</li>
+          <li><b>Лес.</b> Чаща прячет отряды, глушит болты и вдвое замедляет конницу. Хитрый полководец устроит там засаду.</li>
+          <li><b>Горы.</b> Гряды с перевалами. Крутые склоны не пройти — войска ищут обход.</li>
+          <li><b>Болото.</b> Глубокую воду не перейти, по топи и броду идут медленно, кони вязнут. В камышах легко затаиться.</li>
+          <li><b>Город.</b> Улицы, кварталы, площадь с церковью, баррикады. Дома закрывают от болтов, бой идёт в переулках.</li>
         </ul>
       </section>
       <section>
@@ -422,7 +442,17 @@ const SQUAD_NAME = ['мечники', 'варвары', 'арбалетчики'
 
 // ------------------------------------------------------------------ мир
 
-const SIZE = 440, RES = 256, HALF = SIZE / 2, CELL = SIZE / RES, FIELD = 80, WATER = 0, TEX = 512;
+let SIZE = 440, RES = 256, HALF = SIZE / 2, CELL = SIZE / RES, FIELD = 80;
+const WATER = 0, TEX = 512;
+
+/** Размер поля боя: обычное 160×160 м или большое (для великой сечи). */
+function setWorldScale(big) {
+  FIELD = big ? 118 : 80;
+  SIZE = FIELD * 2 + 280;
+  RES = big ? 300 : 256;
+  HALF = SIZE / 2;
+  CELL = SIZE / RES;
+}
 
 class World {
   constructor() {
@@ -430,11 +460,15 @@ class World {
     this.group = null;
     this.owned = [];
     this.sunDir = new THREE.Vector3(0, 1, 0);
+    this.type = 'field';
+    this.features = { hills: [], ridges: [], ravine: null, walls: [] };
   }
 
-  generate(seed, style, assets) {
+  generate(seed, style, assets, type = 'field', big = false) {
     this.dispose();
-    this.style = style;
+    setWorldScale(big);
+    this.type = type; this.big = big; this.style = style;
+    this.h = new Float32Array((RES + 1) * (RES + 1));
     this.group = new THREE.Group();
     scene.add(this.group);
     const rand = mulberry32(seed);
@@ -442,7 +476,8 @@ class World {
     this.pn = new Perlin(rand);
     const o = () => rand() * 200;
     this.o = { hx: o(), hz: o(), lx: o(), lz: o(), mx: o(), mz: o(), cx: o(), cz: o() };
-    this.features = this.makeFeatures(rand);
+    this.town = type === 'city' && assets ? makeTown(rand, assets.cityDefs) : null;
+    this.features = this.makeFeatures(rand, type);
     const wa = rand() * Math.PI * 2, ws = rand() < 0.2 ? 0 : 1 + rand() * 6;
     this.wind = new THREE.Vector2(Math.cos(wa) * ws, Math.sin(wa) * ws);
 
@@ -450,6 +485,29 @@ class World {
     for (let z = 0; z <= RES; z++)
       for (let x = 0; x <= RES; x++)
         h[z * (RES + 1) + x] = this.rawHeight(x * CELL - HALF, z * CELL - HALF);
+
+    // Препятствия: стволы леса, дома, мелочи; ограды — отдельной сеткой (их перелезают)
+    this.obs = new Obstacles(FIELD);
+    this.wallGrid = new Obstacles(FIELD);
+    for (const w of this.features.walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az);
+      this.wallGrid.insert({ wall: w, x: (w.ax + w.bx) / 2, z: (w.az + w.bz) / 2 }, len / 2 + w.t);
+    }
+    this.trees = type === 'forest' ? this.plantForest(rand) : [];
+    for (const t of this.trees) this.obs.addCircle(t.x, t.z, t.trunk, 7, this.heightAt(t.x, t.z));
+    if (this.town) {
+      for (const b of this.town.buildings) {
+        b.y = this.footprintY(b);
+        if (b.def.kind === 'well') this.obs.addCircle(b.x, b.z, Math.max(b.hx, b.hz), b.top, b.y);
+        else this.obs.addRect(b.x, b.z, b.hx, b.hz, b.rot, b.top, b.y);
+      }
+      for (const p of this.town.props) {
+        const s = 1.1 / p.def.h;
+        p.s = s; p.y = this.heightAt(p.x, p.z);
+        this.obs.addCircle(p.x, p.z, Math.max(p.def.w, p.def.d) * s * 0.5, 1.1, p.y);
+      }
+    }
+    this.nav = new NavGrid(this);
     this.analyze();
 
     this.buildTerrain(style);
@@ -457,124 +515,6 @@ class World {
     this.applyAtmosphere(style);
     this.buildWalls();
     if (assets) this.buildDecor(style, assets);
-  }
-
-  // ---------------------------------------------------------------- тактический рельеф
-
-  /** Холмы, овраг, гряда и развалины каменных оград — всё, за что можно воевать. */
-  makeFeatures(R) {
-    const f = { hills: [], ridges: [], ravine: null, walls: [] };
-    for (const side of [-1, 1])
-      f.hills.push({ x: lerp(-45, 45, R()), z: side * lerp(20, 42, R()), r: lerp(11, 16, R()), h: lerp(4.5, 7.5, R()) });
-    if (R() < 0.65)
-      f.hills.push({ x: (R() < 0.5 ? -1 : 1) * lerp(38, 60, R()), z: lerp(-10, 10, R()), r: lerp(9, 13, R()), h: lerp(3.5, 6, R()) });
-
-    // Овраг поперёк поля между армиями
-    const z0 = lerp(-10, 10, R()), tilt = lerp(-0.22, 0.22, R()), x0 = lerp(-58, -22, R()), x1 = lerp(22, 60, R()), ph = R() * 6;
-    const pts = [];
-    for (let i = 0; i <= 16; i++) { const x = lerp(x0, x1, i / 16); pts.push([x, z0 + x * tilt + Math.sin(x * 0.06 + ph) * 6]); }
-    f.ravine = { pts, w: lerp(6.5, 9, R()), d: lerp(3.4, 4.4, R()) };
-
-    if (R() < 0.7) {
-      const s = R() < 0.5 ? -1 : 1, x = s * lerp(42, 64, R());
-      f.ridges.push({ ax: x, az: lerp(-38, -8, R()), bx: x + lerp(-10, 10, R()), bz: lerp(8, 38, R()), r: 4.5, h: lerp(2.6, 3.6, R()) });
-    }
-
-    // Каменные ограды с проёмами
-    const nW = 3 + ((R() * 3) | 0);
-    for (let i = 0; i < nW; i++) {
-      const cx = lerp(-62, 62, R()), cz = lerp(-34, 34, R());
-      const ang = R() < 0.6 ? lerp(-0.35, 0.35, R()) : Math.PI / 2 + lerp(-0.35, 0.35, R());
-      const len = lerp(10, 22, R()), dx = Math.cos(ang), dz = Math.sin(ang);
-      let s = -len / 2;
-      while (s < len / 2) {
-        const e = Math.min(len / 2, s + lerp(3.5, 7, R()));
-        f.walls.push({ ax: cx + dx * s, az: cz + dz * s, bx: cx + dx * e, bz: cz + dz * e, h: 1.35, t: 0.5 });
-        s = e + lerp(1.7, 2.6, R());
-      }
-    }
-    return f;
-  }
-
-  /** Карта «выпуклости» поля: где высоты, где низины. По ней думают полководцы. */
-  analyze() {
-    const step = 4, n = Math.floor((FIELD * 2) / step) + 1, prom = new Float32Array(n * n);
-    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
-      const x = -FIELD + ix * step, z = -FIELD + iz * step;
-      let s = 0;
-      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
-      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
-    }
-    const high = [], low = [];
-    for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
-      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
-      if (p > 1.4) {
-        let top = true;
-        for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
-          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
-        if (top) high.push({ x, z, h, prom: p });
-      }
-      if (p < -1.0) low.push({ x, z, h, depth: -p });
-    }
-    high.sort((a, b) => b.prom - a.prom);
-    this.an = { step, n, prom, high: high.slice(0, 12), low };
-  }
-
-  prominenceAt(x, z) {
-    const a = this.an, ix = clamp(Math.round((x + FIELD) / a.step), 0, a.n - 1), iz = clamp(Math.round((z + FIELD) / a.step), 0, a.n - 1);
-    return a.prom[iz * a.n + ix];
-  }
-
-  /** Верх ограды в точке (или -Infinity, если ограды нет). */
-  wallTop(x, z) {
-    for (const w of this.features.walls) {
-      if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.1) return this.heightAt(x, z) + w.h;
-    }
-    return -Infinity;
-  }
-
-  inWall(x, z) {
-    for (const w of this.features.walls) if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.35) return true;
-    return false;
-  }
-
-  /** Прямая видимость между двумя точками: мешают склоны и ограды. */
-  los(ax, ay, az, bx, by, bz) {
-    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz), n = Math.max(2, Math.ceil(d / 1.4));
-    for (let i = 1; i < n; i++) {
-      const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t;
-      if (this.heightAt(x, z) > y - 0.1) return false;
-      if (this.wallTop(x, z) > y) return false;
-    }
-    return true;
-  }
-
-  buildWalls() {
-    const walls = this.features.walls;
-    const stones = [];
-    const R = mulberry32(991);
-    for (const w of walls) {
-      const len = Math.hypot(w.bx - w.ax, w.bz - w.az), dx = (w.bx - w.ax) / len, dz = (w.bz - w.az) / len, yaw = Math.atan2(dx, dz);
-      for (let course = 0; course < 3; course++) {
-        const sy = course === 2 ? 0.3 : 0.52, y0 = course === 0 ? 0.26 : course === 1 ? 0.78 : 1.2;
-        for (let s = (course % 2) * 0.35; s < len; s += lerp(0.62, 0.8, R())) {
-          if (course === 2 && R() < 0.35) continue; // верх ограды местами осыпался
-          const x = w.ax + dx * s, z = w.az + dz * s;
-          stones.push({ x, z, y: this.heightAt(x, z) + y0, yaw: yaw + lerp(-0.12, 0.12, R()), sx: lerp(0.62, 0.82, R()), sy, sz: w.t * lerp(0.9, 1.1, R()), c: lerp(0.78, 1.05, R()) });
-        }
-      }
-    }
-    if (!stones.length) return;
-    const mesh = new THREE.InstancedMesh(this.own(new THREE.BoxGeometry(1, 1, 1)), this.own(new THREE.MeshStandardMaterial({ color: 0x8c8479, roughness: 0.95 })), stones.length);
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
-    stones.forEach((st, i) => {
-      q.setFromEuler(e.set(lerp(-0.05, 0.05, R()), st.yaw + Math.PI / 2, lerp(-0.05, 0.05, R())));
-      m4.compose(p.set(st.x, st.y, st.z), q, sc.set(st.sx, st.sy, st.sz));
-      mesh.setMatrixAt(i, m4);
-      mesh.setColorAt(i, c.setScalar(st.c));
-    });
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    this.group.add(mesh);
   }
 
   dispose() {
@@ -586,18 +526,207 @@ class World {
 
   own(o) { this.owned.push(o); return o; }
 
+  /** Где армии выстраиваются перед боем (расстояние от центра до первой линии). */
+  get spawnZ() { return this.town ? this.town.TZ + 8 : FIELD * (this.big ? 0.3 : 0.28); }
+
+  // ---------------------------------------------------------------- тактический рельеф
+
+  /** Холмы, овраги, гряды, островки и развалины — всё, за что можно воевать. */
+  makeFeatures(R, type) {
+    const f = { hills: [], ridges: [], ravine: null, walls: [], islands: [] };
+    const F = FIELD, S = F / 80;
+    const ruins = (count) => {
+      for (let i = 0; i < count; i++) {
+        const cx = lerp(-F * 0.78, F * 0.78, R()), cz = lerp(-F * 0.42, F * 0.42, R());
+        const ang = R() < 0.6 ? lerp(-0.35, 0.35, R()) : Math.PI / 2 + lerp(-0.35, 0.35, R());
+        const len = lerp(10, 22, R()), dx = Math.cos(ang), dz = Math.sin(ang);
+        let s = -len / 2;
+        while (s < len / 2) {
+          const e = Math.min(len / 2, s + lerp(3.5, 7, R()));
+          f.walls.push({ ax: cx + dx * s, az: cz + dz * s, bx: cx + dx * e, bz: cz + dz * e, h: 1.35, t: 0.5 });
+          s = e + lerp(1.7, 2.6, R());
+        }
+      }
+    };
+
+    if (type === 'city') { f.walls = this.town ? this.town.walls.slice() : []; return f; }
+
+    if (type === 'mountains') {
+      // Две гряды поперёк поля, в каждой — перевалы
+      for (const zc of [lerp(-F * 0.22, -F * 0.05, R()), lerp(F * 0.08, F * 0.25, R())]) {
+        const gaps = 1 + ((R() * 2) | 0), cuts = [...Array(gaps)].map(() => lerp(-F * 0.6, F * 0.6, R())).sort((a, b) => a - b);
+        let x = -F * 1.05;
+        for (const c of [...cuts, F * 1.05]) {
+          const e = c - 7;
+          if (e - x > 8) f.ridges.push({ ax: x, az: zc + lerp(-6, 6, R()), bx: e, bz: zc + lerp(-6, 6, R()), r: lerp(6.5, 8.5, R()), h: lerp(11, 16, R()) });
+          x = c + 7;
+        }
+      }
+      for (let i = 0; i < 3; i++) f.hills.push({ x: lerp(-F * 0.7, F * 0.7, R()), z: lerp(-F * 0.45, F * 0.45, R()), r: lerp(8, 12, R()) * S, h: lerp(6, 10, R()) });
+      return f;
+    }
+
+    if (type === 'swamp') {
+      const n = Math.round(lerp(6, 9, R()) * S);
+      for (let i = 0; i < n; i++) f.hills.push({ x: lerp(-F * 0.75, F * 0.75, R()), z: lerp(-F * 0.4, F * 0.4, R()), r: lerp(6, 10, R()), h: lerp(1.8, 3.2, R()) });
+      ruins(1 + ((R() * 2) | 0));
+      return f;
+    }
+
+    // Поле и лес: холмы по сторонам, овраг между армиями, гряда на фланге
+    for (const side of [-1, 1])
+      f.hills.push({ x: lerp(-F * 0.56, F * 0.56, R()), z: side * lerp(F * 0.25, F * 0.52, R()), r: lerp(11, 16, R()), h: lerp(4.5, 7.5, R()) });
+    if (R() < 0.65) f.hills.push({ x: (R() < 0.5 ? -1 : 1) * lerp(F * 0.48, F * 0.75, R()), z: lerp(-10, 10, R()), r: lerp(9, 13, R()), h: lerp(3.5, 6, R()) });
+    if (type === 'field' || R() < 0.5) {
+      const z0 = lerp(-10, 10, R()), tilt = lerp(-0.22, 0.22, R()), x0 = lerp(-F * 0.72, -F * 0.28, R()), x1 = lerp(F * 0.28, F * 0.75, R()), ph = R() * 6;
+      const pts = [];
+      for (let i = 0; i <= 16; i++) { const x = lerp(x0, x1, i / 16); pts.push([x, z0 + x * tilt + Math.sin(x * 0.06 + ph) * 6]); }
+      f.ravine = { pts, w: lerp(6.5, 9, R()), d: type === 'forest' ? lerp(2.2, 3, R()) : lerp(3.4, 4.4, R()) };
+    }
+    if (R() < 0.7) {
+      const s = R() < 0.5 ? -1 : 1, x = s * lerp(F * 0.52, F * 0.8, R());
+      f.ridges.push({ ax: x, az: lerp(-F * 0.48, -F * 0.1, R()), bx: x + lerp(-10, 10, R()), bz: lerp(F * 0.1, F * 0.48, R()), r: 4.5, h: lerp(2.6, 3.6, R()) });
+    }
+    ruins(type === 'forest' ? 1 + ((R() * 2) | 0) : Math.round((3 + ((R() * 3) | 0)) * S));
+    return f;
+  }
+
+  /** Лес: плотность чащи 0..1 (у мест построения армий — поляны). */
+  forestAt(x, z) {
+    if (this.type !== 'forest' || !World.inField(x, z)) return 0;
+    const d = this.pn.n01(x * 0.024 + this.o.cx, z * 0.024 + this.o.cz);
+    const mask = 1 - 0.8 * smooth(FIELD * 0.46, FIELD * 0.72, Math.abs(z));
+    return smooth(0.4, 0.6, d) * mask;
+  }
+
+  /** Болото: камыш в мелкой воде и на топких берегах. */
+  reedsAt(x, z) {
+    if (this.type !== 'swamp') return false;
+    const h = this.heightAt(x, z);
+    return h < 0.45 && h > -0.9 && this.pn.n01(x * 0.09 + this.o.lx, z * 0.09 + this.o.lz) > 0.42;
+  }
+
+  plantForest(R) {
+    const out = [], tries = Math.round(FIELD * FIELD * 0.26);
+    for (let i = 0; i < tries; i++) {
+      const x = lerp(-FIELD + 2, FIELD - 2, R()), z = lerp(-FIELD + 2, FIELD - 2, R());
+      const f = this.forestAt(x, z);
+      if (f < 0.3 || R() > f * 0.85) continue;
+      const cluster = R() < 0.22;
+      out.push({ x, z, kind: cluster ? 2 + ((R() * 5) | 0) : (R() * 2) | 0, rot: R() * Math.PI * 2, k: lerp(0.95, 1.4, R()), trunk: cluster ? 1.5 : 0.45 });
+    }
+    return out;
+  }
+
+  /** Высота основания дома: по самому низкому углу, чтобы он не висел над землёй. */
+  footprintY(b) {
+    let lo = Infinity;
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) lo = Math.min(lo, this.heightAt(b.x + sx * b.hx, b.z + sz * b.hz));
+    return lo - 0.15;
+  }
+
+  /** Карта «выпуклости» поля и укромные места: по ним думают полководцы. */
+  analyze() {
+    const step = 4, n = Math.floor((FIELD * 2) / step) + 1, prom = new Float32Array(n * n);
+    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
+      const x = -FIELD + ix * step, z = -FIELD + iz * step;
+      let s = 0;
+      for (let a = 0; a < 8; a++) s += this.heightAt(x + Math.cos(a * Math.PI / 4) * 14, z + Math.sin(a * Math.PI / 4) * 14);
+      prom[iz * n + ix] = this.heightAt(x, z) - s / 8;
+    }
+    const high = [], low = [], hide = [];
+    for (let iz = 1; iz < n - 1; iz++) for (let ix = 1; ix < n - 1; ix++) {
+      const p = prom[iz * n + ix], x = -FIELD + ix * step, z = -FIELD + iz * step, h = this.heightAt(x, z);
+      if (this.nav.speedAt(x, z, 0) === 0) continue;
+      if (p > 1.4) {
+        let top = true;
+        for (let dz = -1; dz <= 1 && top; dz++) for (let dx = -1; dx <= 1; dx++)
+          if ((dx || dz) && this.heightAt(x + dx * step, z + dz * step) > h) { top = false; break; }
+        if (top) high.push({ x, z, h, prom: p });
+      }
+      if (p < -1.0 && h > WATER - 0.3) { low.push({ x, z, h, depth: -p }); hide.push({ x, z, depth: -p }); }
+      else if ((ix + iz) % 2 === 0 && this.nav.concealAt(x, z)) hide.push({ x, z, depth: 1.5 });
+    }
+    high.sort((a, b) => b.prom - a.prom);
+    this.an = { step, n, prom, high: high.slice(0, 16), low, hide };
+  }
+
+  prominenceAt(x, z) {
+    const a = this.an, ix = clamp(Math.round((x + FIELD) / a.step), 0, a.n - 1), iz = clamp(Math.round((z + FIELD) / a.step), 0, a.n - 1);
+    return a.prom[iz * a.n + ix];
+  }
+
+  /** Отряд укрыт от глаз: в низине, в чаще или в камыше. */
+  concealedAt(x, z) { return this.prominenceAt(x, z) < -0.9 || this.nav.concealAt(x, z); }
+
+  walkable(x, z, pad = 0.3) { return this.nav.speedAt(x, z, 0) > 0 && !this.obs.hit(x, z, pad); }
+
+  /** Верх ограды в точке (или -Infinity, если ограды нет). */
+  wallTop(x, z) {
+    const L = this.wallGrid.near(x, z);
+    if (L) for (const o of L) {
+      const w = o.wall;
+      if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.1) return this.heightAt(x, z) + w.h;
+    }
+    return -Infinity;
+  }
+
+  inWall(x, z) {
+    const L = this.wallGrid.near(x, z);
+    if (L) for (const o of L) { const w = o.wall; if (segDist(x, z, w.ax, w.az, w.bx, w.bz) < w.t * 0.5 + 0.35) return true; }
+    return false;
+  }
+
+  /** Прямая видимость: мешают склоны, ограды, дома и густая чаща. */
+  los(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz), n = Math.max(2, Math.ceil(d / 1.4)), step = d / n;
+    let canopy = 0;
+    const forest = this.type === 'forest', houses = this.obs.list.length > 0;
+    for (let i = 1; i < n; i++) {
+      const t = i / n, x = ax + dx * t, z = az + dz * t, y = ay + (by - ay) * t, g = this.heightAt(x, z);
+      if (g > y - 0.1) return false;
+      if (this.wallTop(x, z) > y) return false;
+      if (houses && this.obs.blocks(x, z, y)) return false;
+      if (forest && y < g + 7 && this.nav.canopyAt(x, z) && (canopy += step) > 7) return false;
+    }
+    return true;
+  }
+
+  /** Места, где можно укрыться от стрелков врага (ec — центр вражеской армии). */
+  coverCandidates(ec) {
+    const out = [];
+    for (const l of this.an.hide) out.push({ x: l.x, z: l.z, kind: 'low' });
+    for (const w of this.features.walls) {
+      const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, l = Math.hypot(w.bx - w.ax, w.bz - w.az) || 1;
+      const nx = -(w.bz - w.az) / l, nz = (w.bx - w.ax) / l, side = nx * (mx - ec.x) + nz * (mz - ec.z) > 0 ? 1 : -1;
+      out.push({ x: mx + nx * 1.6 * side, z: mz + nz * 1.6 * side, kind: 'wall' });
+    }
+    if (this.town) for (const b of this.town.buildings) {
+      const v = norm2(b.x - ec.x, b.z - ec.z), r = Math.max(b.hx, b.hz) + 2;
+      out.push({ x: b.x + v.x * r, z: b.z + v.z * r, kind: 'house' });
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------- высоты
 
   rawHeight(x, z) {
-    const n = this.pn, o = this.o;
+    const n = this.pn, o = this.o, T = this.type, F = this.features;
     const dist = Math.max(Math.abs(x), Math.abs(z)) * 0.6 + Math.hypot(x, z) * 0.4;
     const hills = n.fbm(x * 0.006 + o.hx, z * 0.006 + o.hz, 4);
     const detail = n.fbm(x * 0.05 + o.hx + 31.7, z * 0.05 + o.hz - 11.3, 2);
 
-    // Поле боя: мягкие холмы, всегда выше воды
-    let field = 2.6 + hills * 3.2 + detail * 0.35;
-    const F = this.features;
-    if (F && dist < FIELD + 30) {
+    let field;
+    if (T === 'swamp') {
+      field = 0.35 + hills * 1.4 + detail * 0.35;
+      const pool = n.n01(x * 0.028 + o.lx, z * 0.028 + o.lz);
+      field -= Math.max(0, pool - 0.42) * 7;
+      field += smooth(FIELD * 0.42, FIELD * 0.72, Math.abs(z)) * 1.9; // у армий суше
+    } else if (T === 'city') field = 2.2 + hills * 1.0 + detail * 0.12;
+    else if (T === 'mountains') field = 3 + hills * 5 + detail * 0.5 + n.ridged(x * 0.02 + o.mx, z * 0.02 + o.mz, 3) * 4 * (1 - smooth(FIELD * 0.5, FIELD * 0.75, Math.abs(z)));
+    else field = 2.6 + hills * 3.2 + detail * 0.35;
+
+    if (dist < FIELD + 30) {
       for (const hl of F.hills) {
         const d2 = ((x - hl.x) ** 2 + (z - hl.z) ** 2) / (hl.r * hl.r);
         if (d2 < 9) field += hl.h * Math.exp(-d2);
@@ -606,19 +735,21 @@ class World {
         const d = segDist(x, z, r.ax, r.az, r.bx, r.bz);
         if (d < r.r * 3) field += r.h * Math.exp(-((d / r.r) ** 2));
       }
-      const rv = F.ravine;
-      const d = polyDist(x, z, rv.pts);
-      if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
+      if (F.ravine) {
+        const rv = F.ravine, d = polyDist(x, z, rv.pts);
+        if (d < rv.w) field -= rv.d * smooth(rv.w, rv.w * 0.3, d);
+      }
     }
-    if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
+    if (T === 'swamp') field = Math.max(field, -2.2);
+    else if (field < 1.2) field = 1.2 - (1.2 - field) * 0.3;
 
     // Окрестности: холмы крупнее, озёра, горы по краям
     let outer = 3 + hills * 16 + detail * 0.9;
     const lake = n.n01(x * 0.011 + o.lx, z * 0.011 + o.lz);
-    outer -= Math.max(0, lake - 0.58) * 70 * smooth(105, 135, dist);
-    const floor = lerp(1.0, -30, smooth(100, 125, dist));
+    outer -= Math.max(0, lake - 0.58) * 70 * smooth(FIELD + 25, FIELD + 55, dist);
+    const floor = lerp(1.0, -30, smooth(FIELD + 20, FIELD + 45, dist));
     if (outer < floor) outer = floor;
-    const mt = smooth(115, 215, dist);
+    const mt = smooth(FIELD + 35, FIELD + 135, dist);
     outer += mt * mt * (30 + n.ridged(x * 0.009 + o.mx, z * 0.009 + o.mz, 4) * 60);
 
     return lerp(field, outer, smooth(FIELD - 5, FIELD + 40, dist));
@@ -661,12 +792,23 @@ class World {
     return null;
   }
 
+  /** Мощёные улицы и площадь города: 0 — трава, 1 — камень. */
+  paving(x, z) {
+    const T = this.town;
+    if (!T || Math.abs(x) > T.TX + 12 || Math.abs(z) > T.TZ + 12) return 0;
+    for (const sq of T.squares) if (Math.abs(x - sq.x) < sq.hx && Math.abs(z - sq.z) < sq.hz) return 1;
+    let best = Infinity;
+    for (const s of T.streets) best = Math.min(best, segDist(x, z, s.ax, s.az, s.bx, s.bz) - s.w / 2);
+    return smooth(0.8, -0.4, best);
+  }
+
   // ---------------------------------------------------------------- рельеф
 
   buildTerrain(s) {
     const n = this.pn, o = this.o;
     const data = new Uint8Array(TEX * TEX * 4);
     const c = new THREE.Color(), t = new THREE.Color();
+    const mud = new THREE.Color(0x4f4a2c), cobble = new THREE.Color(0x8b8274), floorC = new THREE.Color(0x3f5328);
     for (let ty = 0; ty < TEX; ty++) {
       for (let tx = 0; tx < TEX; tx++) {
         const x = (tx + 0.5) / TEX * SIZE - HALF, z = (ty + 0.5) / TEX * SIZE - HALF;
@@ -678,12 +820,19 @@ class World {
         c.copy(s.grassA).lerp(s.grassB, n1);
         c.lerp(s.dry, smooth(0.55, 0.8, n3) * 0.75);
         c.lerp(s.dirt, smooth(0.72, 0.85, n2 * 0.6 + n1 * 0.4) * 0.6);
+        if (this.type === 'forest') c.lerp(floorC, this.forestAt(x, z) * 0.7);
         const shore = y - WATER;
-        t.copy(s.sand).lerp(c, smooth(0.2, 1.4, shore + (n2 - 0.5) * 0.6)); c.copy(t);
-        if (shore < 0) c.copy(s.sand).lerp(s.underwater, smooth(0, -5, shore));
+        if (this.type === 'swamp') {
+          c.lerp(mud, smooth(0.9, 0.1, shore) * 0.8);
+          if (shore < 0) c.copy(mud).lerp(s.underwater, smooth(0, -1.5, shore));
+        } else {
+          t.copy(s.sand).lerp(c, smooth(0.2, 1.4, shore + (n2 - 0.5) * 0.6)); c.copy(t);
+          if (shore < 0) c.copy(s.sand).lerp(s.underwater, smooth(0, -5, shore));
+        }
         c.lerp(s.rock, smooth(0.07, 0.16, slope + (n2 - 0.5) * 0.04));
         c.lerp(s.rock, smooth(32, 48, y + (n1 - 0.5) * 12));
         c.lerp(s.snow, smooth(s.snowLine, s.snowLine + 6, y + (n2 - 0.5) * 10) * (1 - smooth(0.2, 0.3, slope)));
+        if (this.town) c.lerp(cobble, this.paving(x, z) * (0.75 + n2 * 0.2));
         const k = 0.9 + n2 * 0.18;
         const i = (ty * TEX + tx) * 4;
         data[i] = clamp(c.r * k * 255, 0, 255); data[i + 1] = clamp(c.g * k * 255, 0, 255); data[i + 2] = clamp(c.b * k * 255, 0, 255); data[i + 3] = 255;
@@ -779,7 +928,38 @@ class World {
     scene.environment = this.envRT.texture;
   }
 
-  // ---------------------------------------------------------------- деревья, камни, трава, замки
+  buildWalls() {
+    const walls = this.features.walls;
+    const stones = [];
+    const R = mulberry32(991);
+    for (const w of walls) {
+      const len = Math.hypot(w.bx - w.ax, w.bz - w.az);
+      if (len < 0.3) continue;
+      const dx = (w.bx - w.ax) / len, dz = (w.bz - w.az) / len, yaw = Math.atan2(dx, dz);
+      const courses = w.h > 1.2 ? 3 : 2;
+      for (let course = 0; course < courses; course++) {
+        const sy = course === 2 ? 0.3 : 0.52, y0 = course === 0 ? 0.26 : course === 1 ? 0.78 : 1.2;
+        for (let s = (course % 2) * 0.35; s < len; s += lerp(0.62, 0.8, R())) {
+          if (course === courses - 1 && R() < 0.35) continue; // верх ограды местами осыпался
+          const x = w.ax + dx * s, z = w.az + dz * s;
+          stones.push({ x, z, y: this.heightAt(x, z) + y0, yaw: yaw + lerp(-0.12, 0.12, R()), sx: lerp(0.62, 0.82, R()), sy, sz: w.t * lerp(0.9, 1.1, R()), c: lerp(0.78, 1.05, R()) });
+        }
+      }
+    }
+    if (!stones.length) return;
+    const mesh = new THREE.InstancedMesh(this.own(new THREE.BoxGeometry(1, 1, 1)), this.own(new THREE.MeshStandardMaterial({ color: 0x8c8479, roughness: 0.95 })), stones.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
+    stones.forEach((st, i) => {
+      q.setFromEuler(e.set(lerp(-0.05, 0.05, R()), st.yaw + Math.PI / 2, lerp(-0.05, 0.05, R())));
+      m4.compose(p.set(st.x, st.y, st.z), q, sc.set(st.sx, st.sy, st.sz));
+      mesh.setMatrixAt(i, m4);
+      mesh.setColorAt(i, c.setScalar(st.c));
+    });
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
+  }
+
+  // ---------------------------------------------------------------- деревья, камни, трава, постройки
 
   flatSpot(xMin, xMax, zMin, zMax, radius, tries) {
     let best = null, bestScore = Infinity;
@@ -799,11 +979,12 @@ class World {
 
   buildDecor(s, assets) {
     const r = this.rand, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const T = this.type;
     const treeKinds = assets.trees;
     const lists = treeKinds.map(() => []);
 
-    // Деревья рощами, вне поля боя
-    const tries = Math.floor(2400 * s.treeDensity);
+    // Деревья рощами вокруг поля боя
+    const tries = Math.floor(2400 * s.treeDensity * (T === 'forest' ? 1.4 : T === 'mountains' ? 0.7 : 1) * (this.big ? 1.4 : 1));
     for (let i = 0; i < tries; i++) {
       const x = lerp(-HALF + 6, HALF - 6, r()), z = lerp(-HALF + 6, HALF - 6, r());
       if (Math.abs(x) < FIELD + 7 && Math.abs(z) < FIELD + 7) continue;
@@ -811,43 +992,54 @@ class World {
       if (y < WATER + 0.8 || y > s.snowLine + 4 || this.slopeAt(x, z) > 0.12) continue;
       const forest = this.pn.n01(x * 0.013 + this.o.mx, z * 0.013 + this.o.mz);
       if (forest < 0.45 && r() > 0.06) continue;
-      const kind = Math.floor(r() * treeKinds.length);
-      lists[kind].push([x, y - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.3, r())]);
+      lists[Math.floor(r() * treeKinds.length)].push([x, y - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.3, r())]);
+    }
+    // Лес на самом поле боя
+    for (const t of this.trees) lists[t.kind].push([t.x, this.heightAt(t.x, t.z) - 0.2, t.z, t.rot, t.k]);
+    // Горы: редкие сосны на пологих склонах
+    if (T === 'mountains') for (let i = 0; i < FIELD * 3; i++) {
+      const x = lerp(-FIELD, FIELD, r()), z = lerp(-FIELD, FIELD, r());
+      if (this.slopeAt(x, z) > 0.1 || this.nav.speedAt(x, z, 0) === 0) continue;
+      lists[(r() * 2) | 0].push([x, this.heightAt(x, z) - 0.2, z, r() * Math.PI * 2, lerp(0.8, 1.2, r())]);
+      this.obs.addCircle(x, z, 0.45, 7, this.heightAt(x, z));
     }
     const treeMat = assets.treeMaterial(s);
     treeKinds.forEach((kind, i) => this.instanced(kind, treeMat, lists[i], true));
 
-    // Камни: крупные снаружи, мелкие на поле
+    // Камни: крупные снаружи, мелкие на поле (в горах — побольше)
     const rockLists = assets.rocks.map(() => []);
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < (T === 'mountains' ? 420 : 260) * (this.big ? 1.5 : 1); i++) {
       const x = lerp(-HALF + 5, HALF - 5, r()), z = lerp(-HALF + 5, HALF - 5, r());
       const inField = Math.abs(x) < FIELD + 4 && Math.abs(z) < FIELD + 4;
-      if (inField && r() > 0.3) continue;
+      if (inField && (r() > (T === 'mountains' ? 0.6 : 0.3) || this.paving(x, z) > 0 || this.obs.hit(x, z, 1))) continue;
       const y = this.heightAt(x, z);
       if (y < WATER - 1.5 || y > 40) continue;
-      const size = inField ? lerp(0.5, 1.1, r()) : lerp(1.2, 4, r());
+      const size = inField ? lerp(0.5, T === 'mountains' ? 2.5 : 1.1, r()) : lerp(1.2, 4, r());
       rockLists[Math.floor(r() * rockLists.length)].push([x, y - size * 0.3, z, r() * Math.PI * 2, size]);
     }
     assets.rocks.forEach((kind, i) => this.instanced(kind, assets.rockMat, rockLists[i], true));
 
-    // Трава и цветы
-    const tuftCount = Math.floor((LOW_END ? 3500 : 7000) * s.grassDensity);
+    // Трава и цветы (на болоте — камыш)
+    const tuftCount = Math.floor((LOW_END ? 3500 : 7000) * s.grassDensity * (this.big ? 1.6 : 1));
     const grass = new THREE.InstancedMesh(GRASS_GEO, GRASS_MAT, tuftCount);
     const flowerCount = Math.floor(tuftCount * s.flowers);
     const flowers = new THREE.InstancedMesh(FLOWER_GEO, FLOWER_MAT, Math.max(1, flowerCount));
-    const col = new THREE.Color();
+    const col = new THREE.Color(), reedA = new THREE.Color(0x8a8f45), reedB = new THREE.Color(0xa99a55);
     let gi = 0, fi = 0;
     for (let tries2 = 0; gi < tuftCount && tries2 < tuftCount * 3; tries2++) {
       const x = lerp(-FIELD - 30, FIELD + 30, r()), z = lerp(-FIELD - 30, FIELD + 30, r());
       const y = this.heightAt(x, z);
-      if (y < WATER + 0.4 || this.pn.n01(x * 0.05 + this.o.lx, z * 0.05 + this.o.lz) < 0.33) continue;
+      const reed = this.reedsAt(x, z);
+      if (!reed && (y < WATER + 0.4 || this.pn.n01(x * 0.05 + this.o.lx, z * 0.05 + this.o.lz) < 0.33)) continue;
+      if (this.town && (this.paving(x, z) > 0.2 || this.obs.hit(x, z, 0.3))) continue;
       q.setFromAxisAngle(up, r() * Math.PI * 2);
       const k = lerp(0.7, 1.4, r());
-      m4.compose(p.set(x, y - 0.03, z), q, sc.set(k, k * lerp(0.8, 1.3, r()), k));
+      if (reed) m4.compose(p.set(x, Math.max(y, WATER - 0.2) - 0.05, z), q, sc.set(k * 1.1, k * lerp(3, 4.5, r()), k * 1.1));
+      else m4.compose(p.set(x, y - 0.03, z), q, sc.set(k, k * lerp(0.8, 1.3, r()), k));
       grass.setMatrixAt(gi, m4);
-      grass.setColorAt(gi, col.copy(s.grass1).lerp(s.grass2, r()));
+      grass.setColorAt(gi, reed ? col.copy(reedA).lerp(reedB, r()) : col.copy(s.grass1).lerp(s.grass2, r()));
       gi++;
-      if (fi < flowerCount && r() < s.flowers * 1.2) {
+      if (!reed && fi < flowerCount && r() < s.flowers * 1.2) {
         m4.compose(p.set(x + 0.1, y + 0.33 * k, z), q, sc.set(1, 1, 1));
         flowers.setMatrixAt(fi, m4);
         flowers.setColorAt(fi, s.flower[Math.floor(r() * 3)]);
@@ -859,15 +1051,37 @@ class World {
     this.group.add(grass);
     if (fi > 0) this.group.add(flowers);
 
+    if (this.town) this.buildTown(assets);
+
     // Замки армий за их спинами, мельница и башни на холмах
-    const blue = this.flatSpot(-35, 35, -150, -104, 9, 60), red = this.flatSpot(-35, 35, 104, 150, 9, 60);
+    const F = FIELD;
+    const blue = this.flatSpot(-35, 35, -(F + 70), -(F + 24), 9, 60), red = this.flatSpot(-35, 35, F + 24, F + 70, 9, 60);
     if (blue) this.placeBuilding(assets.buildings.castle_blue, blue, 0, 24);
     if (red) this.placeBuilding(assets.buildings.castle_red, red, Math.PI, 24);
     for (let i = 0; i < 3; i++) {
       const side = r() < 0.5 ? -1 : 1;
-      const spot = this.flatSpot(side * 150, side * 100, -120, 120, 5, 40);
+      const spot = this.flatSpot(side * (F + 70), side * (F + 20), -(F + 40), F + 40, 5, 40);
       if (spot) this.placeBuilding(i === 0 ? assets.buildings.windmill : assets.buildings.tower, spot, r() * Math.PI * 2, i === 0 ? 15 : 13);
     }
+  }
+
+  /** Все дома города сливаются в один меш: одна текстура, один вызов отрисовки. */
+  buildTown(assets) {
+    const geos = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const put = (def, x, y, z, rot, k) => {
+      q.setFromAxisAngle(up, rot);
+      m4.compose(p.set(x, y, z), q, s.set(k, k, k));
+      geos.push(def.geometry.clone().applyMatrix4(m4));
+    };
+    for (const b of this.town.buildings) put(b.def, b.x, b.y, b.z, b.rot, b.s);
+    for (const pr of this.town.props) put(pr.def, pr.x, pr.y, pr.z, pr.rot, pr.s);
+    if (!geos.length) return;
+    const merged = this.own(mergeGeometries(geos, false));
+    geos.forEach((g) => g.dispose());
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, assets.cityMat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    this.group.add(mesh);
   }
 
   instanced(kind, mat, list, shadow) {
@@ -951,6 +1165,336 @@ function polyDist(x, z, pts) {
   return best;
 }
 
+// ------------------------------------------------------------------ типы местности
+
+const MAP_TYPES = [
+  { key: 'field', name: 'Поле', note: 'холмы, овраг и каменные ограды' },
+  { key: 'forest', name: 'Лес', note: 'рощи прячут отряды и глушат болты, кони вязнут в чаще' },
+  { key: 'mountains', name: 'Горы', note: 'гряды с перевалами, крутые склоны не пройти' },
+  { key: 'swamp', name: 'Болото', note: 'топи, островки и камыш — глубокую воду не перейти' },
+  { key: 'city', name: 'Город', note: 'улицы, кварталы, площадь и баррикады' },
+];
+
+// ------------------------------------------------------------------ препятствия: дома (прямоугольники) и стволы (круги)
+
+class Obstacles {
+  constructor(field) {
+    this.cell = 8; this.half = field + 12;
+    this.dim = Math.ceil((this.half * 2) / this.cell);
+    this.grid = Array.from({ length: this.dim * this.dim }, () => []);
+    this.list = [];
+  }
+  cellRange(x, z, r) {
+    const c = this.cell, h = this.half, d = this.dim;
+    return [clamp(Math.floor((x - r + h) / c), 0, d - 1), clamp(Math.floor((x + r + h) / c), 0, d - 1),
+            clamp(Math.floor((z - r + h) / c), 0, d - 1), clamp(Math.floor((z + r + h) / c), 0, d - 1)];
+  }
+  insert(o, r) {
+    this.list.push(o);
+    const [x0, x1, z0, z1] = this.cellRange(o.x, o.z, r);
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) this.grid[z * this.dim + x].push(o);
+  }
+  /** Прямоугольник (дом): центр, полуразмеры, поворот, высота крыши над землёй. */
+  addRect(x, z, hx, hz, ang, top, ground) { this.insert({ rect: true, x, z, hx, hz, c: Math.cos(ang), s: Math.sin(ang), top, ground }, Math.hypot(hx, hz)); }
+  addCircle(x, z, r, top, ground) { this.insert({ rect: false, x, z, r, top, ground }, r); }
+  near(x, z) {
+    const c = this.cell, h = this.half, d = this.dim;
+    const ix = Math.floor((x + h) / c), iz = Math.floor((z + h) / c);
+    if (ix < 0 || iz < 0 || ix >= d || iz >= d) return null;
+    return this.grid[iz * d + ix];
+  }
+  /** Точка внутри препятствия (с запасом pad)? Возвращает препятствие или null. */
+  hit(x, z, pad = 0) {
+    const L = this.near(x, z);
+    if (!L) return null;
+    for (const o of L) {
+      const dx = x - o.x, dz = z - o.z;
+      if (o.rect) {
+        const lx = dx * o.c + dz * o.s, lz = -dx * o.s + dz * o.c;
+        if (Math.abs(lx) < o.hx + pad && Math.abs(lz) < o.hz + pad) return o;
+      } else if (dx * dx + dz * dz < (o.r + pad) ** 2) return o;
+    }
+    return null;
+  }
+  /** Выталкивает круг радиуса r из препятствий (солдат скользит вдоль стены). */
+  pushOut(p, r) {
+    const L = this.near(p.x, p.z);
+    if (!L || !L.length) return;
+    for (const o of L) {
+      const dx = p.x - o.x, dz = p.z - o.z;
+      if (o.rect) {
+        let lx = dx * o.c + dz * o.s, lz = -dx * o.s + dz * o.c;
+        const ex = o.hx + r, ez = o.hz + r;
+        if (Math.abs(lx) >= ex || Math.abs(lz) >= ez) continue;
+        if (ex - Math.abs(lx) < ez - Math.abs(lz)) lx = Math.sign(lx || 1) * ex; else lz = Math.sign(lz || 1) * ez;
+        p.x = o.x + lx * o.c - lz * o.s;
+        p.z = o.z + lx * o.s + lz * o.c;
+      } else {
+        const d = Math.hypot(dx, dz), m = o.r + r;
+        if (d >= m) continue;
+        const k = d > 1e-4 ? m / d : 0;
+        p.x = o.x + (d > 1e-4 ? dx * k : m);
+        p.z = o.z + dz * k;
+      }
+    }
+  }
+  /** Перекрывает ли препятствие точку на высоте y (для прямой видимости и болтов). */
+  blocks(x, z, y) {
+    const o = this.hit(x, z);
+    return !!o && y < o.ground + o.top;
+  }
+}
+
+// ------------------------------------------------------------------ навигация: сетка проходимости + A*
+
+class MinHeap {
+  constructor() { this.n = []; this.f = []; }
+  get size() { return this.n.length; }
+  clear() { this.n.length = 0; this.f.length = 0; }
+  push(node, f) {
+    const N = this.n, F = this.f;
+    let i = N.length;
+    N.push(node); F.push(f);
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (F[p] <= f) break;
+      N[i] = N[p]; F[i] = F[p]; i = p;
+    }
+    N[i] = node; F[i] = f;
+  }
+  pop() {
+    const N = this.n, F = this.f, top = N[0], last = N.pop(), lf = F.pop();
+    if (N.length) {
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1, r = l + 1;
+        let m = i, mf = lf;
+        if (l < N.length && F[l] < mf) { m = l; mf = F[l]; }
+        if (r < N.length && F[r] < mf) { m = r; mf = F[r]; }
+        if (m === i) break;
+        N[i] = N[m]; F[i] = F[m]; i = m;
+      }
+      N[i] = last; F[i] = lf;
+    }
+    return top;
+  }
+}
+
+/**
+ * Сетка 2×2 м по полю боя: скорость движения в клетке для пехоты (0) и конницы (1),
+ * 0 — не пройти (дом, обрыв, глубокая вода). По ней ищутся пути и замедляются войска.
+ */
+class NavGrid {
+  constructor(world) {
+    this.cell = 2; this.half = FIELD + 2;
+    this.dim = Math.ceil((this.half * 2) / this.cell);
+    const n = this.dim * this.dim;
+    this.speed = [new Float32Array(n), new Float32Array(n)];
+    this.conceal = new Uint8Array(n);
+    this.canopy = new Uint8Array(n);
+    this.blockedCount = 0;
+    this.build(world);
+    this.heap = new MinHeap();
+    this.gs = new Float32Array(n); this.came = new Int32Array(n); this.seen = new Int32Array(n); this.done = new Int32Array(n); this.run = 0;
+  }
+
+  build(w) {
+    const D = this.dim, c = this.cell;
+    for (let iz = 0; iz < D; iz++) for (let ix = 0; ix < D; ix++) {
+      const i = iz * D + ix, x = -this.half + (ix + 0.5) * c, z = -this.half + (iz + 0.5) * c;
+      let si = 1, sc = 1, hide = 0, canopy = 0;
+      const h = w.heightAt(x, z);
+      const g = Math.max(Math.abs(w.heightAt(x + 1, z) - w.heightAt(x - 1, z)), Math.abs(w.heightAt(x, z + 1) - w.heightAt(x, z - 1))) / 2;
+      if (g > 1.35) si = sc = 0;                                  // обрыв
+      const depth = WATER - h;
+      if (depth > 1.1) si = sc = 0;                               // глубокая вода
+      else if (depth > 0.4) { si *= 0.35; sc *= 0.25; }           // брод
+      else if (depth > -0.35) { si *= 0.6; sc *= 0.42; }          // топь у берега
+      const f = w.forestAt(x, z);
+      if (f > 0.5) { si *= 0.8; sc *= 0.5; hide = 1; canopy = 1; } // чаща
+      else if (f > 0.3) { si *= 0.92; sc *= 0.75; }
+      if (w.reedsAt(x, z)) hide = 1;                              // камыш
+      const ob = w.obs.hit(x, z, 0.4);
+      if (ob && (ob.rect || ob.r > 1)) si = sc = 0;                // дом, колодец (стволы обходят сами)
+      this.speed[0][i] = si; this.speed[1][i] = sc;
+      this.conceal[i] = hide; this.canopy[i] = canopy;
+      if (si === 0) this.blockedCount++;
+    }
+  }
+
+  idx(x, z) {
+    const D = this.dim, ix = Math.floor((x + this.half) / this.cell), iz = Math.floor((z + this.half) / this.cell);
+    return ix < 0 || iz < 0 || ix >= D || iz >= D ? -1 : iz * D + ix;
+  }
+  center(i) { const D = this.dim; return [-this.half + ((i % D) + 0.5) * this.cell, -this.half + (((i / D) | 0) + 0.5) * this.cell]; }
+  speedAt(x, z, cls) { const i = this.idx(x, z); return i < 0 ? 1 : this.speed[cls][i]; }
+  concealAt(x, z) { const i = this.idx(x, z); return i >= 0 && this.conceal[i] === 1; }
+  canopyAt(x, z) { const i = this.idx(x, z); return i >= 0 && this.canopy[i] === 1; }
+
+  lineClear(ax, az, bx, bz, cls) {
+    const d = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(d / (this.cell * 0.5))), sp = this.speed[cls];
+    for (let k = 1; k <= n; k++) {
+      const t = k / n, i = this.idx(ax + (bx - ax) * t, az + (bz - az) * t);
+      if (i >= 0 && sp[i] === 0) return false;
+    }
+    return true;
+  }
+
+  nearestOpen(i, sp) {
+    const D = this.dim, x0 = i % D, z0 = (i / D) | 0;
+    for (let r = 1; r < 8; r++)
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const x = x0 + dx, z = z0 + dz;
+        if (x >= 0 && z >= 0 && x < D && z < D && sp[z * D + x] > 0) return z * D + x;
+      }
+    return -1;
+  }
+
+  /** A* по сетке; путь сглаживается до немногих точек поворота. */
+  findPath(ax, az, bx, bz, cls) {
+    const D = this.dim, sp = this.speed[cls];
+    let s = this.idx(ax, az), g = this.idx(bx, bz);
+    if (s < 0 || g < 0) return null;
+    if (sp[s] === 0) s = this.nearestOpen(s, sp);
+    const goalOpen = sp[g] > 0;
+    if (!goalOpen) g = this.nearestOpen(g, sp);
+    if (s < 0 || g < 0) return null;
+    const run = ++this.run, gs = this.gs, came = this.came, seen = this.seen, done = this.done, heap = this.heap;
+    const gx = g % D, gz = (g / D) | 0;
+    const h = (i) => { const dx = Math.abs((i % D) - gx), dz = Math.abs(((i / D) | 0) - gz); return dx + dz - 0.5858 * Math.min(dx, dz); };
+    heap.clear();
+    gs[s] = 0; came[s] = -1; seen[s] = run; heap.push(s, h(s));
+    let expanded = 0;
+    while (heap.size && expanded < 25000) {
+      const c = heap.pop();
+      if (done[c] === run) continue;
+      done[c] = run; expanded++;
+      if (c === g) break;
+      const cx = c % D, cz = (c / D) | 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dz) continue;
+        const nx = cx + dx, nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= D || nz >= D) continue;
+        const ni = nz * D + nx;
+        if (sp[ni] === 0 || done[ni] === run) continue;
+        if (dx && dz && (sp[cz * D + nx] === 0 || sp[nz * D + cx] === 0)) continue; // не срезаем углы домов
+        const ng = gs[c] + (dx && dz ? 1.4142 : 1) * (2 / (sp[c] + sp[ni]));
+        if (seen[ni] !== run || ng < gs[ni]) { seen[ni] = run; gs[ni] = ng; came[ni] = c; heap.push(ni, ng + h(ni)); }
+      }
+    }
+    if (done[g] !== run) return null;
+    const cells = [];
+    for (let c = g; c !== -1; c = came[c]) cells.push(c);
+    cells.reverse();
+    const pts = cells.map((i) => this.center(i));
+    if (goalOpen) pts[pts.length - 1] = [bx, bz];
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1;) {
+      let j = pts.length - 1;
+      while (j > i + 1 && !this.lineClear(pts[i][0], pts[i][1], pts[j][0], pts[j][1], cls)) j--;
+      out.push(pts[j]); i = j;
+    }
+    return out;
+  }
+}
+
+// ------------------------------------------------------------------ город
+
+/** Высота модели в метрах для каждого вида постройки. */
+const CITY_HEIGHTS = { home: 7.5, church: 15, tavern: 9.5, blacksmith: 8, market: 7, tower_B: 13, destroyed: 6, well: 3.2 };
+
+/**
+ * План города: сетка улиц, кварталы с домами по краям, площадь с церковью,
+ * рынком и колодцем, сады, баррикады поперёк улиц (с проёмами) и мелочи.
+ */
+function makeTown(R, defs) {
+  const TX = FIELD * 0.78, TZ = FIELD * 0.42, W = 6.5;
+  const nx = Math.max(3, Math.round((TX * 2) / 27)), nz = Math.max(2, Math.round((TZ * 2) / 25));
+  const xs = [...Array(nx + 1)].map((_, i) => -TX + (i * TX * 2) / nx);
+  const zs = [...Array(nz + 1)].map((_, i) => -TZ + (i * TZ * 2) / nz);
+  const town = { TX, TZ, W, streets: [], buildings: [], props: [], walls: [], squares: [], gardens: [] };
+  for (const x of xs) town.streets.push({ ax: x, az: -TZ - 10, bx: x, bz: TZ + 10, w: W });
+  for (const z of zs) town.streets.push({ ax: -TX - 10, az: z, bx: TX + 10, bz: z, w: W });
+
+  const homes = defs.filter((d) => d.kind === 'home'), extra = defs.filter((d) => ['tavern', 'blacksmith', 'destroyed', 'tower_B'].includes(d.kind));
+  const byKind = (k) => defs.find((d) => d.kind === k);
+  const place = (def, x, z, rot) => {
+    const s = CITY_HEIGHTS[def.kind] / def.h, turned = Math.abs(Math.sin(rot)) > 0.5;
+    town.buildings.push({ def, x, z, rot, s, hx: (turned ? def.d : def.w) * s * 0.46, hz: (turned ? def.w : def.d) * s * 0.46, top: CITY_HEIGHTS[def.kind] * 0.9 });
+  };
+  const cix = Math.floor(nx / 2), ciz = Math.floor(nz / 2);
+
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    const x0 = xs[i] + W / 2, x1 = xs[i + 1] - W / 2, z0 = zs[j] + W / 2, z1 = zs[j + 1] - W / 2;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    if (i === cix && j === ciz) {
+      // Площадь: церковь у края, колодец в центре, рынок сбоку
+      town.squares.push({ x: cx, z: cz, hx: (x1 - x0) / 2, hz: (z1 - z0) / 2 });
+      const ch = byKind('church');
+      if (ch) place(ch, cx, z1 - ch.d * (CITY_HEIGHTS.church / ch.h) * 0.5 - 0.5, 0);
+      const wl = byKind('well');
+      if (wl) place(wl, cx, cz - 2, 0);
+      const mk = byKind('market');
+      if (mk) place(mk, x0 + mk.w * (CITY_HEIGHTS.market / mk.h) * 0.5 + 1, z0 + mk.d * (CITY_HEIGHTS.market / mk.h) * 0.5 + 1, Math.PI);
+      continue;
+    }
+    if (R() < 0.14) { town.gardens.push({ x0, x1, z0, z1 }); continue; } // сад с оградой
+    // Дома вдоль четырёх сторон квартала, фасадом на улицу
+    const sides = [
+      { ax: x0, az: z1, bx: x1, bz: z1, rot: 0, inX: 0, inZ: -1 },
+      { ax: x0, az: z0, bx: x1, bz: z0, rot: Math.PI, inX: 0, inZ: 1 },
+      { ax: x1, az: z0, bx: x1, bz: z1, rot: Math.PI / 2, inX: -1, inZ: 0 },
+      { ax: x0, az: z0, bx: x0, bz: z1, rot: -Math.PI / 2, inX: 1, inZ: 0 },
+    ];
+    for (let k = 0; k < 4; k++) {
+      const sd = sides[k], len = Math.hypot(sd.bx - sd.ax, sd.bz - sd.az), ux = (sd.bx - sd.ax) / len, uz = (sd.bz - sd.az) / len;
+      const margin = k >= 2 ? 7.5 : 0; // боковые стороны короче: углы заняты
+      let t = margin + R() * 1.5;
+      while (t < len - margin - 4) {
+        const def = R() < 0.12 && extra.length ? extra[(R() * extra.length) | 0] : homes[(R() * homes.length) | 0];
+        const s = CITY_HEIGHTS[def.kind] / def.h, fw = def.w * s, fd = def.d * s;
+        if (t + fw > len - margin) break;
+        const along = t + fw / 2, depth = fd / 2 + 0.4;
+        place(def, sd.ax + ux * along + sd.inX * depth, sd.az + uz * along + sd.inZ * depth, sd.rot);
+        t += fw + 0.6 + R() * 2.2;
+      }
+    }
+  }
+
+  // Баррикады поперёк улиц: две секции с проёмом посередине
+  const nBar = Math.round(nx * nz * 0.45);
+  for (let b = 0; b < nBar; b++) {
+    const vertical = R() < 0.5;
+    if (vertical) {
+      const x = xs[(R() * xs.length) | 0], j = (R() * nz) | 0, z = (zs[j] + zs[j + 1]) / 2 + (R() - 0.5) * 6;
+      town.walls.push({ ax: x - W / 2, az: z, bx: x - 0.9, bz: z, h: 1.3, t: 0.55 }, { ax: x + 0.9, az: z, bx: x + W / 2, bz: z, h: 1.3, t: 0.55 });
+    } else {
+      const z = zs[(R() * zs.length) | 0], i = (R() * nx) | 0, x = (xs[i] + xs[i + 1]) / 2 + (R() - 0.5) * 8;
+      town.walls.push({ ax: x, az: z - W / 2, bx: x, bz: z - 0.9, h: 1.3, t: 0.55 }, { ax: x, az: z + 0.9, bx: x, bz: z + W / 2, h: 1.3, t: 0.55 });
+    }
+  }
+  // Сады: низкая ограда по периметру с проходами
+  for (const g of town.gardens) {
+    const pts = [[g.x0, g.z0], [g.x1, g.z0], [g.x1, g.z1], [g.x0, g.z1], [g.x0, g.z0]];
+    for (let k = 0; k < 4; k++) {
+      const [ax, az] = pts[k], [bx, bz] = pts[k + 1], mx = (ax + bx) / 2, mz = (az + bz) / 2;
+      const gx = (bx - ax) / Math.hypot(bx - ax, bz - az) * 1.2, gz = (bz - az) / Math.hypot(bx - ax, bz - az) * 1.2;
+      town.walls.push({ ax, az, bx: mx - gx, bz: mz - gz, h: 1.0, t: 0.45 }, { ax: mx + gx, az: mz + gz, bx, bz, h: 1.0, t: 0.45 });
+    }
+  }
+  // Бочки, ящики, тачки вдоль улиц
+  const props = defs.filter((d) => d.kind === 'prop');
+  for (let k = 0; k < nx * nz * 5 && props.length; k++) {
+    const st = town.streets[(R() * town.streets.length) | 0], t = R();
+    const x = lerp(st.ax, st.bx, t), z = lerp(st.az, st.bz, t), side = R() < 0.5 ? -1 : 1;
+    const px = st.ax === st.bx ? x + side * (W / 2 - 0.7) : x, pz = st.ax === st.bx ? z : z + side * (W / 2 - 0.7);
+    if (Math.abs(px) > TX || Math.abs(pz) > TZ) continue;
+    town.props.push({ def: props[(R() * props.length) | 0], x: px, z: pz, rot: R() * Math.PI * 2 });
+  }
+  return town;
+}
+
 // ------------------------------------------------------------------ модели (KayKit, Quaternius — CC0)
 
 // Модели упакованы скриптом pack_models.py: компактный GLB в base64 + текстуры PNG рядом
@@ -958,6 +1502,13 @@ const MODEL_NAMES = ['Knight', 'Barbarian', 'Rogue_Hooded', 'Horse', 'White_Hors
   'tree_single_A', 'tree_single_B', 'trees_A_large', 'trees_A_medium', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
   'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
   'castle_blue', 'castle_red', 'windmill', 'tower'];
+// Город: дома четырёх цветов, общественные здания и мелочи для улиц
+const CITY_MODELS = {
+  home: ['home_A_red', 'home_A_blue', 'home_A_yellow', 'home_A_green', 'home_B_red', 'home_B_blue', 'home_B_yellow', 'home_B_green'],
+  church: ['church'], tavern: ['tavern'], blacksmith: ['blacksmith'], market: ['market'], well: ['well'], tower_B: ['tower_B'], destroyed: ['destroyed'],
+  prop: ['barrel', 'crate_A_big', 'crate_B_small', 'crate_long_A', 'wheelbarrow', 'sack'],
+};
+for (const list of Object.values(CITY_MODELS)) for (const n of list) MODEL_NAMES.push('city_' + n);
 
 async function loadPacked(loader, name) {
   const res = await fetch('pack/' + name + '.txt');
@@ -1271,6 +1822,14 @@ async function loadAssets(onProgress) {
     }
     return foliage[key];
   };
+  ASSETS.cityDefs = [];
+  for (const [kind, list] of Object.entries(CITY_MODELS)) for (const n of list) {
+    const m = mergeStatic(G['city_' + n]);
+    const bb = m.geometry.boundingBox;
+    ASSETS.cityDefs.push({ kind, name: n, geometry: m.geometry, w: bb.max.x - bb.min.x, d: bb.max.z - bb.min.z, h: m.height });
+    ASSETS.cityMat = ASSETS.cityMat || m.material;
+  }
+  ASSETS.cityMat.roughness = 0.85;
   ASSETS.buildings = {};
   for (const k of ['castle_blue', 'castle_red', 'windmill', 'tower']) {
     const sc = G[k].scene;
@@ -1650,7 +2209,8 @@ class Squad {
 
 // ------------------------------------------------------------------ солдаты
 
-const GRID = 2.5, GRID_HALF = FIELD + 10, GRID_DIM = Math.ceil(GRID_HALF * 2 / GRID);
+const GRID = 2.5;
+let GRID_HALF = 90, GRID_DIM = Math.ceil((GRID_HALF * 2) / GRID);
 
 class Unit {
   constructor(plan) {
@@ -1720,7 +2280,7 @@ class Battle {
         const ox = (c - (t.cols - 1) / 2) * t.spacing, oz = -(r - (t.rows - 1) / 2) * t.spacing;
         const jx = ox + (Math.random() - 0.5) * 0.2, jz = oz + (Math.random() - 0.5) * 0.2;
         const x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
-        if (!World.inField(x, z, 1) || this.occupied(x, z, t.radius)) continue;
+        if (!World.inField(x, z, 1) || !world.walkable(x, z, t.radius) || this.occupied(x, z, t.radius)) continue;
         const plan = { type, team, x, z, yaw, variant: (Math.random() * 2) | 0, squad: id, ox, oz };
         this.plan.push(plan);
         const u = new Unit(plan);
@@ -1771,6 +2331,7 @@ class Battle {
   resetToPlan() {
     this.clearUnits();
     const map = new Map();
+    this.plan = this.plan.filter((p) => World.inField(p.x, p.z, 1) && world.walkable(p.x, p.z, 0.4));
     for (const p of this.plan) {
       const u = new Unit(p);
       this.units.push(u);
@@ -1808,24 +2369,24 @@ class Battle {
       { front: [3, 5], xbow: [2, 3], cav: [1, 2], lines: 1 },
       { front: [6, 8], xbow: [4, 5], cav: [2, 4], lines: 2 },
       { front: [11, 13], xbow: [7, 9], cav: [4, 6], lines: 4 }][size] || null;
-    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0);
+    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0), z0 = world.spawnZ;
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI;
       for (let line = 0; line < cfg.lines; line++) {
         const front = pick(cfg.front);
         for (let i = 0; i < front; i++)
-          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (22 + line * 8 + R() * 2), yaw);
+          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (z0 + line * 8 + R() * 2), yaw);
       }
       const xbRows = Math.max(1, Math.ceil(cfg.lines / 2));
       for (let row = 0; row < xbRows; row++) {
         const n = pick(cfg.xbow);
         for (let i = 0; i < n; i++)
-          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (24 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
+          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (z0 + 2 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
       }
       const cav = pick(cfg.cav);
       for (let i = 0; i < cav; i++) {
         const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
-        this.placeSquad(3, team, side * (58 + k * 3 - (R() * 4)), dir * (26 + k * 10 + R() * 4), yaw);
+        this.placeSquad(3, team, side * (FIELD * 0.72 + k * 3 - R() * 4), dir * (z0 + 4 + k * 10 + R() * 4), yaw);
       }
     }
   }
@@ -1963,7 +2524,7 @@ class Battle {
         continue;
       }
 
-      sq.hidden = world.prominenceAt(sq.center.x, sq.center.z) < -0.9 && !sq.engaged && this.time - sq.lastShotT > 3 && !enemyNear;
+      sq.hidden = world.concealedAt(sq.center.x, sq.center.z) && !sq.engaged && this.time - sq.lastShotT > 3 && !enemyNear;
 
       if (o.mode === 'move' && (d2d(o, sq.center) < 4 || this.time - sq.orderT > 35)) {
         const next = o.then ? { ...o.then } : { kind: 'advance', mode: 'advance' };
@@ -1999,21 +2560,32 @@ class Battle {
           u.aiming = true; wantSlot = false;
           u.face(nx, nz, dt);
           if (u.cooldown <= 0 && u.atkT < 0) this.startAttack(u, true);
-        } else if (o.mode === 'advance' || o.mode === 'charge') { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+        } else if (o.mode === 'advance' || o.mode === 'charge') {
+        const [wx, wz] = this.navTarget(u, tg.pos.x, tg.pos.z), ll = Math.hypot(wx - u.pos.x, wz - u.pos.z) || 1;
+        dx = (wx - u.pos.x) / ll * t.speed; dz = (wz - u.pos.z) / ll * t.speed; wantSlot = false;
+      }
       } else if (d <= contact) {
         u.engaged = true; wantSlot = false;
         u.face(nx, nz, dt);
         if (u.cooldown <= 0 && u.atkT < 0 && t.dmg > 0) this.startAttack(u, false);
-      } else if (this.mayChase(u, tg)) { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+      } else if (this.mayChase(u, tg)) {
+        wantSlot = false;
+        if (d > 6) {
+          const [wx, wz] = this.navTarget(u, tg.pos.x, tg.pos.z), ll = Math.hypot(wx - u.pos.x, wz - u.pos.z) || 1;
+          dx = (wx - u.pos.x) / ll * t.speed; dz = (wz - u.pos.z) / ll * t.speed;
+        } else { dx = nx * t.speed; dz = nz * t.speed; }
+      }
     }
     if (wantSlot) {
       let gx, gz;
       if (t.special === 'commander') { const c = this.commanders[u.team]; gx = c ? c.post.x : u.pos.x; gz = c ? c.post.z : u.pos.z; }
       else [gx, gz] = sq.slot(u);
+      const sd0 = Math.hypot(gx - u.pos.x, gz - u.pos.z);
+      if (sd0 > 4) [gx, gz] = this.navTarget(u, gx, gz);
       const sx = gx - u.pos.x, sz = gz - u.pos.z, sd = Math.hypot(sx, sz);
-      if (sd > 0.7) {
-        const k = (sd > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
-        dx = sx / sd * t.speed * k; dz = sz / sd * t.speed * k;
+      if (sd0 > 0.7) {
+        const k = (sd0 > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
+        dx = sx / (sd || 1) * t.speed * k; dz = sz / (sd || 1) * t.speed * k;
       } else if (o.face != null && !u.aiming) u.face(Math.sin(o.face), Math.cos(o.face), dt, 3);
     }
     if (u.atkT >= 0 && !t.ranged && t.charge <= 1) { dx *= 0.3; dz *= 0.3; }
@@ -2028,6 +2600,42 @@ class Battle {
       if (!u.hitDone && u.atkT >= (u.shot ? 0.55 : 0.5)) { u.hitDone = true; this.resolveHit(u); }
       if (u.atkT >= 1) u.atkT = -1;
     }
+  }
+
+  /**
+   * Куда идти сейчас, чтобы добраться до (gx, gz): прямо, если путь свободен,
+   * иначе к следующей точке пути A*. Путь считается один раз на отряд.
+   */
+  navTarget(u, gx, gz) {
+    const nav = world.nav;
+    if (!nav.blockedCount) return [gx, gz];
+    const cls = u.t.mount ? 1 : 0;
+    if (this.time > (u.navT || 0) || Math.hypot(gx - u.navGX, gz - u.navGZ) > 5) {
+      u.navT = this.time + 0.7 + Math.random() * 0.4;
+      u.navGX = gx; u.navGZ = gz;
+      if (nav.lineClear(u.pos.x, u.pos.z, gx, gz, cls)) u.path = null;
+      else {
+        const sq = u.squad, pc = sq.pathCache;
+        let path;
+        if (pc && pc.cls === cls && Math.hypot(pc.gx - gx, pc.gz - gz) < 6 && this.time - pc.t < 3 && d2d(sq.center, u.pos) < 12) path = pc.path;
+        else {
+          const from = d2d(sq.center, u.pos) < 12 && nav.speedAt(sq.center.x, sq.center.z, cls) > 0 ? sq.center : u.pos;
+          path = nav.findPath(from.x, from.z, gx, gz, cls);
+          if (from === sq.center) sq.pathCache = { cls, gx, gz, t: this.time, path };
+        }
+        u.path = path;
+        u.pathI = 1;
+        if (path) { // начинаем с ближайшей точки пути
+          let best = Infinity;
+          for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - u.pos.x, path[i][1] - u.pos.z); if (d < best) { best = d; u.pathI = i; } }
+        }
+      }
+    }
+    const P = u.path;
+    if (!P) return [gx, gz];
+    while (u.pathI < P.length - 1 && Math.hypot(P[u.pathI][0] - u.pos.x, P[u.pathI][1] - u.pos.z) < 2.5) u.pathI++;
+    if (u.pathI >= P.length - 1 && Math.hypot(P[P.length - 1][0] - u.pos.x, P[P.length - 1][1] - u.pos.z) < 3) return [gx, gz];
+    return P[Math.min(u.pathI, P.length - 1)];
   }
 
   steer(u, dx, dz, dt, faceMove) {
@@ -2151,7 +2759,10 @@ class Battle {
       u.retargetT = 0.5;
       u.fleeFrom = this.gridNearest(u, 16, null);
     }
-    let fx = 0, fz = u.team === 0 ? -1 : 1;
+    const [ex, ez] = this.navTarget(u, u.pos.x, (u.team === 0 ? -1 : 1) * (FIELD - 4));
+    let fx = ex - u.pos.x, fz = ez - u.pos.z;
+    const fl = Math.hypot(fx, fz) || 1;
+    fx /= fl; fz /= fl;
     if (u.fleeFrom) {
       const ax = u.pos.x - u.fleeFrom.pos.x, az = u.pos.z - u.fleeFrom.pos.z, l = Math.hypot(ax, az) || 1;
       fx += ax / l * 1.5; fz += az / l * 1.5;
@@ -2185,6 +2796,7 @@ class Battle {
       u.retargetT = 0.3;
       u.fleeFrom = this.gridNearest(u, 12, null);
     }
+    [gx, gz] = this.navTarget(u, gx, gz);
     let vx = gx - u.pos.x, vz = gz - u.pos.z;
     const l = Math.hypot(vx, vz) || 1;
     vx /= l; vz /= l;
@@ -2272,17 +2884,26 @@ class Battle {
   }
 
   integrate(u, dt) {
-    const vx = u.vel.x, vz = u.vel.z, sp = Math.hypot(vx, vz);
+    const vx = u.vel.x, vz = u.vel.z, sp = Math.hypot(vx, vz), cls = u.t.mount ? 1 : 0, nav = world.nav;
     let f = 1;
     if (sp > 0.05) {
       // в гору тяжело, под гору легче
       const g = world.heightAt(u.pos.x + vx / sp, u.pos.z + vz / sp) - u.pos.y;
       f = g > 0 ? Math.max(0.35, 1 - g * 1.4) : Math.min(1.2, 1 - g * 0.5);
     }
+    f *= Math.max(0.2, nav.speedAt(u.pos.x, u.pos.z, cls)); // топь, брод, чаща
     if (world.inWall(u.pos.x, u.pos.z)) f *= 0.35; // перелезаем ограду
     u.curSpeed = sp * f;
+    const ox = u.pos.x, oz = u.pos.z;
     u.pos.x += (vx * f + u.knock.x) * dt;
     u.pos.z += (vz * f + u.knock.z) * dt;
+    // В непроходимое (обрыв, глубокая вода, дом) не заходим — скользим вдоль
+    if (nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && nav.speedAt(ox, oz, cls) > 0) {
+      if (nav.speedAt(u.pos.x, oz, cls) > 0) u.pos.z = oz;
+      else if (nav.speedAt(ox, u.pos.z, cls) > 0) u.pos.x = ox;
+      else { u.pos.x = ox; u.pos.z = oz; }
+    }
+    world.obs.pushOut(u.pos, u.t.radius * 0.8);
     const k = Math.exp(-7 * dt);
     u.knock.x *= k; u.knock.z *= k;
     const lim = FIELD - 0.5;
@@ -2298,6 +2919,11 @@ class Battle {
   }
 
   buildGrid() {
+    if (GRID_HALF !== FIELD + 10) {
+      GRID_HALF = FIELD + 10;
+      GRID_DIM = Math.ceil((GRID_HALF * 2) / GRID);
+      this.head = new Int32Array(GRID_DIM * GRID_DIM);
+    }
     this.head.fill(-1);
     if (this.next.length < this.units.length) { this.next = new Int32Array(this.units.length * 2); this.push = new Float32Array(this.units.length * 4); }
     for (let i = 0; i < this.units.length; i++) {
@@ -2336,7 +2962,11 @@ class Battle {
       if (!u.alive || (px === 0 && pz === 0)) continue;
       const l = Math.hypot(px, pz);
       if (l > 0.4) { px *= 0.4 / l; pz *= 0.4 / l; }
+      const ox = u.pos.x, oz = u.pos.z, cls = u.t.mount ? 1 : 0;
       u.pos.x = clamp(u.pos.x + px, -lim, lim); u.pos.z = clamp(u.pos.z + pz, -lim, lim);
+      // толкотня не выдавливает в обрыв или в воду
+      if (world.nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && world.nav.speedAt(ox, oz, cls) > 0) { u.pos.x = ox; u.pos.z = oz; }
+      world.obs.pushOut(u.pos, u.t.radius * 0.8);
       u.pos.y = world.heightAt(u.pos.x, u.pos.z);
     }
   }
@@ -2410,7 +3040,9 @@ class Bolts {
         a.pos.lerpVectors(a.from, a.to, s); a.pos.y += a.arc * 4 * s * (1 - s);
         a.dir.subVectors(a.to, a.from).divideScalar(a.dur); a.dir.y += a.arc * 4 * (1 - 2 * s) / a.dur;
         // Болт врезается в склон или ограду — так и работает укрытие
-        if (s > 0.08 && s < 1 && (a.pos.y < world.heightAt(a.pos.x, a.pos.z) + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y)) {
+        const gy = world.heightAt(a.pos.x, a.pos.z);
+        const inTrees = world.type === 'forest' && a.pos.y < gy + 7 && world.nav.canopyAt(a.pos.x, a.pos.z) && Math.random() < dt * 2.2;
+        if (s > 0.08 && s < 1 && (a.pos.y < gy + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y || world.obs.blocks(a.pos.x, a.pos.z, a.pos.y) || inTrees)) {
           a.flying = false; a.stuck = 8; a.dir.normalize();
           continue;
         }
@@ -2581,7 +3213,7 @@ class Commander {
     const underFire = B.time - sq.lastHitT < 3;
     if ((underFire && enR > myR * 1.1) || (this.trait === 'cautious' && enR > myR * 1.3)) {
       const c = this.coverFor(sq, ec);
-      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: c.wall ? 'за ограду, от чужих болтов' : 'в низину, от чужих болтов' };
+      if (c && d2d(c, sq.center) > 5) return { kind: 'cover', mode: 'move', x: c.x, z: c.z, then: { kind: 'hold', mode: 'hold' }, why: { wall: 'за ограду', house: 'за дома', low: world.type === 'forest' ? 'в чащу' : world.type === 'swamp' ? 'в камыши' : 'в низину' }[c.kind] + ', от чужих болтов' };
     }
     if (world.prominenceAt(sq.center.x, sq.center.z) < 1.0 && sq.order.kind !== 'cover') {
       const h = this.highNear(sq.center, 36, en, ec);
@@ -2643,12 +3275,12 @@ class Commander {
     }
     // 2. Засада в низине (хитрый, в начале боя)
     if (this.trait === 'cunning' && !this.ambushSet && B.time < 30 && !sq.engaged) {
-      const hollow = world.an.low
+      const hollow = world.an.hide
         .filter((l) => d2d(l, sq.center) < 45 && d2d(l, ec) < d2d(sq.center, ec) + 5 && d2d(l, ec) > 25)
         .sort((a, b) => b.depth - a.depth)[0];
       if (hollow) {
         this.ambushSet = true;
-        return { kind: 'ambush', mode: 'move', x: hollow.x, z: hollow.z, then: { kind: 'ambush', mode: 'ambush', leash: 14 }, why: 'затаиться в низине и ждать' };
+        return { kind: 'ambush', mode: 'move', x: hollow.x, z: hollow.z, then: { kind: 'ambush', mode: 'ambush', leash: 14 }, why: world.type === 'forest' ? 'затаиться в чаще и ждать' : world.type === 'swamp' ? 'затаиться в камышах' : 'затаиться в низине и ждать' };
       }
     }
     // 3. Оборона: занять холм и ждать
@@ -2697,21 +3329,16 @@ class Commander {
     return best;
   }
 
-  /** Укрытие: низина или обратная сторона ограды, не ближе к врагу. */
+  /** Укрытие: низина, чаща, камыш, обратная сторона ограды или дома — не ближе к врагу. */
   coverFor(sq, ec) {
-    const dNow = d2d(sq.center, ec), cands = [];
-    for (const l of world.an.low) cands.push({ x: l.x, z: l.z, wall: false });
-    for (const w of world.features.walls) {
-      const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, n = norm2(-(w.bz - w.az), w.bx - w.ax);
-      const side = (n.x * (mx - ec.x) + n.z * (mz - ec.z)) > 0 ? 1 : -1;
-      cands.push({ x: mx + n.x * 1.6 * side, z: mz + n.z * 1.6 * side, wall: true });
-    }
+    const dNow = d2d(sq.center, ec);
     let best = null, bd = Infinity;
-    for (const c of cands) {
+    for (const c of world.coverCandidates(ec)) {
       const d = d2d(c, sq.center);
-      if (d > 32 || d2d(c, ec) < dNow - 8) continue;
+      if (d > 34 || d2d(c, ec) < dNow - 8 || !world.walkable(c.x, c.z, 0.5)) continue;
       if (d < bd) { bd = d; best = c; }
     }
+    if (best) best.wall = best.kind !== 'low';
     return best;
   }
 
@@ -2972,6 +3599,17 @@ const game = {
   winner: -1, battleTime: 0, resultDelay: 0, seed: 1, style: null, lastBiome: -1,
 };
 
+/** Под местность подстраиваем погоду и краски: над болотом туман, на грядах снег. */
+function tweakStyle(st, type) {
+  if (type === 'swamp') {
+    st.fogD *= 1.7; st.waterAlpha = 0.88;
+    st.water = new THREE.Color(0x3d4a2c); st.underwater = new THREE.Color(0x3c3f26);
+    st.grassA.lerp(new THREE.Color(0x6b7a3a), 0.5); st.grassB.lerp(new THREE.Color(0x7d8a40), 0.5);
+  }
+  if (type === 'mountains') st.snowLine = Math.min(st.snowLine, 13);
+  if (type === 'forest') st.treeDensity *= 1.2;
+}
+
 function newMap(seed) {
   game.seed = seed ?? ((Math.random() * 99999) | 1);
   const r = mulberry32(game.seed);
@@ -2979,12 +3617,17 @@ function newMap(seed) {
   if (biome === game.lastBiome) biome = (biome + 1 + ((r() * (BIOMES.length - 1)) | 0)) % BIOMES.length;
   game.lastBiome = biome;
   game.style = makeStyle(biome, (r() * TIMES.length) | 0);
-  world.generate(game.seed, game.style, ASSETS);
+  const sel = $('mapType').value;
+  game.mapType = sel === 'random' ? MAP_TYPES[(r() * MAP_TYPES.length) | 0].key : sel;
+  tweakStyle(game.style, game.mapType);
+  game.big = $('armySize').value === '3';
+  world.generate(game.seed, game.style, ASSETS, game.mapType, game.big);
   battle.resetToPlan();
   game.phase = 'setup';
   rig.cinematic = false;
-  rig.lookAt(0, -48, 0, 34 * DEG, 85, true);
-  $('mapName').textContent = game.style.title + ' · карта №' + game.seed;
+  rig.lookAt(0, -(world.spawnZ + 22), 0, 36 * DEG, game.big ? 115 : 85, true);
+  const tn = MAP_TYPES.find((t) => t.key === game.mapType).name;
+  $('mapName').textContent = `${tn} · ${game.style.title} · карта №${game.seed}`;
   updateWind();
   refreshUI();
 }
@@ -3063,10 +3706,22 @@ function buildUI() {
   TEAM.forEach((tm, i) => { $('team-' + i).onclick = () => { game.team = i; game.eraser = false; refreshUI(); }; });
   $('eraser').onclick = () => { game.eraser = !game.eraser; ghost.count = 0; refreshUI(); };
   $('fight').onclick = startBattle;
-  $('newMap').onclick = () => { newMap(); toast('Карта: ' + game.style.title); };
-  const makeArmies = () => { battle.randomArmies(+$('armySize').value); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  $('newMap').onclick = () => { newMap(); if (!battle.plan.length || game.mapType === 'city') battle.randomArmies(+$('armySize').value); refreshUI(); toast($('mapName').textContent); };
+  const makeArmies = () => {
+    if (($('armySize').value === '3') !== game.big) newMap(game.seed); // для великой сечи — большое поле
+    battle.randomArmies(+$('armySize').value);
+    refreshUI();
+    toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`);
+  };
   $('random').onclick = makeArmies;
   $('armySize').onchange = makeArmies;
+  $('mapType').onchange = () => {
+    newMap();
+    battle.randomArmies(+$('armySize').value);
+    refreshUI();
+    const t = MAP_TYPES.find((m) => m.key === game.mapType);
+    toast(`${t.name}: ${t.note}`, 3600);
+  };
   $('clear').onclick = () => { battle.clearAll(); refreshUI(); };
   $('pause').onclick = () => { game.paused = !game.paused; refreshUI(); };
   [['slow', 0.25], ['normal', 1], ['fast', 2]].forEach(([id, s]) => ($(id).onclick = () => { game.speed = s; game.paused = false; refreshUI(); }));
@@ -3350,10 +4005,10 @@ async function start(saved) {
   battle.bolts.init();
   const probe = ASSETS.bolt; // наконечник болта: выбираем сторону, где модель шире у кончика
   BOLT_TIP = probe.tip || 1;
+  $('armySize').value = LOW_END ? '1' : '2';
   newMap(saved?.seed);
   if (saved?.plan?.length) battle.setPlan(saved.plan);
-  else battle.randomArmies(LOW_END ? 1 : 2);
-  $('armySize').value = LOW_END ? '1' : '2';
+  else battle.randomArmies(+$('armySize').value);
   refreshUI();
   $('loading').hidden = true;
   toast('Карта: ' + game.style.title + '. Расставьте армии и жмите «В бой!»', 4200);

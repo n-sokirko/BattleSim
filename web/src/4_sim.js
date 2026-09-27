@@ -91,7 +91,8 @@ class Squad {
 
 // ------------------------------------------------------------------ солдаты
 
-const GRID = 2.5, GRID_HALF = FIELD + 10, GRID_DIM = Math.ceil(GRID_HALF * 2 / GRID);
+const GRID = 2.5;
+let GRID_HALF = 90, GRID_DIM = Math.ceil((GRID_HALF * 2) / GRID);
 
 class Unit {
   constructor(plan) {
@@ -161,7 +162,7 @@ class Battle {
         const ox = (c - (t.cols - 1) / 2) * t.spacing, oz = -(r - (t.rows - 1) / 2) * t.spacing;
         const jx = ox + (Math.random() - 0.5) * 0.2, jz = oz + (Math.random() - 0.5) * 0.2;
         const x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
-        if (!World.inField(x, z, 1) || this.occupied(x, z, t.radius)) continue;
+        if (!World.inField(x, z, 1) || !world.walkable(x, z, t.radius) || this.occupied(x, z, t.radius)) continue;
         const plan = { type, team, x, z, yaw, variant: (Math.random() * 2) | 0, squad: id, ox, oz };
         this.plan.push(plan);
         const u = new Unit(plan);
@@ -212,6 +213,7 @@ class Battle {
   resetToPlan() {
     this.clearUnits();
     const map = new Map();
+    this.plan = this.plan.filter((p) => World.inField(p.x, p.z, 1) && world.walkable(p.x, p.z, 0.4));
     for (const p of this.plan) {
       const u = new Unit(p);
       this.units.push(u);
@@ -249,24 +251,24 @@ class Battle {
       { front: [3, 5], xbow: [2, 3], cav: [1, 2], lines: 1 },
       { front: [6, 8], xbow: [4, 5], cav: [2, 4], lines: 2 },
       { front: [11, 13], xbow: [7, 9], cav: [4, 6], lines: 4 }][size] || null;
-    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0);
+    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0), z0 = world.spawnZ;
     for (let team = 0; team < 2; team++) {
       const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI;
       for (let line = 0; line < cfg.lines; line++) {
         const front = pick(cfg.front);
         for (let i = 0; i < front; i++)
-          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (22 + line * 8 + R() * 2), yaw);
+          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (z0 + line * 8 + R() * 2), yaw);
       }
       const xbRows = Math.max(1, Math.ceil(cfg.lines / 2));
       for (let row = 0; row < xbRows; row++) {
         const n = pick(cfg.xbow);
         for (let i = 0; i < n; i++)
-          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (24 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
+          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (z0 + 2 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
       }
       const cav = pick(cfg.cav);
       for (let i = 0; i < cav; i++) {
         const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
-        this.placeSquad(3, team, side * (58 + k * 3 - (R() * 4)), dir * (26 + k * 10 + R() * 4), yaw);
+        this.placeSquad(3, team, side * (FIELD * 0.72 + k * 3 - R() * 4), dir * (z0 + 4 + k * 10 + R() * 4), yaw);
       }
     }
   }
@@ -404,7 +406,7 @@ class Battle {
         continue;
       }
 
-      sq.hidden = world.prominenceAt(sq.center.x, sq.center.z) < -0.9 && !sq.engaged && this.time - sq.lastShotT > 3 && !enemyNear;
+      sq.hidden = world.concealedAt(sq.center.x, sq.center.z) && !sq.engaged && this.time - sq.lastShotT > 3 && !enemyNear;
 
       if (o.mode === 'move' && (d2d(o, sq.center) < 4 || this.time - sq.orderT > 35)) {
         const next = o.then ? { ...o.then } : { kind: 'advance', mode: 'advance' };
@@ -440,21 +442,32 @@ class Battle {
           u.aiming = true; wantSlot = false;
           u.face(nx, nz, dt);
           if (u.cooldown <= 0 && u.atkT < 0) this.startAttack(u, true);
-        } else if (o.mode === 'advance' || o.mode === 'charge') { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+        } else if (o.mode === 'advance' || o.mode === 'charge') {
+        const [wx, wz] = this.navTarget(u, tg.pos.x, tg.pos.z), ll = Math.hypot(wx - u.pos.x, wz - u.pos.z) || 1;
+        dx = (wx - u.pos.x) / ll * t.speed; dz = (wz - u.pos.z) / ll * t.speed; wantSlot = false;
+      }
       } else if (d <= contact) {
         u.engaged = true; wantSlot = false;
         u.face(nx, nz, dt);
         if (u.cooldown <= 0 && u.atkT < 0 && t.dmg > 0) this.startAttack(u, false);
-      } else if (this.mayChase(u, tg)) { dx = nx * t.speed; dz = nz * t.speed; wantSlot = false; }
+      } else if (this.mayChase(u, tg)) {
+        wantSlot = false;
+        if (d > 6) {
+          const [wx, wz] = this.navTarget(u, tg.pos.x, tg.pos.z), ll = Math.hypot(wx - u.pos.x, wz - u.pos.z) || 1;
+          dx = (wx - u.pos.x) / ll * t.speed; dz = (wz - u.pos.z) / ll * t.speed;
+        } else { dx = nx * t.speed; dz = nz * t.speed; }
+      }
     }
     if (wantSlot) {
       let gx, gz;
       if (t.special === 'commander') { const c = this.commanders[u.team]; gx = c ? c.post.x : u.pos.x; gz = c ? c.post.z : u.pos.z; }
       else [gx, gz] = sq.slot(u);
+      const sd0 = Math.hypot(gx - u.pos.x, gz - u.pos.z);
+      if (sd0 > 4) [gx, gz] = this.navTarget(u, gx, gz);
       const sx = gx - u.pos.x, sz = gz - u.pos.z, sd = Math.hypot(sx, sz);
-      if (sd > 0.7) {
-        const k = (sd > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
-        dx = sx / sd * t.speed * k; dz = sz / sd * t.speed * k;
+      if (sd0 > 0.7) {
+        const k = (sd0 > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
+        dx = sx / (sd || 1) * t.speed * k; dz = sz / (sd || 1) * t.speed * k;
       } else if (o.face != null && !u.aiming) u.face(Math.sin(o.face), Math.cos(o.face), dt, 3);
     }
     if (u.atkT >= 0 && !t.ranged && t.charge <= 1) { dx *= 0.3; dz *= 0.3; }
@@ -469,6 +482,42 @@ class Battle {
       if (!u.hitDone && u.atkT >= (u.shot ? 0.55 : 0.5)) { u.hitDone = true; this.resolveHit(u); }
       if (u.atkT >= 1) u.atkT = -1;
     }
+  }
+
+  /**
+   * Куда идти сейчас, чтобы добраться до (gx, gz): прямо, если путь свободен,
+   * иначе к следующей точке пути A*. Путь считается один раз на отряд.
+   */
+  navTarget(u, gx, gz) {
+    const nav = world.nav;
+    if (!nav.blockedCount) return [gx, gz];
+    const cls = u.t.mount ? 1 : 0;
+    if (this.time > (u.navT || 0) || Math.hypot(gx - u.navGX, gz - u.navGZ) > 5) {
+      u.navT = this.time + 0.7 + Math.random() * 0.4;
+      u.navGX = gx; u.navGZ = gz;
+      if (nav.lineClear(u.pos.x, u.pos.z, gx, gz, cls)) u.path = null;
+      else {
+        const sq = u.squad, pc = sq.pathCache;
+        let path;
+        if (pc && pc.cls === cls && Math.hypot(pc.gx - gx, pc.gz - gz) < 6 && this.time - pc.t < 3 && d2d(sq.center, u.pos) < 12) path = pc.path;
+        else {
+          const from = d2d(sq.center, u.pos) < 12 && nav.speedAt(sq.center.x, sq.center.z, cls) > 0 ? sq.center : u.pos;
+          path = nav.findPath(from.x, from.z, gx, gz, cls);
+          if (from === sq.center) sq.pathCache = { cls, gx, gz, t: this.time, path };
+        }
+        u.path = path;
+        u.pathI = 1;
+        if (path) { // начинаем с ближайшей точки пути
+          let best = Infinity;
+          for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - u.pos.x, path[i][1] - u.pos.z); if (d < best) { best = d; u.pathI = i; } }
+        }
+      }
+    }
+    const P = u.path;
+    if (!P) return [gx, gz];
+    while (u.pathI < P.length - 1 && Math.hypot(P[u.pathI][0] - u.pos.x, P[u.pathI][1] - u.pos.z) < 2.5) u.pathI++;
+    if (u.pathI >= P.length - 1 && Math.hypot(P[P.length - 1][0] - u.pos.x, P[P.length - 1][1] - u.pos.z) < 3) return [gx, gz];
+    return P[Math.min(u.pathI, P.length - 1)];
   }
 
   steer(u, dx, dz, dt, faceMove) {
@@ -592,7 +641,10 @@ class Battle {
       u.retargetT = 0.5;
       u.fleeFrom = this.gridNearest(u, 16, null);
     }
-    let fx = 0, fz = u.team === 0 ? -1 : 1;
+    const [ex, ez] = this.navTarget(u, u.pos.x, (u.team === 0 ? -1 : 1) * (FIELD - 4));
+    let fx = ex - u.pos.x, fz = ez - u.pos.z;
+    const fl = Math.hypot(fx, fz) || 1;
+    fx /= fl; fz /= fl;
     if (u.fleeFrom) {
       const ax = u.pos.x - u.fleeFrom.pos.x, az = u.pos.z - u.fleeFrom.pos.z, l = Math.hypot(ax, az) || 1;
       fx += ax / l * 1.5; fz += az / l * 1.5;
@@ -626,6 +678,7 @@ class Battle {
       u.retargetT = 0.3;
       u.fleeFrom = this.gridNearest(u, 12, null);
     }
+    [gx, gz] = this.navTarget(u, gx, gz);
     let vx = gx - u.pos.x, vz = gz - u.pos.z;
     const l = Math.hypot(vx, vz) || 1;
     vx /= l; vz /= l;
@@ -713,17 +766,26 @@ class Battle {
   }
 
   integrate(u, dt) {
-    const vx = u.vel.x, vz = u.vel.z, sp = Math.hypot(vx, vz);
+    const vx = u.vel.x, vz = u.vel.z, sp = Math.hypot(vx, vz), cls = u.t.mount ? 1 : 0, nav = world.nav;
     let f = 1;
     if (sp > 0.05) {
       // в гору тяжело, под гору легче
       const g = world.heightAt(u.pos.x + vx / sp, u.pos.z + vz / sp) - u.pos.y;
       f = g > 0 ? Math.max(0.35, 1 - g * 1.4) : Math.min(1.2, 1 - g * 0.5);
     }
+    f *= Math.max(0.2, nav.speedAt(u.pos.x, u.pos.z, cls)); // топь, брод, чаща
     if (world.inWall(u.pos.x, u.pos.z)) f *= 0.35; // перелезаем ограду
     u.curSpeed = sp * f;
+    const ox = u.pos.x, oz = u.pos.z;
     u.pos.x += (vx * f + u.knock.x) * dt;
     u.pos.z += (vz * f + u.knock.z) * dt;
+    // В непроходимое (обрыв, глубокая вода, дом) не заходим — скользим вдоль
+    if (nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && nav.speedAt(ox, oz, cls) > 0) {
+      if (nav.speedAt(u.pos.x, oz, cls) > 0) u.pos.z = oz;
+      else if (nav.speedAt(ox, u.pos.z, cls) > 0) u.pos.x = ox;
+      else { u.pos.x = ox; u.pos.z = oz; }
+    }
+    world.obs.pushOut(u.pos, u.t.radius * 0.8);
     const k = Math.exp(-7 * dt);
     u.knock.x *= k; u.knock.z *= k;
     const lim = FIELD - 0.5;
@@ -739,6 +801,11 @@ class Battle {
   }
 
   buildGrid() {
+    if (GRID_HALF !== FIELD + 10) {
+      GRID_HALF = FIELD + 10;
+      GRID_DIM = Math.ceil((GRID_HALF * 2) / GRID);
+      this.head = new Int32Array(GRID_DIM * GRID_DIM);
+    }
     this.head.fill(-1);
     if (this.next.length < this.units.length) { this.next = new Int32Array(this.units.length * 2); this.push = new Float32Array(this.units.length * 4); }
     for (let i = 0; i < this.units.length; i++) {
@@ -777,7 +844,11 @@ class Battle {
       if (!u.alive || (px === 0 && pz === 0)) continue;
       const l = Math.hypot(px, pz);
       if (l > 0.4) { px *= 0.4 / l; pz *= 0.4 / l; }
+      const ox = u.pos.x, oz = u.pos.z, cls = u.t.mount ? 1 : 0;
       u.pos.x = clamp(u.pos.x + px, -lim, lim); u.pos.z = clamp(u.pos.z + pz, -lim, lim);
+      // толкотня не выдавливает в обрыв или в воду
+      if (world.nav.speedAt(u.pos.x, u.pos.z, cls) === 0 && world.nav.speedAt(ox, oz, cls) > 0) { u.pos.x = ox; u.pos.z = oz; }
+      world.obs.pushOut(u.pos, u.t.radius * 0.8);
       u.pos.y = world.heightAt(u.pos.x, u.pos.z);
     }
   }
@@ -851,7 +922,9 @@ class Bolts {
         a.pos.lerpVectors(a.from, a.to, s); a.pos.y += a.arc * 4 * s * (1 - s);
         a.dir.subVectors(a.to, a.from).divideScalar(a.dur); a.dir.y += a.arc * 4 * (1 - 2 * s) / a.dur;
         // Болт врезается в склон или ограду — так и работает укрытие
-        if (s > 0.08 && s < 1 && (a.pos.y < world.heightAt(a.pos.x, a.pos.z) + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y)) {
+        const gy = world.heightAt(a.pos.x, a.pos.z);
+        const inTrees = world.type === 'forest' && a.pos.y < gy + 7 && world.nav.canopyAt(a.pos.x, a.pos.z) && Math.random() < dt * 2.2;
+        if (s > 0.08 && s < 1 && (a.pos.y < gy + 0.05 || world.wallTop(a.pos.x, a.pos.z) > a.pos.y || world.obs.blocks(a.pos.x, a.pos.z, a.pos.y) || inTrees)) {
           a.flying = false; a.stuck = 8; a.dir.normalize();
           continue;
         }

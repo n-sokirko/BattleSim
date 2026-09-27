@@ -31,6 +31,9 @@ for n in ["tree_single_A", "tree_single_B", "trees_A_large", "trees_A_medium", "
     MODELS[n] = f"world/{n}.gltf"
 MODELS.update({"castle_blue": "world/building_castle_blue.gltf", "castle_red": "world/building_castle_red.gltf",
                "windmill": "world/building_windmill_blue.gltf", "tower": "world/building_tower_A_red.gltf"})
+# Город: дома, церковь, таверна, рынок, стены, мелочи
+for f in sorted(pathlib.Path(SRC / "city").glob("*.gltf")):
+    MODELS["city_" + f.stem] = "city/" + f.name
 
 
 def read_model(path: pathlib.Path):
