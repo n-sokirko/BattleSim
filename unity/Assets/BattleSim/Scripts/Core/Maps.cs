@@ -175,6 +175,16 @@ namespace BattleSim.Core
             return best;
         }
 
+        /// <summary>Боевой ход стены под точкой (или null): для раскладки стрелков вдоль стены.</summary>
+        public Deck WallAt(float x, float z)
+        {
+            var L = Grid.Near(x, z);
+            if (L != null)
+                foreach (var d in L)
+                    if (d.Kind == DeckKind.Wall && Locate(d, x, z, out _, out _)) return d;
+            return null;
+        }
+
         /// <summary>Тонкий настил моста перекрывает точку на высоте y?</summary>
         public bool ThinBlocks(float x, float z, float y)
         {

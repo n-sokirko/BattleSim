@@ -325,7 +325,9 @@ namespace BattleSim.Core
                     if (placed >= Defs.Types[2].Cols * Defs.Types[2].Rows * 0.6f)
                     {
                         usedWall.Add(p);
-                        Squads[Squads.Count - 1].Order = new Order(OrderKind.Fire, Mode.Hold) { Why = "держать стену" }.At(p);
+                        var ws = Squads[Squads.Count - 1];
+                        ws.Order = new Order(OrderKind.Fire, Mode.Hold) { Why = "держать стену", Face = M.PI }.At(p);
+                        ws.Garrison = true;
                         ok = true;
                         break;
                     }
@@ -543,7 +545,7 @@ namespace BattleSim.Core
                 Lap(4);
                 for (int i = 0; i < Units.Count; i++) if (Units[i].Alive) Integrate(Units[i], dt);
                 Lap(5);
-                Separate();
+                ResolveContacts();
                 Lap(6);
             }
             Bolts.Tick(dt);
@@ -649,6 +651,8 @@ namespace BattleSim.Core
             float engageR = float.MaxValue;
             if (advance && !t.Ranged && !u.IsLeader)
                 engageR = t.Mount ? 14 : u.Row <= 0 ? 7 : u.Row == 1 ? 4.5f : sq.EngagedFor > 4 ? 5.5f : 3f;
+            if (sq.Front != null && !u.IsLeader)
+                engageR = u.Row <= 0 ? t.Radius * 2 + t.Reach + 0.8f : 0; // строй держит линию: только выпад первой шеренги
             if (tg != null)
             {
                 float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = M.Hypot(tx, tz);
@@ -688,6 +692,7 @@ namespace BattleSim.Core
 #if PROF
             SubLap(1);
 #endif
+            if (!wantSlot) u.Settled = false;
             if (wantSlot)
             {
                 if (u.IsLeader)
@@ -820,7 +825,7 @@ namespace BattleSim.Core
         // Кого можно выбрать целью: зависит от приказа, скрытности и роли
         bool Allowed(Unit u, Unit e, float d2, Order o, bool ranged, float gx, float gz, float leash)
         {
-            if (e.Squad != null && e.Squad.Hidden && d2 > 196) return false; // в низине не видно
+            if (e.Squad != null && e.Squad.Hidden && d2 > 196 && u.Pos.y - e.Pos.y < 4) return false; // в низине не видно (сверху — видно)
             if (e.T.Special == Special.Messenger && !ranged && d2 > 64) return false;
             if (u.IsLeader && d2 > 64) return false;
             if (e.Squad != null && e.Squad == u.IgnoreSquad && Time < u.IgnoreT) return false;
@@ -828,7 +833,7 @@ namespace BattleSim.Core
             if (!ranged && MathF.Abs(e.Pos.y - u.Pos.y) > 1.8f + 0.5f * MathF.Sqrt(d2)) return false;
             // стрелку отвесно вниз из-за кладки не выстрелить (мёртвая зона под стеной)
             if (ranged && MathF.Abs(e.Pos.y - u.Pos.y) > 1.8f && MathF.Abs(e.Pos.y - u.Pos.y) > MathF.Sqrt(d2) * 0.9f) return false;
-            if (o.Mode == Mode.Move && d2 > 10) return false;
+            if (o.Mode == Mode.Move && d2 > 10 && !ranged) return false; // на марше не отвлекаться (стрелки стреляют и на ходу)
             if ((o.Mode == Mode.Hold || o.Mode == Mode.Ambush) && !ranged)
             {
                 float lx = e.Pos.x - gx, lz = e.Pos.z - gz;
@@ -837,8 +842,8 @@ namespace BattleSim.Core
             return true;
         }
 
-        readonly Unit[] bestE = new Unit[6];
-        readonly float[] bestS = new float[6];
+        readonly Unit[] bestE = new Unit[13];
+        readonly float[] bestS = new float[13];
 
         /// <summary>
         /// Цель с учётом приказа, скрытности и прямой видимости. Ищем не по всей армии,
@@ -856,7 +861,7 @@ namespace BattleSim.Core
 
             var foes = u.Squad.Foes;
             bool chargeT = o.Mode == Mode.Charge && o.Target != null && o.Target.Alive > 0;
-            int nc = Math.Min(foes.Count + (chargeT ? 1 : 0), 4), nb = 0;
+            int nc = Math.Min(foes.Count + (chargeT ? 1 : 0), ranged ? 8 : 4), nb = 0, cap = ranged ? 12 : 5;
             for (int qi = 0; qi < nc; qi++)
             {
                 var q = chargeT ? (qi == 0 ? o.Target : foes[qi - 1]) : foes[qi];
@@ -866,9 +871,9 @@ namespace BattleSim.Core
                     float dx = e.Pos.x - u.Pos.x, dz = e.Pos.z - u.Pos.z, d2 = dx * dx + dz * dz;
                     if (!Allowed(u, e, d2, o, ranged, gx, gz, leash)) continue;
                     float sc = o.Mode == Mode.Charge && o.Target == q ? d2 * 0.2f : d2;
-                    if (nb < 5 || sc < bestS[nb - 1])
+                    if (nb < cap || sc < bestS[nb - 1])
                     {
-                        int i = nb < 5 ? nb++ : 4;
+                        int i = nb < cap ? nb++ : cap - 1;
                         while (i > 0 && bestS[i - 1] > sc) { bestS[i] = bestS[i - 1]; bestE[i] = bestE[i - 1]; i--; }
                         bestS[i] = sc; bestE[i] = e;
                     }
@@ -1216,6 +1221,96 @@ namespace BattleSim.Core
                 CellOf(u.Pos.x, u.Pos.z, out int cx, out int cz);
                 int c = cz * gridDim + cx;
                 next[i] = head[c]; head[c] = i;
+            }
+        }
+
+        float[] rcStart = new float[0], rcAcc = new float[0];
+
+        /// <summary>
+        /// Подвижность солдата в паре (обратная «жёсткость»): кто уступает место. Стоящий в строю и рубящийся
+        /// почти не уступают идущему своему — тот обтекает; сбитый и бегущий уступают всем; враги — по массе.
+        /// </summary>
+        static float Mob(Unit a, bool foe)
+        {
+            var o = a.Squad?.Order;
+            if (foe) return (a.Settled && o != null && o.Mode == Mode.Hold ? 0.35f : 1f) / a.T.Mass;
+            if (o != null && o.Mode == Mode.Rout) return 1.2f;
+            if (a.Engaged) return 0.15f;
+            if (a.Settled) return 0.25f;
+            return 1f / a.T.Mass;
+        }
+
+        /// <summary>
+        /// Столкновения (по образцу PBD-толпы): две итерации поправок позиций по парам соседей, каждая пара — один раз,
+        /// сдвиг не больше 12 см за итерацию. Главное — после поправки гасим скорость «в соседа»: кто упёрся, перестаёт
+        /// давить, и вечного «трения» нет. Между врагами — зазор 15 см, чтобы линии не прорастали друг в друга.
+        /// </summary>
+        void ResolveContacts()
+        {
+            var U = Units;
+            int n = U.Count;
+            if (rcStart.Length < n * 2) { rcStart = new float[n * 4]; rcAcc = new float[n * 4]; }
+            for (int i = 0; i < n; i++) { rcStart[i * 2] = U[i].Pos.x; rcStart[i * 2 + 1] = U[i].Pos.z; }
+            float lim = World.Field - 0.5f;
+            for (int it = 0; it < 2; it++)
+            {
+                Array.Clear(rcAcc, 0, n * 2);
+                for (int i = 0; i < n; i++)
+                {
+                    var u = U[i];
+                    if (!u.Alive) continue;
+                    CellOf(u.Pos.x, u.Pos.z, out int cx, out int cz);
+                    for (int z = Math.Max(cz - 1, 0); z <= Math.Min(cz + 1, gridDim - 1); z++)
+                        for (int x = Math.Max(cx - 1, 0); x <= Math.Min(cx + 1, gridDim - 1); x++)
+                            for (int j = head[z * gridDim + x]; j >= 0; j = next[j])
+                            {
+                                if (j <= i || j >= n) continue; // каждая пара — один раз
+                                var o = U[j];
+                                if (!o.Alive) continue;
+                                bool foe = o.Team != u.Team;
+                                float min = u.T.Radius + o.T.Radius + (foe ? 0.15f : 0f);
+                                float dx = u.Pos.x - o.Pos.x, dz = u.Pos.z - o.Pos.z, d2 = dx * dx + dz * dz;
+                                if (d2 >= min * min || MathF.Abs(u.Pos.y - o.Pos.y) > 1.5f) continue; // на стене и под стеной не толкаются
+                                float d = MathF.Sqrt(d2) + 1e-5f;
+                                float nx = d > 2e-5f ? dx / d : MathF.Cos(i), nz = d > 2e-5f ? dz / d : MathF.Sin(i);
+                                float pen = (min - d) * 0.8f;
+                                if (!foe && u.Squad == o.Squad && u.Squad != null && u.Squad.FormMarch)
+                                { // своя колонна на марше: не «гармошка» — продольную часть поправки ослабляем
+                                    float fx = MathF.Sin(u.Squad.Facing), fz = MathF.Cos(u.Squad.Facing), al = nx * fx + nz * fz;
+                                    nx -= fx * al * 0.7f; nz -= fz * al * 0.7f;
+                                }
+                                float wi = Mob(u, foe), wj = Mob(o, foe), ws = wi + wj;
+                                rcAcc[i * 2] += nx * pen * wi / ws; rcAcc[i * 2 + 1] += nz * pen * wi / ws;
+                                rcAcc[j * 2] -= nx * pen * wj / ws; rcAcc[j * 2 + 1] -= nz * pen * wj / ws;
+                            }
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    var u = U[i];
+                    float px = rcAcc[i * 2], pz = rcAcc[i * 2 + 1];
+                    if (!u.Alive || (px == 0 && pz == 0)) continue;
+                    float l = M.Hypot(px, pz);
+                    if (l > 0.12f) { px *= 0.12f / l; pz *= 0.12f / l; }
+                    float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y;
+                    int cls = u.T.Mount ? 1 : 0;
+                    float nx = M.Clamp(u.Pos.x + px, -lim, lim), nz = M.Clamp(u.Pos.z + pz, -lim, lim);
+                    if (!CanMove(ox, oz, oy, nx, nz, cls)) continue; // толкотня не сбрасывает со стены и в воду
+                    u.Pos.x = nx; u.Pos.z = nz;
+                    World.Obs.PushOut(ref u.Pos.x, ref u.Pos.z, u.T.Radius * 0.8f);
+                    if (!CanMove(ox, oz, oy, u.Pos.x, u.Pos.z, cls)) { u.Pos.x = nx; u.Pos.z = nz; }
+                    u.Pos.y = World.GroundAt(u.Pos.x, u.Pos.z);
+                }
+            }
+            // упёрся — перестаём давить: гасим составляющую скорости против поправки; в сцепке — «трение»
+            for (int i = 0; i < n; i++)
+            {
+                var u = U[i];
+                if (!u.Alive) continue;
+                float cx = u.Pos.x - rcStart[i * 2], cz = u.Pos.z - rcStart[i * 2 + 1], cl = M.Hypot(cx, cz);
+                if (cl < 1e-4f) continue;
+                float nx = cx / cl, nz = cz / cl, vn = u.Vel.x * nx + u.Vel.z * nz;
+                if (vn < 0) { u.Vel.x -= nx * vn; u.Vel.z -= nz * vn; }
+                if (u.Engaged) { u.Vel.x *= 0.7f; u.Vel.z *= 0.7f; }
             }
         }
 

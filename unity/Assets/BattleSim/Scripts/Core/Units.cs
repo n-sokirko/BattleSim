@@ -71,6 +71,13 @@ namespace BattleSim.Core
         // заявка на путь точки отряда: считается понемногу за несколько шагов
         public bool APathQueued;
         public V2 APathWant;
+        // постоянная сетка мест: Cells[шеренга * CellFiles + колонна]; бреши закрывают задние, а не перераздача
+        /// <summary>Сцепка строй-на-строй, в которой отряд держит линию фронта (или null — свободный бой).</summary>
+        public Engagement Front;
+        public Unit[] Cells;
+        public int CellFiles, CellRows;
+        public bool CellMarch;
+        public float LayoutT, CellShift;
         public int RowTick = -1;
         public V2[] RowP = new V2[0], RowF = new V2[0];
         public bool[] RowOk = new bool[0];
@@ -138,6 +145,11 @@ namespace BattleSim.Core
         /// <summary>Реакция на удар для анимации: 1 — вздрогнул, 2 — принял удар на щит (показывается один раз).</summary>
         public int HitReact;
         public float HitAnimT;
+        /// <summary>Стоит на своём месте в строю (гистерезис: встал ближе 0,2 м — стоит, пока не сдвинут дальше 0,6 м).</summary>
+        public bool Settled;
+        /// <summary>Колонна в строю (номер места в шеренге) и зерно «дрейфа» — строй не выглядит роботом.</summary>
+        public int File;
+        public float DriftSeed;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;
@@ -192,6 +204,18 @@ namespace BattleSim.Core
         public V2 E, Dir;
         public int Team;
         public readonly List<Squad> Queue = new List<Squad>();
+    }
+
+    /// <summary>
+    /// Сцепка двух пехотных отрядов: линия фронта (точка P, нормаль N от A к B), зазор между первыми шеренгами.
+    /// Строи стоят друг против друга, рубятся первые шеренги парами, линия медленно поворачивается и смещается
+    /// в сторону слабейшего — видно, кто кого теснит.
+    /// </summary>
+    public sealed class Engagement
+    {
+        public Squad A, B;
+        public V2 P, N;
+        public float Gap, PairT, LastFightT, Born;
     }
 
     /// <summary>Что случилось в бою — для эффектов на экране (пыль, искры, брызги).</summary>
