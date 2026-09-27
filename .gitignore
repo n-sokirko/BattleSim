@@ -20,3 +20,6 @@ unity/*.user
 # Система
 .DS_Store
 Thumbs.db
+
+# Локальные настройки Claude Code
+.claude/

@@ -1,123 +1,58 @@
 // ------------------------------------------------------------------ анимация
 
-/** Канал анимации: одно активное действие с плавными переходами. */
-class Channel {
-  constructor(mixer, clips) { this.mixer = mixer; this.clips = clips; this.cur = null; this.name = ''; this.actions = {}; }
-  get(name) {
-    if (!this.actions[name]) {
-      const c = this.clips[name];
-      if (!c) return null;
-      this.actions[name] = this.mixer.clipAction(c);
-    }
-    return this.actions[name];
-  }
-  play(name, { once = false, speed = 1, fade = 0.18, restart = false } = {}) {
-    const a = this.get(name);
-    if (!a) return;
-    if (this.cur === a && !restart) { a.timeScale = speed; return; }
-    a.reset();
-    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
-    a.clampWhenFinished = once;
-    a.timeScale = speed;
-    a.setEffectiveWeight(1);
-    a.play();
-    if (this.cur && this.cur !== a) a.crossFadeFrom(this.cur, fade, false);
-    this.cur = a; this.name = name;
-  }
-}
-
-const HORSE_YAW = 0; // поправка, если модель коня смотрит не вдоль +Z
-
-function makeView(u) {
-  const root = new THREE.Group();
-  const v = { root, mixers: [] };
-  if (u.t.mount) {
-    const hv = u.t.special === 'commander' ? 1 : u.t.special === 'messenger' ? 0 : u.variant % ASSETS.horses.length;
-    const hd = ASSETS.horses[hv];
-    const horse = SkeletonUtils.clone(hd.template);
-    horse.rotation.y = HORSE_YAW;
-    root.add(horse);
-    const rider = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
-    v.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
-    rider.position.copy(v.riderBase);
-    root.add(rider);
-    v.rider = rider;
-    if (u.t.special === 'commander') {
-      v.banner = makeBanner(u.team);
-      v.banner.position.set(-0.3, ASSETS.riderHipsY, -0.38);
-      rider.add(v.banner);
-    }
-    const hm = new THREE.AnimationMixer(horse), rm = new THREE.AnimationMixer(rider);
-    v.mixers.push(hm, rm);
-    v.main = new Channel(hm, hd.clips);
-    const riderClips = { arms: ASSETS.rider.arms };
-    ASSETS.rider.attack.forEach((c, i) => (riderClips['atk' + i] = c));
-    v.upper = new Channel(rm, riderClips);
-    rm.clipAction(ASSETS.rider.sit).play();
-    v.upper.play('arms');
-    v.main.play('Idle');
-  } else {
-    const ch = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
-    root.add(ch);
-    const m = new THREE.AnimationMixer(ch);
-    v.mixers.push(m);
-    v.main = new Channel(m, ASSETS.clips[u.t.model]);
-    v.main.play(u.t.anim.idle, { fade: 0 });
-    // разные солдаты не должны двигаться в унисон
-    if (v.main.cur) v.main.cur.time = Math.random() * v.main.cur.getClip().duration;
-  }
-  root.scale.setScalar(u.scale);
-  unitLayer.add(root);
-  v.accum = 0; v.frame = (Math.random() * 4) | 0;
-  return v;
-}
-
-function disposeView(v) {
-  if (!v) return;
-  unitLayer.remove(v.root);
-  for (const m of v.mixers) m.stopAllAction();
-}
-
-/** Выбирает анимацию по состоянию солдата. */
+/**
+ * Выбирает анимацию по состоянию солдата. Здесь только имена клипов и время —
+ * сами позы берутся из запечённой текстуры (см. 3b_crowd.js).
+ */
 function animate(u, state) {
-  const v = u.view, a = u.t.anim;
-  const speed = u.curSpeed;
+  const a = u.t.anim, speed = u.curSpeed;
   if (u.t.mount) {
-    if (!u.alive) { if (!u.deathShown) { v.main.play('Death', { once: true }); u.deathShown = true; } return; }
-    if (speed > 3.5) v.main.play('Gallop', { speed: clamp(speed / 7, 0.7, 1.4) });
-    else if (speed > 0.4) v.main.play('Walk', { speed: clamp(speed / 1.6, 0.6, 1.6) });
-    else v.main.play('Idle');
-    if (u.atkNew && a.attack.length) { u.atkNew = false; v.upper.play('atk' + ((Math.random() * a.attack.length) | 0), { once: true, restart: true, speed: 1.1, fade: 0.08 }); }
-    else if (u.atkT < 0 && v.upper.name !== 'arms') v.upper.play('arms', { fade: 0.25 });
-    const bob = speed > 3.5 ? Math.abs(Math.sin(u.phase)) * 0.12 : 0;
-    v.rider.position.set(v.riderBase.x, v.riderBase.y + bob, v.riderBase.z);
+    if (!u.alive) {
+      if (!u.deathShown) {
+        playAnim(u.anim, 'Death', { once: true });
+        playAnim(u.ride, Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true });
+        u.deathShown = true;
+      }
+      return;
+    }
+    if (speed > 3.5) playAnim(u.anim, 'Gallop', { speed: clamp(speed / 7, 0.7, 1.4) });
+    else if (speed > 0.4) playAnim(u.anim, 'Walk', { speed: clamp(speed / 1.6, 0.6, 1.6) });
+    else playAnim(u.anim, 'Idle');
+    if (u.atkNew && a.attack.length) {
+      u.atkNew = false;
+      playAnim(u.ride, 'atk' + ((Math.random() * Math.min(2, a.attack.length)) | 0), { once: true, restart: true, speed: 1.1 });
+    } else if (u.atkT < 0 && u.ride.name !== 'ride') playAnim(u.ride, 'ride');
     return;
   }
   if (!u.alive) {
-    if (!u.deathShown) { v.main.play(Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true, fade: 0.1 }); u.deathShown = true; }
+    if (!u.deathShown) { playAnim(u.anim, Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true }); u.deathShown = true; }
     return;
   }
-  if (state === 'cheer') { v.main.play(a.cheer); return; }
+  if (state === 'cheer') { playAnim(u.anim, a.cheer); return; }
   if (u.atkNew) {
     u.atkNew = false;
     let name = a.attack[(Math.random() * a.attack.length) | 0];
     if (u.t.ranged && !u.shot) name = a.melee;
-    const clip = v.main.get(name)?.getClip();
-    const sp = clip ? clamp(clip.duration / u.atkDur, 0.8, 2.2) : 1;
-    v.main.play(name, { once: true, restart: true, speed: sp, fade: 0.08 });
+    const clip = ASSETS.crowd.inf[u.type].clips[name];
+    playAnim(u.anim, name, { once: true, restart: true, speed: clip ? clamp(clip.dur / u.atkDur, 0.8, 2.2) : 1 });
     return;
   }
   if (u.atkT >= 0) return; // удар ещё идёт
-  if (u.t.ranged && u.aiming) { v.main.play(u.cooldown > 0.6 ? a.reload : a.aim); return; }
-  if (speed > 1.6) v.main.play(a.run, { speed: clamp(speed / 3.4, 0.6, 1.5) });
-  else if (speed > 0.3) v.main.play('Walking_A', { speed: clamp(speed / 1.4, 0.6, 1.4) });
-  else v.main.play(a.idle);
+  if (u.t.ranged && u.aiming) { playAnim(u.anim, u.cooldown > 0.6 ? a.reload : a.aim); return; }
+  if (speed > 1.6) playAnim(u.anim, a.run, { speed: clamp(speed / 3.4, 0.6, 1.5) });
+  else if (speed > 0.3) playAnim(u.anim, 'Walking_A', { speed: clamp(speed / 1.4, 0.6, 1.4) });
+  else playAnim(u.anim, a.idle);
 }
 
 // ------------------------------------------------------------------ отряды
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+/** Римские цифры для номеров отрядов: I, II, … XLIX. */
+function roman(n) {
+  let out = '';
+  for (const [v, r] of [[40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) while (n >= v) { out += r; n -= v; }
+  return out;
+}
 const d2d = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 /** Отряд: у него общий приказ, боевой дух и точки строя. */
@@ -134,7 +69,7 @@ class Squad {
   }
   get name() {
     const base = SQUAD_NAME[this.type] || this.t.name.toLowerCase();
-    return this.num ? base + ' ' + ROMAN[this.num] : base;
+    return this.num ? base + ' ' + roman(this.num) : base;
   }
   refresh(dt) {
     let n = 0, eng = false;
@@ -171,8 +106,13 @@ class Unit {
     this.chargeT = 0; this.deadT = 0; this.phase = Math.random() * 6; this.deathShown = false; this.curSpeed = 0;
     this.losT = -9; this.losTarget = null; this.losOk = false; this.carry = null; this.gone = false; this.squad = null;
     this.scale = this.t.special === 'commander' ? 1.12 : 0.95 + Math.random() * 0.1;
-    this.view = makeView(this);
-    this.sync();
+    if (this.t.mount) {
+      this.horse = this.t.special === 'commander' ? 1 : this.t.special === 'messenger' ? 0 : this.variant % 2;
+      const hd = ASSETS.horses[this.horse];
+      this.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
+      this.anim = animState('Idle');
+      this.ride = animState('ride');
+    } else this.anim = animState(this.t.anim.idle);
   }
   get forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
   face(dx, dz, dt, rate = 9.5) {
@@ -182,12 +122,7 @@ class Unit {
     const step = rate * dt;
     this.yaw += Math.abs(d) <= step ? d : Math.sign(d) * step;
   }
-  sync() {
-    const r = this.view.root;
-    const sink = this.alive ? 0 : Math.max(0, this.deadT - 18) * 0.25;
-    r.position.set(this.pos.x, this.pos.y - sink, this.pos.z);
-    r.rotation.y = this.yaw;
-  }
+
 }
 
 // ------------------------------------------------------------------ бой
@@ -206,6 +141,7 @@ class Battle {
     this.couriers = [null, null];
     this.log = []; this.onLog = null; this.glareLogged = [false, false];
     this.bolts = new Bolts(this);
+    this.armyC = [null, null];
   }
 
   addLog(team, text) {
@@ -252,7 +188,7 @@ class Battle {
     this.units = this.units.filter((u) => {
       const dx = u.pos.x - x, dz = u.pos.z - z;
       if (dx * dx + dz * dz > radius * radius) return true;
-      disposeView(u.view); n++;
+      n++;
       return false;
     });
     for (const sq of this.squads) sq.units = sq.units.filter((u) => this.units.includes(u));
@@ -264,7 +200,6 @@ class Battle {
   }
 
   clearUnits() {
-    for (const u of this.units) disposeView(u.view);
     this.units = []; this.squads = [];
     this.commanders = [null, null]; this.couriers = [null, null];
     this.bolts.clear();
@@ -307,19 +242,32 @@ class Battle {
     this.alive = this.planCount.slice();
   }
 
-  randomArmies() {
+  /** Случайные армии: size 1 — стычка, 2 — сражение, 3 — великая сеча. */
+  randomArmies(size = 1) {
     this.clearAll();
+    const cfg = [null,
+      { front: [3, 5], xbow: [2, 3], cav: [1, 2], lines: 1 },
+      { front: [6, 8], xbow: [4, 5], cav: [2, 4], lines: 2 },
+      { front: [11, 13], xbow: [7, 9], cav: [4, 6], lines: 4 }][size] || null;
+    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0);
     for (let team = 0; team < 2; team++) {
-      const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI, R = Math.random;
-      const front = 3 + ((R() * 3) | 0);
-      for (let i = 0; i < front; i++)
-        this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 9.5 + (R() - 0.5) * 3, dir * (30 + R() * 6), yaw);
-      const back = 2 + ((R() * 2) | 0);
-      for (let i = 0; i < back; i++)
-        this.placeSquad(2, team, (i - (back - 1) / 2) * 11 + (R() - 0.5) * 3, dir * (44 + R() * 5), yaw);
-      const flanks = 1 + ((R() * 2) | 0);
-      for (let i = 0; i < flanks; i++)
-        this.placeSquad(3, team, (i % 2 ? -1 : 1) * (36 + R() * 12), dir * (38 + R() * 8), yaw);
+      const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI;
+      for (let line = 0; line < cfg.lines; line++) {
+        const front = pick(cfg.front);
+        for (let i = 0; i < front; i++)
+          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (22 + line * 8 + R() * 2), yaw);
+      }
+      const xbRows = Math.max(1, Math.ceil(cfg.lines / 2));
+      for (let row = 0; row < xbRows; row++) {
+        const n = pick(cfg.xbow);
+        for (let i = 0; i < n; i++)
+          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (24 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
+      }
+      const cav = pick(cfg.cav);
+      for (let i = 0; i < cav; i++) {
+        const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
+        this.placeSquad(3, team, side * (58 + k * 3 - (R() * 4)), dir * (26 + k * 10 + R() * 4), yaw);
+      }
     }
   }
 
@@ -385,11 +333,15 @@ class Battle {
     sq.labelT = 4;
   }
 
-  armyCenter(team) {
-    const c = new THREE.Vector3();
-    let n = 0;
-    for (const u of this.teams[team]) if (!u.t.special) { c.add(u.pos); n++; }
-    return n ? c.divideScalar(n) : null;
+  armyCenter(team) { return this.armyC ? this.armyC[team] : null; }
+
+  computeArmyCenters() {
+    this.armyC = [0, 1].map((team) => {
+      const c = new THREE.Vector3();
+      let n = 0;
+      for (const u of this.teams[team]) if (!u.t.special) { c.add(u.pos); n++; }
+      return n ? c.divideScalar(n) : null;
+    });
   }
 
   // ---------------------------------------------------------------- главный цикл
@@ -400,11 +352,13 @@ class Battle {
     const alive = [0, 0];
     for (const u of this.units) if (u.alive) { this.teams[u.team].push(u); if (!u.t.special) alive[u.team]++; }
     this.alive = alive;
+    this.computeArmyCenters();
     this.buildGrid();
     for (const sq of this.squads) sq.refresh(dt);
     for (const cs of this.couriers) if (cs) cs.refresh(dt);
 
     if (this.fighting && dt > 0) {
+      if ((this.foesT = (this.foesT || 0) - dt) <= 0) { this.foesT = 0.8; this.updateFoes(); }
       this.updateSquads(dt);
       for (const c of this.commanders) if (c) c.tick(dt);
       for (const u of this.units) if (u.alive) this.think(u, dt);
@@ -415,12 +369,11 @@ class Battle {
 
     for (let i = this.units.length - 1; i >= 0; i--) {
       const u = this.units[i];
-      if (u.gone) { disposeView(u.view); u.alive = false; this.units.splice(i, 1); continue; }
+      if (u.gone) { u.alive = false; this.units.splice(i, 1); continue; }
       if (!u.alive) {
         u.deadT += dt;
-        if (u.deadT > 24) { disposeView(u.view); this.units.splice(i, 1); continue; }
+        if (u.deadT > 24) { this.units.splice(i, 1); continue; }
       }
-      u.sync();
     }
   }
 
@@ -434,9 +387,7 @@ class Battle {
       if (sq.alive < sq.size * 0.3) sq.morale = Math.min(sq.morale, 55);
       sq.morale = clamp(sq.morale, 0, 100);
 
-      let enemyNear = false;
-      for (const e of this.squads)
-        if (e.team !== sq.team && !e.special && e.alive && d2d(e.center, sq.center) < 20) { enemyNear = true; break; }
+      const enemyNear = sq.foes && sq.foes.length > 0 && sq.foes[0].alive > 0 && d2d(sq.foes[0].center, sq.center) < 20;
 
       if (o.mode !== 'rout' && sq.morale < 18) {
         this.applyOrder(sq, { kind: 'rout', mode: 'rout' });
@@ -534,33 +485,84 @@ class Battle {
     return false;
   }
 
-  /** Цель с учётом приказа, скрытности и прямой видимости. */
+  /**
+   * Цель с учётом приказа, скрытности и прямой видимости. Ищем не по всей армии,
+   * а в ближайших клетках сетки и среди вражеских отрядов, известных своему отряду, —
+   * так поиск не тормозит и при тысячах солдат.
+   */
   pickTarget(u) {
-    const o = u.squad.order, ranged = u.t.ranged, enemies = this.teams[1 - u.team];
+    const o = u.squad.order, ranged = u.t.ranged;
     const gx = o.x ?? u.pos.x, gz = o.z ?? u.pos.z, leash = o.leash ?? (u.t.mount ? 16 : 10);
-    const best = [];
-    for (const e of enemies) {
-      const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
-      if (e.squad && e.squad.hidden && d2 > 196) continue; // в низине не видно
-      let s = d2;
-      if (e.t.special === 'messenger') { if (!ranged && d2 > 64) continue; s *= 1.3; }
-      if (u.t.special === 'commander' && d2 > 64) continue;
-      if (o.mode === 'move' && d2 > 10) continue;
+    const allowed = (e, d2) => {
+      if (e.squad && e.squad.hidden && d2 > 196) return false; // в низине не видно
+      if (e.t.special === 'messenger' && !ranged && d2 > 64) return false;
+      if (u.t.special === 'commander' && d2 > 64) return false;
+      if (o.mode === 'move' && d2 > 10) return false;
       if ((o.mode === 'hold' || o.mode === 'ambush') && !ranged) {
         const lx = e.pos.x - gx, lz = e.pos.z - gz;
-        if (lx * lx + lz * lz > leash * leash && d2 > 9) continue;
+        if (lx * lx + lz * lz > leash * leash && d2 > 9) return false;
       }
-      if (o.mode === 'charge' && o.target && e.squad === o.target) s *= 0.2;
-      if (best.length < 5 || s < best[best.length - 1].s) {
-        best.push({ e, s });
-        best.sort((a, b) => a.s - b.s);
-        if (best.length > 5) best.pop();
+      return true;
+    };
+    const near = this.gridNearest(u, ranged ? 4 : 10, allowed);
+    if (near) return near;
+    if (u.t.special) return null;
+
+    const foes = u.squad.foes || [];
+    const cands = o.mode === 'charge' && o.target && o.target.alive ? [o.target, ...foes] : foes;
+    const best = [];
+    for (let qi = 0; qi < Math.min(cands.length, 4); qi++) {
+      const q = cands[qi];
+      for (const e of q.units) {
+        if (!e.alive) continue;
+        const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
+        if (!allowed(e, d2)) continue;
+        const sc = o.mode === 'charge' && o.target === q ? d2 * 0.2 : d2;
+        if (best.length < 5 || sc < best[best.length - 1].s) {
+          best.push({ e, s: sc });
+          best.sort((a, b) => a.s - b.s);
+          if (best.length > 5) best.pop();
+        }
       }
     }
     if (!best.length) return null;
     if (!ranged) return best[0].e;
     for (const c of best) if (d2d(c.e.pos, u.pos) <= this.rangeOf(u, c.e) && this.canSee(u, c.e)) return c.e;
     return o.mode === 'advance' || o.mode === 'charge' ? best[0].e : null;
+  }
+
+  /** Ближайший враг в радиусе R по сетке соседей. */
+  gridNearest(u, R, allowed) {
+    const [cx, cz] = this.cellOf(u.pos.x, u.pos.z), r = Math.ceil(R / GRID);
+    let best = null, bs = R * R;
+    for (let z = Math.max(cz - r, 0); z <= Math.min(cz + r, GRID_DIM - 1); z++) {
+      for (let x = Math.max(cx - r, 0); x <= Math.min(cx + r, GRID_DIM - 1); x++) {
+        for (let j = this.head[z * GRID_DIM + x]; j >= 0; j = this.next[j]) {
+          const e = this.units[j];
+          if (!e || !e.alive || e.team === u.team) continue;
+          const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
+          if (d2 >= bs || (allowed && !allowed(e, d2))) continue;
+          best = e; bs = d2;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Раз в 0,8 с каждому отряду — список ближайших видимых вражеских отрядов. */
+  updateFoes() {
+    const S = this.squads.filter((q) => !q.special && q.alive > 0);
+    for (const sq of S) {
+      const list = [];
+      for (const e of S) {
+        if (e.team === sq.team) continue;
+        const d = d2d(e.center, sq.center);
+        if (!e.hidden || d < 16) list.push({ e, d });
+      }
+      list.sort((a, b) => a.d - b.d);
+      sq.foes = list.slice(0, 4).map((x) => x.e);
+      sq.foeDist = list.length ? list[0].d : Infinity;
+    }
   }
 
   canSee(u, tg) {
@@ -588,9 +590,7 @@ class Battle {
   flee(u, dt) {
     if (u.retargetT <= 0 || !u.fleeFrom || !u.fleeFrom.alive) {
       u.retargetT = 0.5;
-      let best = null, bd = Infinity;
-      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
-      u.fleeFrom = bd < 30 ? best : null;
+      u.fleeFrom = this.gridNearest(u, 16, null);
     }
     let fx = 0, fz = u.team === 0 ? -1 : 1;
     if (u.fleeFrom) {
@@ -624,9 +624,7 @@ class Battle {
     // Гонец объезжает врагов стороной
     if (u.retargetT <= 0) {
       u.retargetT = 0.3;
-      let best = null, bd = 12;
-      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
-      u.fleeFrom = best;
+      u.fleeFrom = this.gridNearest(u, 12, null);
     }
     let vx = gx - u.pos.x, vz = gz - u.pos.z;
     const l = Math.hypot(vx, vz) || 1;
@@ -812,7 +810,7 @@ class Battle {
 // ------------------------------------------------------------------ арбалетные болты
 
 class Bolts {
-  constructor(battle) { this.battle = battle; this.cap = 600; this.list = []; this.mesh = null; }
+  constructor(battle) { this.battle = battle; this.cap = LOW_END ? 700 : 1600; this.list = []; this.mesh = null; }
   init() {
     const b = ASSETS.bolt;
     this.mesh = new THREE.InstancedMesh(b.geometry, b.material, this.cap);

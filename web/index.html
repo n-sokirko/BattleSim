@@ -48,6 +48,13 @@
   .btn:hover { background: var(--panel-hi); border-color: var(--line-hi); }
   .btn:active { transform: translateY(1px); }
   .btn:focus-visible, .card:focus-visible, .team:focus-visible, .fight:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .pair { display: inline-flex; gap: 0; }
+  .pair > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .pair > .btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }
+  .select { appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+  .select option { background: #161b22; color: var(--text); }
   .btn[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.2); color: #f6d792; }
 
   .dock { display: flex; gap: 8px; align-items: stretch; min-width: 0; flex: 1 1 auto; }
@@ -161,7 +168,14 @@
   </div>
   <div class="row" id="setupTop">
     <button class="btn" id="newMap">Новая карта</button>
-    <button class="btn" id="random">Случайные армии</button>
+    <span class="pair">
+      <button class="btn" id="random">Случайные армии</button>
+      <select class="btn select" id="armySize" aria-label="Размер армий">
+        <option value="1">Стычка</option>
+        <option value="2" selected>Сражение</option>
+        <option value="3">Великая сеча</option>
+      </select>
+    </span>
     <button class="btn" id="clear">Очистить</button>
     <button class="btn" id="cmdToggle">Полководцы: есть</button>
     <button class="btn" id="helpBtn">Как устроен бой</button>
@@ -351,7 +365,7 @@ const TEAM = [
   { name: 'Синие', hue: 214, sat: 0.62, css: '#3f7fe6' },
   { name: 'Красные', hue: 2, sat: 0.66, css: '#d9483b' },
 ];
-const MAX_UNITS = LOW_END ? 420 : 700;
+const MAX_UNITS = LOW_END ? 1200 : 3200;
 
 // ------------------------------------------------------------------ стили мира
 
@@ -1208,6 +1222,29 @@ async function loadAssets(onProgress) {
     ASSETS.riderHipsY = hipsY;
   }
 
+  // Толпа: запечённые анимации + инстансинг (тысячи солдат без отдельных скелетов)
+  const cap = MAX_UNITS + 64, K = ASSETS.clips;
+  const infantryDefs = (t) => {
+    const a = t.anim, clips = K[t.model], defs = [], seen = new Set();
+    const add = (name, loop) => { if (name && !seen.has(name) && clips[name]) { seen.add(name); defs.push({ name, clips: [clips[name]], loop }); } };
+    [a.idle, a.run, 'Walking_A', a.cheer, a.aim, a.reload].forEach((n) => add(n, true));
+    [...a.attack, a.melee, 'Death_A', 'Death_B'].forEach((n) => add(n, false));
+    return defs;
+  };
+  const R = ASSETS.rider;
+  const riderDefs = [
+    { name: 'ride', clips: [R.arms, R.sit] },
+    ...R.attack.map((c, i) => ({ name: 'atk' + i, clips: [c, R.sit], loop: false })),
+    { name: 'Death_A', clips: [K.Knight.Death_A], loop: false },
+    { name: 'Death_B', clips: [K.Knight.Death_B], loop: false },
+  ];
+  ASSETS.crowd = {
+    inf: [0, 1, 2].map((i) => new CrowdModel(ASSETS.units[i], infantryDefs(TYPES[i]), cap)),
+    rider: { 3: new CrowdModel(ASSETS.units[3], riderDefs, cap), [T_CMD]: new CrowdModel(ASSETS.units[T_CMD], riderDefs, 24), [T_MSG]: new CrowdModel(ASSETS.units[T_MSG], riderDefs, 96) },
+    horse: ASSETS.horses.map((h) => new CrowdModel([h.template], ['Idle', 'Walk', 'Gallop', 'Death'].map((n) => ({ name: n, clips: [h.clips[n]], loop: n !== 'Death' })), cap)),
+  };
+  ASSETS.crowdList = [...ASSETS.crowd.inf, ...Object.values(ASSETS.crowd.rider), ...ASSETS.crowd.horse];
+
   // Болт для арбалета
   const arrow = mergeStatic(G.arrow);
   ASSETS.bolt = { geometry: arrow.geometry, material: arrow.material, norm: 0.95 / Math.max(arrow.height, 0.01) };
@@ -1273,126 +1310,308 @@ function waveBanner(banner, time, wind) {
   flag.geometry.computeVertexNormals();
 }
 
+// ------------------------------------------------------------------ толпа: запечённая анимация + инстансинг + LOD
+//
+// Чтобы на поле помещались тысячи солдат, у каждого нет своего скелета и своего
+// AnimationMixer. Позы костей всех анимаций заранее «запекаются» в текстуру
+// (строка = кадр, 4 текселя = матрица кости), а скиннинг считает видеокарта.
+// Все солдаты одного вида рисуются одним InstancedMesh; дальние — упрощённой моделью.
+
+const BAKE_FPS = 30;
+const LOD_DIST = LOW_END ? 38 : 55;
+
+/** Упрощение меша кластеризацией вершин (для дальнего LOD). Цвета из разных клеток палитры не смешиваются. */
+function decimateSkinned(src, cell) {
+  const pos = src.getAttribute('position'), nor = src.getAttribute('normal'), uv = src.getAttribute('uv');
+  const si = src.getAttribute('skinIndex'), sw = src.getAttribute('skinWeight'), col = src.getAttribute('color');
+  const n = pos.count, remap = new Int32Array(n), keys = new Map();
+  const P = [], N = [], U = [], SI = [], SW = [], CO = [];
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    let swatch = '';
+    if (uv) swatch = Math.floor(uv.getX(i) * 8) + ':' + Math.floor(uv.getY(i) * 4);
+    else if (col) swatch = Math.round(col.getX(i) * 20) + ':' + Math.round(col.getY(i) * 20) + ':' + Math.round(col.getZ(i) * 20);
+    const key = Math.floor(x / cell) + ',' + Math.floor(y / cell) + ',' + Math.floor(z / cell) + '|' + swatch;
+    let k = keys.get(key);
+    if (k === undefined) {
+      k = P.length / 3;
+      keys.set(key, k);
+      P.push(x, y, z); N.push(0, 0, 0);
+      if (uv) U.push(uv.getX(i), uv.getY(i));
+      if (col) CO.push(col.getX(i), col.getY(i), col.getZ(i));
+      SI.push(si.getX(i), si.getY(i), si.getZ(i), si.getW(i));
+      SW.push(sw.getX(i), sw.getY(i), sw.getZ(i), sw.getW(i));
+    }
+    N[k * 3] += nor.getX(i); N[k * 3 + 1] += nor.getY(i); N[k * 3 + 2] += nor.getZ(i);
+    remap[i] = k;
+  }
+  const idx = src.index ? src.index.array : [...Array(n).keys()], out = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = remap[idx[t]], b = remap[idx[t + 1]], c = remap[idx[t + 2]];
+    if (a !== b && b !== c && a !== c) out.push(a, b, c);
+  }
+  for (let k = 0; k < N.length; k += 3) { const l = Math.hypot(N[k], N[k + 1], N[k + 2]) || 1; N[k] /= l; N[k + 1] /= l; N[k + 2] /= l; }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  if (col) g.setAttribute('color', new THREE.Float32BufferAttribute(CO, 3));
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(SI, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(SW, 4));
+  g.setIndex(out);
+  return g;
+}
+
+/** Подменяет скиннинг в шейдере материала: матрицы костей берутся из запечённой текстуры. */
+function injectBake(material, tex, depth) {
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.bakeTex = { value: tex };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
+      uniform highp sampler2D bakeTex;
+      attribute vec4 skinIndex;
+      attribute vec4 skinWeight;
+      attribute vec2 aFrame;
+      attribute float aBlend;
+      mat4 bakeBone(float row, float b) {
+        ivec2 p = ivec2(int(b) * 4, int(row));
+        return mat4(texelFetch(bakeTex, p, 0), texelFetch(bakeTex, p + ivec2(1, 0), 0),
+                    texelFetch(bakeTex, p + ivec2(2, 0), 0), texelFetch(bakeTex, p + ivec2(3, 0), 0));
+      }
+      mat4 bakeSkin(float row) {
+        return skinWeight.x * bakeBone(row, skinIndex.x) + skinWeight.y * bakeBone(row, skinIndex.y)
+             + skinWeight.z * bakeBone(row, skinIndex.z) + skinWeight.w * bakeBone(row, skinIndex.w);
+      }
+      mat4 bakeMatrix() {
+        mat4 m = bakeSkin(aFrame.x);
+        if (aBlend > 0.001) m = m * (1.0 - aBlend) + bakeSkin(aFrame.y) * aBlend;
+        return m;
+      }`);
+    if (depth) {
+      sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', 'mat4 bakeM = bakeMatrix();\nvec3 transformed = (bakeM * vec4(position, 1.0)).xyz;');
+    } else {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <beginnormal_vertex>', 'mat4 bakeM = bakeMatrix();\nvec3 objectNormal = normalize(mat3(bakeM) * normal);')
+        .replace('#include <begin_vertex>', 'vec3 transformed = (bakeM * vec4(position, 1.0)).xyz;');
+    }
+  };
+  material.customProgramCacheKey = () => (depth ? 'bake-depth' : 'bake-color');
+}
+
+/**
+ * Модель толпы: запечённые анимации одного вида солдат/коней и инстанс-меши по командам и LOD.
+ * templates — шаблоны по командам (для коней — один), clipDefs — [{ name, clips: [clip, ...слои], loop }].
+ */
+class CrowdModel {
+  constructor(templates, clipDefs, cap) {
+    const tpl = templates[0];
+    const obj = SkeletonUtils.clone(tpl);
+    obj.updateMatrixWorld(true);
+    let sm = null;
+    obj.traverse((o) => { if (o.isSkinnedMesh && !sm) sm = o; });
+    this.bake(obj, sm, clipDefs);
+
+    const base0 = this.cleanBase(sm.geometry, sm.material);
+    // Шаг упрощения — от размера самой геометрии (у коня она в 100 раз меньше, чем у солдата)
+    base0.computeBoundingBox();
+    const diag = base0.boundingBox.getSize(new THREE.Vector3()).length();
+    const base1 = decimateSkinned(base0, diag * 0.034);
+    this.lodGeo = [base0, base1];
+    this.verts = [base0.getAttribute('position').count, base1.getAttribute('position').count];
+
+    this.depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    injectBake(this.depthMat, this.tex, true);
+    this.meshes = templates.map((t) => {
+      let m = null;
+      t.traverse((o) => { if (o.isSkinnedMesh && !m) m = o; });
+      const mat = this.materialFrom(m.material);
+      return [0, 1].map((lod) => this.makeMesh(this.lodGeo[lod], mat, cap));
+    });
+    this.count = this.meshes.map(() => [0, 0]);
+  }
+
+  /** Запекаем позы: для каждого кадра — матрицы, переводящие вершину меша в пространство юнита. */
+  bake(obj, sm, clipDefs) {
+    const bones = sm.skeleton.bones, inv = sm.skeleton.boneInverses, nb = bones.length;
+    const mixer = new THREE.AnimationMixer(obj), m = new THREE.Matrix4();
+    const rows = [];
+    this.clips = {};
+    for (const def of clipDefs) {
+      const clips = def.clips.filter(Boolean);
+      if (!clips.length) continue;
+      mixer.stopAllAction();
+      const actions = clips.map((c) => { const a = mixer.clipAction(c); a.reset(); a.play(); return a; });
+      const dur = clips[0].duration, frames = Math.max(1, Math.round(dur * BAKE_FPS));
+      this.clips[def.name] = { start: rows.length, frames, loop: def.loop !== false, dur };
+      for (let f = 0; f < frames; f++) {
+        mixer.setTime(Math.min(f / BAKE_FPS, dur - 1e-4));
+        obj.updateMatrixWorld(true);
+        const row = new Float32Array(nb * 16);
+        for (let b = 0; b < nb; b++) { m.multiplyMatrices(bones[b].matrixWorld, inv[b]).multiply(sm.bindMatrix); m.toArray(row, b * 16); }
+        rows.push(row);
+      }
+      actions.forEach((a) => a.stop());
+      mixer.uncacheRoot(obj);
+    }
+    const w = nb * 4, h = rows.length, data = new Float32Array(w * h * 4);
+    rows.forEach((r, i) => data.set(r, i * nb * 16));
+    this.tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.FloatType);
+    this.tex.minFilter = this.tex.magFilter = THREE.NearestFilter;
+    this.tex.needsUpdate = true;
+    // высота в позе покоя — для размера упрощения
+    const bb = new THREE.Box3().setFromObject(obj);
+    this.height = bb.max.y - bb.min.y;
+  }
+
+  /** Базовая геометрия; многоматериальные меши (кони) переводим в цвета вершин. */
+  cleanBase(src, material) {
+    const g = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv', 'skinIndex', 'skinWeight']) {
+      const a = src.getAttribute(name);
+      if (a) g.setAttribute(name, a);
+    }
+    if (src.index) g.setIndex(src.index);
+    if (Array.isArray(material)) {
+      const n = src.getAttribute('position').count, col = new Float32Array(n * 3), idx = src.index ? src.index.array : null;
+      for (const grp of src.groups) {
+        const c = material[grp.materialIndex].color;
+        for (let i = grp.start; i < grp.start + grp.count; i++) {
+          const v = idx ? idx[i] : i;
+          col[v * 3] = c.r; col[v * 3 + 1] = c.g; col[v * 3 + 2] = c.b;
+        }
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.deleteAttribute('uv');
+    }
+    return g;
+  }
+
+  materialFrom(src) {
+    let mat;
+    if (Array.isArray(src)) mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
+    else { mat = src.clone(); mat.roughness = 0.72; mat.metalness = 0; }
+    mat.envMapIntensity = 0.7;
+    injectBake(mat, this.tex, false);
+    return mat;
+  }
+
+  makeMesh(base, mat, cap) {
+    const g = new THREE.BufferGeometry();
+    for (const [k, a] of Object.entries(base.attributes)) g.setAttribute(k, a);
+    g.setIndex(base.index);
+    const frame = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+    const blend = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+    frame.setUsage(THREE.DynamicDrawUsage); blend.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('aFrame', frame);
+    g.setAttribute('aBlend', blend);
+    const mesh = new THREE.InstancedMesh(g, mat, cap);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.customDepthMaterial = this.depthMat;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    unitLayer.add(mesh);
+    return mesh;
+  }
+
+  begin() { for (const c of this.count) { c[0] = 0; c[1] = 0; } }
+
+  add(team, lod, matrix, rowA, rowB, blend) {
+    const mesh = this.meshes[team][lod], i = this.count[team][lod]++;
+    if (i >= mesh.instanceMatrix.count) return;
+    mesh.setMatrixAt(i, matrix);
+    const g = mesh.geometry, f = g.attributes.aFrame.array;
+    f[i * 2] = rowA; f[i * 2 + 1] = rowB;
+    g.attributes.aBlend.array[i] = blend;
+  }
+
+  end() {
+    this.meshes.forEach((pair, team) => pair.forEach((mesh, lod) => {
+      mesh.count = Math.min(this.count[team][lod], mesh.instanceMatrix.count);
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.geometry.attributes.aFrame.needsUpdate = true;
+      mesh.geometry.attributes.aBlend.needsUpdate = true;
+    }));
+  }
+
+  row(st) {
+    const c = this.clips[st.name];
+    if (!c) return 0;
+    let f = Math.floor(st.t * BAKE_FPS);
+    f = c.loop && !st.once ? f % c.frames : Math.min(f, c.frames - 1);
+    return c.start + f;
+  }
+}
+
+// ------------------------------------------------------------------ состояние анимации солдата (без Three.js-объектов)
+
+function animState(name) { return { name, t: Math.random() * 10, speed: 1, once: false, prevRow: 0, blend: 0, lastRow: 0 }; }
+
+function playAnim(st, name, { once = false, speed = 1, restart = false } = {}) {
+  if (st.name === name && !restart) { st.speed = speed; return; }
+  st.prevRow = st.lastRow; st.blend = 1;
+  st.name = name; st.t = once ? 0 : Math.random() * 10; st.speed = speed; st.once = once;
+}
+
+function stepAnim(st, dt) {
+  st.t += dt * st.speed;
+  if (st.blend > 0) st.blend = Math.max(0, st.blend - dt / 0.14);
+}
+
 // ------------------------------------------------------------------ анимация
 
-/** Канал анимации: одно активное действие с плавными переходами. */
-class Channel {
-  constructor(mixer, clips) { this.mixer = mixer; this.clips = clips; this.cur = null; this.name = ''; this.actions = {}; }
-  get(name) {
-    if (!this.actions[name]) {
-      const c = this.clips[name];
-      if (!c) return null;
-      this.actions[name] = this.mixer.clipAction(c);
-    }
-    return this.actions[name];
-  }
-  play(name, { once = false, speed = 1, fade = 0.18, restart = false } = {}) {
-    const a = this.get(name);
-    if (!a) return;
-    if (this.cur === a && !restart) { a.timeScale = speed; return; }
-    a.reset();
-    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
-    a.clampWhenFinished = once;
-    a.timeScale = speed;
-    a.setEffectiveWeight(1);
-    a.play();
-    if (this.cur && this.cur !== a) a.crossFadeFrom(this.cur, fade, false);
-    this.cur = a; this.name = name;
-  }
-}
-
-const HORSE_YAW = 0; // поправка, если модель коня смотрит не вдоль +Z
-
-function makeView(u) {
-  const root = new THREE.Group();
-  const v = { root, mixers: [] };
-  if (u.t.mount) {
-    const hv = u.t.special === 'commander' ? 1 : u.t.special === 'messenger' ? 0 : u.variant % ASSETS.horses.length;
-    const hd = ASSETS.horses[hv];
-    const horse = SkeletonUtils.clone(hd.template);
-    horse.rotation.y = HORSE_YAW;
-    root.add(horse);
-    const rider = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
-    v.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
-    rider.position.copy(v.riderBase);
-    root.add(rider);
-    v.rider = rider;
-    if (u.t.special === 'commander') {
-      v.banner = makeBanner(u.team);
-      v.banner.position.set(-0.3, ASSETS.riderHipsY, -0.38);
-      rider.add(v.banner);
-    }
-    const hm = new THREE.AnimationMixer(horse), rm = new THREE.AnimationMixer(rider);
-    v.mixers.push(hm, rm);
-    v.main = new Channel(hm, hd.clips);
-    const riderClips = { arms: ASSETS.rider.arms };
-    ASSETS.rider.attack.forEach((c, i) => (riderClips['atk' + i] = c));
-    v.upper = new Channel(rm, riderClips);
-    rm.clipAction(ASSETS.rider.sit).play();
-    v.upper.play('arms');
-    v.main.play('Idle');
-  } else {
-    const ch = SkeletonUtils.clone(ASSETS.units[u.type][u.team]);
-    root.add(ch);
-    const m = new THREE.AnimationMixer(ch);
-    v.mixers.push(m);
-    v.main = new Channel(m, ASSETS.clips[u.t.model]);
-    v.main.play(u.t.anim.idle, { fade: 0 });
-    // разные солдаты не должны двигаться в унисон
-    if (v.main.cur) v.main.cur.time = Math.random() * v.main.cur.getClip().duration;
-  }
-  root.scale.setScalar(u.scale);
-  unitLayer.add(root);
-  v.accum = 0; v.frame = (Math.random() * 4) | 0;
-  return v;
-}
-
-function disposeView(v) {
-  if (!v) return;
-  unitLayer.remove(v.root);
-  for (const m of v.mixers) m.stopAllAction();
-}
-
-/** Выбирает анимацию по состоянию солдата. */
+/**
+ * Выбирает анимацию по состоянию солдата. Здесь только имена клипов и время —
+ * сами позы берутся из запечённой текстуры (см. 3b_crowd.js).
+ */
 function animate(u, state) {
-  const v = u.view, a = u.t.anim;
-  const speed = u.curSpeed;
+  const a = u.t.anim, speed = u.curSpeed;
   if (u.t.mount) {
-    if (!u.alive) { if (!u.deathShown) { v.main.play('Death', { once: true }); u.deathShown = true; } return; }
-    if (speed > 3.5) v.main.play('Gallop', { speed: clamp(speed / 7, 0.7, 1.4) });
-    else if (speed > 0.4) v.main.play('Walk', { speed: clamp(speed / 1.6, 0.6, 1.6) });
-    else v.main.play('Idle');
-    if (u.atkNew && a.attack.length) { u.atkNew = false; v.upper.play('atk' + ((Math.random() * a.attack.length) | 0), { once: true, restart: true, speed: 1.1, fade: 0.08 }); }
-    else if (u.atkT < 0 && v.upper.name !== 'arms') v.upper.play('arms', { fade: 0.25 });
-    const bob = speed > 3.5 ? Math.abs(Math.sin(u.phase)) * 0.12 : 0;
-    v.rider.position.set(v.riderBase.x, v.riderBase.y + bob, v.riderBase.z);
+    if (!u.alive) {
+      if (!u.deathShown) {
+        playAnim(u.anim, 'Death', { once: true });
+        playAnim(u.ride, Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true });
+        u.deathShown = true;
+      }
+      return;
+    }
+    if (speed > 3.5) playAnim(u.anim, 'Gallop', { speed: clamp(speed / 7, 0.7, 1.4) });
+    else if (speed > 0.4) playAnim(u.anim, 'Walk', { speed: clamp(speed / 1.6, 0.6, 1.6) });
+    else playAnim(u.anim, 'Idle');
+    if (u.atkNew && a.attack.length) {
+      u.atkNew = false;
+      playAnim(u.ride, 'atk' + ((Math.random() * Math.min(2, a.attack.length)) | 0), { once: true, restart: true, speed: 1.1 });
+    } else if (u.atkT < 0 && u.ride.name !== 'ride') playAnim(u.ride, 'ride');
     return;
   }
   if (!u.alive) {
-    if (!u.deathShown) { v.main.play(Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true, fade: 0.1 }); u.deathShown = true; }
+    if (!u.deathShown) { playAnim(u.anim, Math.random() < 0.5 ? 'Death_A' : 'Death_B', { once: true }); u.deathShown = true; }
     return;
   }
-  if (state === 'cheer') { v.main.play(a.cheer); return; }
+  if (state === 'cheer') { playAnim(u.anim, a.cheer); return; }
   if (u.atkNew) {
     u.atkNew = false;
     let name = a.attack[(Math.random() * a.attack.length) | 0];
     if (u.t.ranged && !u.shot) name = a.melee;
-    const clip = v.main.get(name)?.getClip();
-    const sp = clip ? clamp(clip.duration / u.atkDur, 0.8, 2.2) : 1;
-    v.main.play(name, { once: true, restart: true, speed: sp, fade: 0.08 });
+    const clip = ASSETS.crowd.inf[u.type].clips[name];
+    playAnim(u.anim, name, { once: true, restart: true, speed: clip ? clamp(clip.dur / u.atkDur, 0.8, 2.2) : 1 });
     return;
   }
   if (u.atkT >= 0) return; // удар ещё идёт
-  if (u.t.ranged && u.aiming) { v.main.play(u.cooldown > 0.6 ? a.reload : a.aim); return; }
-  if (speed > 1.6) v.main.play(a.run, { speed: clamp(speed / 3.4, 0.6, 1.5) });
-  else if (speed > 0.3) v.main.play('Walking_A', { speed: clamp(speed / 1.4, 0.6, 1.4) });
-  else v.main.play(a.idle);
+  if (u.t.ranged && u.aiming) { playAnim(u.anim, u.cooldown > 0.6 ? a.reload : a.aim); return; }
+  if (speed > 1.6) playAnim(u.anim, a.run, { speed: clamp(speed / 3.4, 0.6, 1.5) });
+  else if (speed > 0.3) playAnim(u.anim, 'Walking_A', { speed: clamp(speed / 1.4, 0.6, 1.4) });
+  else playAnim(u.anim, a.idle);
 }
 
 // ------------------------------------------------------------------ отряды
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+/** Римские цифры для номеров отрядов: I, II, … XLIX. */
+function roman(n) {
+  let out = '';
+  for (const [v, r] of [[40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]) while (n >= v) { out += r; n -= v; }
+  return out;
+}
 const d2d = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 /** Отряд: у него общий приказ, боевой дух и точки строя. */
@@ -1409,7 +1628,7 @@ class Squad {
   }
   get name() {
     const base = SQUAD_NAME[this.type] || this.t.name.toLowerCase();
-    return this.num ? base + ' ' + ROMAN[this.num] : base;
+    return this.num ? base + ' ' + roman(this.num) : base;
   }
   refresh(dt) {
     let n = 0, eng = false;
@@ -1446,8 +1665,13 @@ class Unit {
     this.chargeT = 0; this.deadT = 0; this.phase = Math.random() * 6; this.deathShown = false; this.curSpeed = 0;
     this.losT = -9; this.losTarget = null; this.losOk = false; this.carry = null; this.gone = false; this.squad = null;
     this.scale = this.t.special === 'commander' ? 1.12 : 0.95 + Math.random() * 0.1;
-    this.view = makeView(this);
-    this.sync();
+    if (this.t.mount) {
+      this.horse = this.t.special === 'commander' ? 1 : this.t.special === 'messenger' ? 0 : this.variant % 2;
+      const hd = ASSETS.horses[this.horse];
+      this.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
+      this.anim = animState('Idle');
+      this.ride = animState('ride');
+    } else this.anim = animState(this.t.anim.idle);
   }
   get forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
   face(dx, dz, dt, rate = 9.5) {
@@ -1457,12 +1681,7 @@ class Unit {
     const step = rate * dt;
     this.yaw += Math.abs(d) <= step ? d : Math.sign(d) * step;
   }
-  sync() {
-    const r = this.view.root;
-    const sink = this.alive ? 0 : Math.max(0, this.deadT - 18) * 0.25;
-    r.position.set(this.pos.x, this.pos.y - sink, this.pos.z);
-    r.rotation.y = this.yaw;
-  }
+
 }
 
 // ------------------------------------------------------------------ бой
@@ -1481,6 +1700,7 @@ class Battle {
     this.couriers = [null, null];
     this.log = []; this.onLog = null; this.glareLogged = [false, false];
     this.bolts = new Bolts(this);
+    this.armyC = [null, null];
   }
 
   addLog(team, text) {
@@ -1527,7 +1747,7 @@ class Battle {
     this.units = this.units.filter((u) => {
       const dx = u.pos.x - x, dz = u.pos.z - z;
       if (dx * dx + dz * dz > radius * radius) return true;
-      disposeView(u.view); n++;
+      n++;
       return false;
     });
     for (const sq of this.squads) sq.units = sq.units.filter((u) => this.units.includes(u));
@@ -1539,7 +1759,6 @@ class Battle {
   }
 
   clearUnits() {
-    for (const u of this.units) disposeView(u.view);
     this.units = []; this.squads = [];
     this.commanders = [null, null]; this.couriers = [null, null];
     this.bolts.clear();
@@ -1582,19 +1801,32 @@ class Battle {
     this.alive = this.planCount.slice();
   }
 
-  randomArmies() {
+  /** Случайные армии: size 1 — стычка, 2 — сражение, 3 — великая сеча. */
+  randomArmies(size = 1) {
     this.clearAll();
+    const cfg = [null,
+      { front: [3, 5], xbow: [2, 3], cav: [1, 2], lines: 1 },
+      { front: [6, 8], xbow: [4, 5], cav: [2, 4], lines: 2 },
+      { front: [11, 13], xbow: [7, 9], cav: [4, 6], lines: 4 }][size] || null;
+    const R = Math.random, pick = ([a, b]) => a + ((R() * (b - a + 1)) | 0);
     for (let team = 0; team < 2; team++) {
-      const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI, R = Math.random;
-      const front = 3 + ((R() * 3) | 0);
-      for (let i = 0; i < front; i++)
-        this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 9.5 + (R() - 0.5) * 3, dir * (30 + R() * 6), yaw);
-      const back = 2 + ((R() * 2) | 0);
-      for (let i = 0; i < back; i++)
-        this.placeSquad(2, team, (i - (back - 1) / 2) * 11 + (R() - 0.5) * 3, dir * (44 + R() * 5), yaw);
-      const flanks = 1 + ((R() * 2) | 0);
-      for (let i = 0; i < flanks; i++)
-        this.placeSquad(3, team, (i % 2 ? -1 : 1) * (36 + R() * 12), dir * (38 + R() * 8), yaw);
+      const dir = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI;
+      for (let line = 0; line < cfg.lines; line++) {
+        const front = pick(cfg.front);
+        for (let i = 0; i < front; i++)
+          this.placeSquad(R() < 0.55 ? 0 : 1, team, (i - (front - 1) / 2) * 10 + (R() - 0.5) * 2, dir * (22 + line * 8 + R() * 2), yaw);
+      }
+      const xbRows = Math.max(1, Math.ceil(cfg.lines / 2));
+      for (let row = 0; row < xbRows; row++) {
+        const n = pick(cfg.xbow);
+        for (let i = 0; i < n; i++)
+          this.placeSquad(2, team, (i - (n - 1) / 2) * 11 + (R() - 0.5) * 2, dir * (24 + cfg.lines * 8 + row * 6 + R() * 2), yaw);
+      }
+      const cav = pick(cfg.cav);
+      for (let i = 0; i < cav; i++) {
+        const side = i % 2 ? -1 : 1, k = Math.floor(i / 2);
+        this.placeSquad(3, team, side * (58 + k * 3 - (R() * 4)), dir * (26 + k * 10 + R() * 4), yaw);
+      }
     }
   }
 
@@ -1660,11 +1892,15 @@ class Battle {
     sq.labelT = 4;
   }
 
-  armyCenter(team) {
-    const c = new THREE.Vector3();
-    let n = 0;
-    for (const u of this.teams[team]) if (!u.t.special) { c.add(u.pos); n++; }
-    return n ? c.divideScalar(n) : null;
+  armyCenter(team) { return this.armyC ? this.armyC[team] : null; }
+
+  computeArmyCenters() {
+    this.armyC = [0, 1].map((team) => {
+      const c = new THREE.Vector3();
+      let n = 0;
+      for (const u of this.teams[team]) if (!u.t.special) { c.add(u.pos); n++; }
+      return n ? c.divideScalar(n) : null;
+    });
   }
 
   // ---------------------------------------------------------------- главный цикл
@@ -1675,11 +1911,13 @@ class Battle {
     const alive = [0, 0];
     for (const u of this.units) if (u.alive) { this.teams[u.team].push(u); if (!u.t.special) alive[u.team]++; }
     this.alive = alive;
+    this.computeArmyCenters();
     this.buildGrid();
     for (const sq of this.squads) sq.refresh(dt);
     for (const cs of this.couriers) if (cs) cs.refresh(dt);
 
     if (this.fighting && dt > 0) {
+      if ((this.foesT = (this.foesT || 0) - dt) <= 0) { this.foesT = 0.8; this.updateFoes(); }
       this.updateSquads(dt);
       for (const c of this.commanders) if (c) c.tick(dt);
       for (const u of this.units) if (u.alive) this.think(u, dt);
@@ -1690,12 +1928,11 @@ class Battle {
 
     for (let i = this.units.length - 1; i >= 0; i--) {
       const u = this.units[i];
-      if (u.gone) { disposeView(u.view); u.alive = false; this.units.splice(i, 1); continue; }
+      if (u.gone) { u.alive = false; this.units.splice(i, 1); continue; }
       if (!u.alive) {
         u.deadT += dt;
-        if (u.deadT > 24) { disposeView(u.view); this.units.splice(i, 1); continue; }
+        if (u.deadT > 24) { this.units.splice(i, 1); continue; }
       }
-      u.sync();
     }
   }
 
@@ -1709,9 +1946,7 @@ class Battle {
       if (sq.alive < sq.size * 0.3) sq.morale = Math.min(sq.morale, 55);
       sq.morale = clamp(sq.morale, 0, 100);
 
-      let enemyNear = false;
-      for (const e of this.squads)
-        if (e.team !== sq.team && !e.special && e.alive && d2d(e.center, sq.center) < 20) { enemyNear = true; break; }
+      const enemyNear = sq.foes && sq.foes.length > 0 && sq.foes[0].alive > 0 && d2d(sq.foes[0].center, sq.center) < 20;
 
       if (o.mode !== 'rout' && sq.morale < 18) {
         this.applyOrder(sq, { kind: 'rout', mode: 'rout' });
@@ -1809,33 +2044,84 @@ class Battle {
     return false;
   }
 
-  /** Цель с учётом приказа, скрытности и прямой видимости. */
+  /**
+   * Цель с учётом приказа, скрытности и прямой видимости. Ищем не по всей армии,
+   * а в ближайших клетках сетки и среди вражеских отрядов, известных своему отряду, —
+   * так поиск не тормозит и при тысячах солдат.
+   */
   pickTarget(u) {
-    const o = u.squad.order, ranged = u.t.ranged, enemies = this.teams[1 - u.team];
+    const o = u.squad.order, ranged = u.t.ranged;
     const gx = o.x ?? u.pos.x, gz = o.z ?? u.pos.z, leash = o.leash ?? (u.t.mount ? 16 : 10);
-    const best = [];
-    for (const e of enemies) {
-      const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
-      if (e.squad && e.squad.hidden && d2 > 196) continue; // в низине не видно
-      let s = d2;
-      if (e.t.special === 'messenger') { if (!ranged && d2 > 64) continue; s *= 1.3; }
-      if (u.t.special === 'commander' && d2 > 64) continue;
-      if (o.mode === 'move' && d2 > 10) continue;
+    const allowed = (e, d2) => {
+      if (e.squad && e.squad.hidden && d2 > 196) return false; // в низине не видно
+      if (e.t.special === 'messenger' && !ranged && d2 > 64) return false;
+      if (u.t.special === 'commander' && d2 > 64) return false;
+      if (o.mode === 'move' && d2 > 10) return false;
       if ((o.mode === 'hold' || o.mode === 'ambush') && !ranged) {
         const lx = e.pos.x - gx, lz = e.pos.z - gz;
-        if (lx * lx + lz * lz > leash * leash && d2 > 9) continue;
+        if (lx * lx + lz * lz > leash * leash && d2 > 9) return false;
       }
-      if (o.mode === 'charge' && o.target && e.squad === o.target) s *= 0.2;
-      if (best.length < 5 || s < best[best.length - 1].s) {
-        best.push({ e, s });
-        best.sort((a, b) => a.s - b.s);
-        if (best.length > 5) best.pop();
+      return true;
+    };
+    const near = this.gridNearest(u, ranged ? 4 : 10, allowed);
+    if (near) return near;
+    if (u.t.special) return null;
+
+    const foes = u.squad.foes || [];
+    const cands = o.mode === 'charge' && o.target && o.target.alive ? [o.target, ...foes] : foes;
+    const best = [];
+    for (let qi = 0; qi < Math.min(cands.length, 4); qi++) {
+      const q = cands[qi];
+      for (const e of q.units) {
+        if (!e.alive) continue;
+        const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
+        if (!allowed(e, d2)) continue;
+        const sc = o.mode === 'charge' && o.target === q ? d2 * 0.2 : d2;
+        if (best.length < 5 || sc < best[best.length - 1].s) {
+          best.push({ e, s: sc });
+          best.sort((a, b) => a.s - b.s);
+          if (best.length > 5) best.pop();
+        }
       }
     }
     if (!best.length) return null;
     if (!ranged) return best[0].e;
     for (const c of best) if (d2d(c.e.pos, u.pos) <= this.rangeOf(u, c.e) && this.canSee(u, c.e)) return c.e;
     return o.mode === 'advance' || o.mode === 'charge' ? best[0].e : null;
+  }
+
+  /** Ближайший враг в радиусе R по сетке соседей. */
+  gridNearest(u, R, allowed) {
+    const [cx, cz] = this.cellOf(u.pos.x, u.pos.z), r = Math.ceil(R / GRID);
+    let best = null, bs = R * R;
+    for (let z = Math.max(cz - r, 0); z <= Math.min(cz + r, GRID_DIM - 1); z++) {
+      for (let x = Math.max(cx - r, 0); x <= Math.min(cx + r, GRID_DIM - 1); x++) {
+        for (let j = this.head[z * GRID_DIM + x]; j >= 0; j = this.next[j]) {
+          const e = this.units[j];
+          if (!e || !e.alive || e.team === u.team) continue;
+          const dx = e.pos.x - u.pos.x, dz = e.pos.z - u.pos.z, d2 = dx * dx + dz * dz;
+          if (d2 >= bs || (allowed && !allowed(e, d2))) continue;
+          best = e; bs = d2;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Раз в 0,8 с каждому отряду — список ближайших видимых вражеских отрядов. */
+  updateFoes() {
+    const S = this.squads.filter((q) => !q.special && q.alive > 0);
+    for (const sq of S) {
+      const list = [];
+      for (const e of S) {
+        if (e.team === sq.team) continue;
+        const d = d2d(e.center, sq.center);
+        if (!e.hidden || d < 16) list.push({ e, d });
+      }
+      list.sort((a, b) => a.d - b.d);
+      sq.foes = list.slice(0, 4).map((x) => x.e);
+      sq.foeDist = list.length ? list[0].d : Infinity;
+    }
   }
 
   canSee(u, tg) {
@@ -1863,9 +2149,7 @@ class Battle {
   flee(u, dt) {
     if (u.retargetT <= 0 || !u.fleeFrom || !u.fleeFrom.alive) {
       u.retargetT = 0.5;
-      let best = null, bd = Infinity;
-      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
-      u.fleeFrom = bd < 30 ? best : null;
+      u.fleeFrom = this.gridNearest(u, 16, null);
     }
     let fx = 0, fz = u.team === 0 ? -1 : 1;
     if (u.fleeFrom) {
@@ -1899,9 +2183,7 @@ class Battle {
     // Гонец объезжает врагов стороной
     if (u.retargetT <= 0) {
       u.retargetT = 0.3;
-      let best = null, bd = 12;
-      for (const e of this.teams[1 - u.team]) { const d = d2d(e.pos, u.pos); if (d < bd) { bd = d; best = e; } }
-      u.fleeFrom = best;
+      u.fleeFrom = this.gridNearest(u, 12, null);
     }
     let vx = gx - u.pos.x, vz = gz - u.pos.z;
     const l = Math.hypot(vx, vz) || 1;
@@ -2087,7 +2369,7 @@ class Battle {
 // ------------------------------------------------------------------ арбалетные болты
 
 class Bolts {
-  constructor(battle) { this.battle = battle; this.cap = 600; this.list = []; this.mesh = null; }
+  constructor(battle) { this.battle = battle; this.cap = LOW_END ? 700 : 1600; this.list = []; this.mesh = null; }
   init() {
     const b = ASSETS.bolt;
     this.mesh = new THREE.InstancedMesh(b.geometry, b.material, this.cap);
@@ -2782,7 +3064,9 @@ function buildUI() {
   $('eraser').onclick = () => { game.eraser = !game.eraser; ghost.count = 0; refreshUI(); };
   $('fight').onclick = startBattle;
   $('newMap').onclick = () => { newMap(); toast('Карта: ' + game.style.title); };
-  $('random').onclick = () => { battle.randomArmies(); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  const makeArmies = () => { battle.randomArmies(+$('armySize').value); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  $('random').onclick = makeArmies;
+  $('armySize').onchange = makeArmies;
   $('clear').onclick = () => { battle.clearAll(); refreshUI(); };
   $('pause').onclick = () => { game.paused = !game.paused; refreshUI(); };
   [['slow', 0.25], ['normal', 1], ['fast', 2]].forEach(([id, s]) => ($(id).onclick = () => { game.speed = s; game.paused = false; refreshUI(); }));
@@ -2924,6 +3208,70 @@ function updateWindArrow() {
   $('windArrow').style.transform = `rotate(${Math.atan2(sx, sy) * 180 / Math.PI}deg)`;
 }
 
+// ------------------------------------------------------------------ отрисовка толпы
+
+const _m4 = new THREE.Matrix4(), _rm = new THREE.Matrix4(), _off = new THREE.Matrix4();
+const _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+
+/** Раскладывает всех видимых солдат по инстанс-мешам: вид × команда × LOD. */
+function renderCrowd(animDt) {
+  const C = ASSETS.crowd;
+  for (const m of ASSETS.crowdList) m.begin();
+  const cp = camera.position, lod2 = LOD_DIST * LOD_DIST;
+  for (const u of battle.units) {
+    stepAnim(u.anim, animDt);
+    if (u.ride) stepAnim(u.ride, animDt);
+    sphere.center.set(u.pos.x, u.pos.y + 1, u.pos.z);
+    if (!frustum.intersectsSphere(sphere)) continue;
+    const lod = cp.distanceToSquared(u.pos) < lod2 ? 0 : 1;
+    const sink = u.alive ? 0 : Math.max(0, u.deadT - 18) * 0.25;
+    _q.setFromAxisAngle(_up, u.yaw);
+    _m4.compose(_p.set(u.pos.x, u.pos.y - sink, u.pos.z), _q, _s.setScalar(u.scale));
+    if (u.t.mount) {
+      const hm = C.horse[u.horse], hr = hm.row(u.anim);
+      hm.add(0, lod, _m4, hr, u.anim.prevRow, u.anim.blend);
+      u.anim.lastRow = hr;
+      const rm = C.rider[u.type], rr = rm.row(u.ride);
+      if (u.alive) {
+        const bob = u.curSpeed > 3.5 ? Math.abs(Math.sin(u.phase)) * 0.12 : 0;
+        _off.makeTranslation(u.riderBase.x, u.riderBase.y + bob, u.riderBase.z);
+      } else _off.makeTranslation(1.2, 0, -0.3); // всадник падает рядом с конём
+      _rm.multiplyMatrices(_m4, _off);
+      rm.add(u.team, lod, _rm, rr, u.ride.prevRow, u.ride.blend);
+      u.ride.lastRow = rr;
+      if (u.t.special === 'commander') u.bannerMatrix = (u.bannerMatrix || new THREE.Matrix4()).copy(_rm);
+    } else {
+      const im = C.inf[u.type], r = im.row(u.anim);
+      im.add(u.team, lod, _m4, r, u.anim.prevRow, u.anim.blend);
+      u.anim.lastRow = r;
+    }
+  }
+  for (const m of ASSETS.crowdList) m.end();
+}
+
+/** Знамёна полководцев едут за всадником и колышутся на ветру. */
+const banners = [null, null];
+function updateBanners(time) {
+  for (let team = 0; team < 2; team++) {
+    const c = battle.commanders[team];
+    let b = banners[team];
+    if (!c || !c.unit.alive || !c.unit.bannerMatrix) { if (b) b.visible = false; continue; }
+    if (!b) {
+      b = banners[team] = new THREE.Group();
+      const flag = makeBanner(team);
+      flag.position.set(-0.3, ASSETS.riderHipsY, -0.38);
+      b.add(flag);
+      b.userData.flag = flag;
+      b.matrixAutoUpdate = false;
+      scene.add(b);
+    }
+    b.visible = true;
+    b.matrix.copy(c.unit.bannerMatrix);
+    b.matrixWorldNeedsUpdate = true;
+    waveBanner(b.userData.flag, time, world.wind.length());
+  }
+}
+
 // ------------------------------------------------------------------ цикл
 
 function resize() {
@@ -2966,17 +3314,9 @@ function frame(now) {
   const animDt = game.phase === 'setup' ? dt : game.paused ? 0 : dt * game.speed;
   projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   frustum.setFromProjectionMatrix(projView);
-  const cp = camera.position, state = game.phase === 'result' ? 'cheer' : null;
-  for (const u of battle.units) {
-    const v = u.view;
-    if (u.alive) animate(u, state && u.team === game.winner ? 'cheer' : null);
-    v.accum += animDt;
-    const d2 = cp.distanceToSquared(u.pos);
-    sphere.center.copy(u.pos);
-    let every = !frustum.intersectsSphere(sphere) ? 8 : d2 < 70 * 70 ? 1 : d2 < 140 * 140 ? 2 : 4;
-    if (!u.alive && u.deadT > 3) every = 0;
-    if (every && (frameNo + v.frame) % every === 0) { for (const m of v.mixers) m.update(v.accum); v.accum = 0; }
-  }
+  const state = game.phase === 'result' ? 'cheer' : null;
+  for (const u of battle.units) if (u.alive) animate(u, state && u.team === game.winner ? 'cheer' : null);
+  renderCrowd(animDt);
 
   // Тени следуют за камерой
   const tgt = rig.target;
@@ -2987,7 +3327,7 @@ function frame(now) {
   if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
 
   updateRings();
-  for (const c of battle.commanders) if (c && c.unit.view.banner) waveBanner(c.unit.view.banner, now / 1000, world.wind.length());
+  updateBanners(now / 1000);
   updateLabels();
   updateWindArrow();
   if ((tallyT += dt) > 0.12) { tallyT = 0; updateTally(); }
@@ -3012,7 +3352,8 @@ async function start(saved) {
   BOLT_TIP = probe.tip || 1;
   newMap(saved?.seed);
   if (saved?.plan?.length) battle.setPlan(saved.plan);
-  else battle.randomArmies();
+  else battle.randomArmies(LOW_END ? 1 : 2);
+  $('armySize').value = LOW_END ? '1' : '2';
   refreshUI();
   $('loading').hidden = true;
   toast('Карта: ' + game.style.title + '. Расставьте армии и жмите «В бой!»', 4200);
@@ -3027,7 +3368,7 @@ window.sechaDebug.step = (sec, dt = 1 / 30) => {
   for (let t = 0; t < sec; t += dt) {
     battle.tick(game.phase === 'setup' ? 0 : dt);
     if (game.phase === 'fight') game.battleTime += dt;
-    for (const u of battle.units) { if (u.alive) animate(u, null); for (const m of u.view.mixers) m.update(dt); }
+    for (const u of battle.units) { if (u.alive) animate(u, null); stepAnim(u.anim, dt); if (u.ride) stepAnim(u.ride, dt); }
   }
   updateTally();
   return { alive: battle.alive.slice(), bolts: battle.bolts.list.length };

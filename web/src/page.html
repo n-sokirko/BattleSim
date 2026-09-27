@@ -48,6 +48,13 @@
   .btn:hover { background: var(--panel-hi); border-color: var(--line-hi); }
   .btn:active { transform: translateY(1px); }
   .btn:focus-visible, .card:focus-visible, .team:focus-visible, .fight:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .pair { display: inline-flex; gap: 0; }
+  .pair > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .pair > .btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }
+  .select { appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+  .select option { background: #161b22; color: var(--text); }
   .btn[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.2); color: #f6d792; }
 
   .dock { display: flex; gap: 8px; align-items: stretch; min-width: 0; flex: 1 1 auto; }
@@ -161,7 +168,14 @@
   </div>
   <div class="row" id="setupTop">
     <button class="btn" id="newMap">Новая карта</button>
-    <button class="btn" id="random">Случайные армии</button>
+    <span class="pair">
+      <button class="btn" id="random">Случайные армии</button>
+      <select class="btn select" id="armySize" aria-label="Размер армий">
+        <option value="1">Стычка</option>
+        <option value="2" selected>Сражение</option>
+        <option value="3">Великая сеча</option>
+      </select>
+    </span>
     <button class="btn" id="clear">Очистить</button>
     <button class="btn" id="cmdToggle">Полководцы: есть</button>
     <button class="btn" id="helpBtn">Как устроен бой</button>

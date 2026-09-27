@@ -269,6 +269,29 @@ async function loadAssets(onProgress) {
     ASSETS.riderHipsY = hipsY;
   }
 
+  // Толпа: запечённые анимации + инстансинг (тысячи солдат без отдельных скелетов)
+  const cap = MAX_UNITS + 64, K = ASSETS.clips;
+  const infantryDefs = (t) => {
+    const a = t.anim, clips = K[t.model], defs = [], seen = new Set();
+    const add = (name, loop) => { if (name && !seen.has(name) && clips[name]) { seen.add(name); defs.push({ name, clips: [clips[name]], loop }); } };
+    [a.idle, a.run, 'Walking_A', a.cheer, a.aim, a.reload].forEach((n) => add(n, true));
+    [...a.attack, a.melee, 'Death_A', 'Death_B'].forEach((n) => add(n, false));
+    return defs;
+  };
+  const R = ASSETS.rider;
+  const riderDefs = [
+    { name: 'ride', clips: [R.arms, R.sit] },
+    ...R.attack.map((c, i) => ({ name: 'atk' + i, clips: [c, R.sit], loop: false })),
+    { name: 'Death_A', clips: [K.Knight.Death_A], loop: false },
+    { name: 'Death_B', clips: [K.Knight.Death_B], loop: false },
+  ];
+  ASSETS.crowd = {
+    inf: [0, 1, 2].map((i) => new CrowdModel(ASSETS.units[i], infantryDefs(TYPES[i]), cap)),
+    rider: { 3: new CrowdModel(ASSETS.units[3], riderDefs, cap), [T_CMD]: new CrowdModel(ASSETS.units[T_CMD], riderDefs, 24), [T_MSG]: new CrowdModel(ASSETS.units[T_MSG], riderDefs, 96) },
+    horse: ASSETS.horses.map((h) => new CrowdModel([h.template], ['Idle', 'Walk', 'Gallop', 'Death'].map((n) => ({ name: n, clips: [h.clips[n]], loop: n !== 'Death' })), cap)),
+  };
+  ASSETS.crowdList = [...ASSETS.crowd.inf, ...Object.values(ASSETS.crowd.rider), ...ASSETS.crowd.horse];
+
   // Болт для арбалета
   const arrow = mergeStatic(G.arrow);
   ASSETS.bolt = { geometry: arrow.geometry, material: arrow.material, norm: 0.95 / Math.max(arrow.height, 0.01) };

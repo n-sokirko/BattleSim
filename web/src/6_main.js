@@ -163,7 +163,9 @@ function buildUI() {
   $('eraser').onclick = () => { game.eraser = !game.eraser; ghost.count = 0; refreshUI(); };
   $('fight').onclick = startBattle;
   $('newMap').onclick = () => { newMap(); toast('Карта: ' + game.style.title); };
-  $('random').onclick = () => { battle.randomArmies(); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  const makeArmies = () => { battle.randomArmies(+$('armySize').value); refreshUI(); toast(`Армии: ${battle.planCount[0]} синих против ${battle.planCount[1]} красных`); };
+  $('random').onclick = makeArmies;
+  $('armySize').onchange = makeArmies;
   $('clear').onclick = () => { battle.clearAll(); refreshUI(); };
   $('pause').onclick = () => { game.paused = !game.paused; refreshUI(); };
   [['slow', 0.25], ['normal', 1], ['fast', 2]].forEach(([id, s]) => ($(id).onclick = () => { game.speed = s; game.paused = false; refreshUI(); }));
@@ -305,6 +307,70 @@ function updateWindArrow() {
   $('windArrow').style.transform = `rotate(${Math.atan2(sx, sy) * 180 / Math.PI}deg)`;
 }
 
+// ------------------------------------------------------------------ отрисовка толпы
+
+const _m4 = new THREE.Matrix4(), _rm = new THREE.Matrix4(), _off = new THREE.Matrix4();
+const _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+
+/** Раскладывает всех видимых солдат по инстанс-мешам: вид × команда × LOD. */
+function renderCrowd(animDt) {
+  const C = ASSETS.crowd;
+  for (const m of ASSETS.crowdList) m.begin();
+  const cp = camera.position, lod2 = LOD_DIST * LOD_DIST;
+  for (const u of battle.units) {
+    stepAnim(u.anim, animDt);
+    if (u.ride) stepAnim(u.ride, animDt);
+    sphere.center.set(u.pos.x, u.pos.y + 1, u.pos.z);
+    if (!frustum.intersectsSphere(sphere)) continue;
+    const lod = cp.distanceToSquared(u.pos) < lod2 ? 0 : 1;
+    const sink = u.alive ? 0 : Math.max(0, u.deadT - 18) * 0.25;
+    _q.setFromAxisAngle(_up, u.yaw);
+    _m4.compose(_p.set(u.pos.x, u.pos.y - sink, u.pos.z), _q, _s.setScalar(u.scale));
+    if (u.t.mount) {
+      const hm = C.horse[u.horse], hr = hm.row(u.anim);
+      hm.add(0, lod, _m4, hr, u.anim.prevRow, u.anim.blend);
+      u.anim.lastRow = hr;
+      const rm = C.rider[u.type], rr = rm.row(u.ride);
+      if (u.alive) {
+        const bob = u.curSpeed > 3.5 ? Math.abs(Math.sin(u.phase)) * 0.12 : 0;
+        _off.makeTranslation(u.riderBase.x, u.riderBase.y + bob, u.riderBase.z);
+      } else _off.makeTranslation(1.2, 0, -0.3); // всадник падает рядом с конём
+      _rm.multiplyMatrices(_m4, _off);
+      rm.add(u.team, lod, _rm, rr, u.ride.prevRow, u.ride.blend);
+      u.ride.lastRow = rr;
+      if (u.t.special === 'commander') u.bannerMatrix = (u.bannerMatrix || new THREE.Matrix4()).copy(_rm);
+    } else {
+      const im = C.inf[u.type], r = im.row(u.anim);
+      im.add(u.team, lod, _m4, r, u.anim.prevRow, u.anim.blend);
+      u.anim.lastRow = r;
+    }
+  }
+  for (const m of ASSETS.crowdList) m.end();
+}
+
+/** Знамёна полководцев едут за всадником и колышутся на ветру. */
+const banners = [null, null];
+function updateBanners(time) {
+  for (let team = 0; team < 2; team++) {
+    const c = battle.commanders[team];
+    let b = banners[team];
+    if (!c || !c.unit.alive || !c.unit.bannerMatrix) { if (b) b.visible = false; continue; }
+    if (!b) {
+      b = banners[team] = new THREE.Group();
+      const flag = makeBanner(team);
+      flag.position.set(-0.3, ASSETS.riderHipsY, -0.38);
+      b.add(flag);
+      b.userData.flag = flag;
+      b.matrixAutoUpdate = false;
+      scene.add(b);
+    }
+    b.visible = true;
+    b.matrix.copy(c.unit.bannerMatrix);
+    b.matrixWorldNeedsUpdate = true;
+    waveBanner(b.userData.flag, time, world.wind.length());
+  }
+}
+
 // ------------------------------------------------------------------ цикл
 
 function resize() {
@@ -347,17 +413,9 @@ function frame(now) {
   const animDt = game.phase === 'setup' ? dt : game.paused ? 0 : dt * game.speed;
   projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   frustum.setFromProjectionMatrix(projView);
-  const cp = camera.position, state = game.phase === 'result' ? 'cheer' : null;
-  for (const u of battle.units) {
-    const v = u.view;
-    if (u.alive) animate(u, state && u.team === game.winner ? 'cheer' : null);
-    v.accum += animDt;
-    const d2 = cp.distanceToSquared(u.pos);
-    sphere.center.copy(u.pos);
-    let every = !frustum.intersectsSphere(sphere) ? 8 : d2 < 70 * 70 ? 1 : d2 < 140 * 140 ? 2 : 4;
-    if (!u.alive && u.deadT > 3) every = 0;
-    if (every && (frameNo + v.frame) % every === 0) { for (const m of v.mixers) m.update(v.accum); v.accum = 0; }
-  }
+  const state = game.phase === 'result' ? 'cheer' : null;
+  for (const u of battle.units) if (u.alive) animate(u, state && u.team === game.winner ? 'cheer' : null);
+  renderCrowd(animDt);
 
   // Тени следуют за камерой
   const tgt = rig.target;
@@ -368,7 +426,7 @@ function frame(now) {
   if (sc.right !== sh) { sc.left = -sh; sc.right = sh; sc.top = sh; sc.bottom = -sh; sc.updateProjectionMatrix(); }
 
   updateRings();
-  for (const c of battle.commanders) if (c && c.unit.view.banner) waveBanner(c.unit.view.banner, now / 1000, world.wind.length());
+  updateBanners(now / 1000);
   updateLabels();
   updateWindArrow();
   if ((tallyT += dt) > 0.12) { tallyT = 0; updateTally(); }
@@ -393,7 +451,8 @@ async function start(saved) {
   BOLT_TIP = probe.tip || 1;
   newMap(saved?.seed);
   if (saved?.plan?.length) battle.setPlan(saved.plan);
-  else battle.randomArmies();
+  else battle.randomArmies(LOW_END ? 1 : 2);
+  $('armySize').value = LOW_END ? '1' : '2';
   refreshUI();
   $('loading').hidden = true;
   toast('Карта: ' + game.style.title + '. Расставьте армии и жмите «В бой!»', 4200);
@@ -408,7 +467,7 @@ window.sechaDebug.step = (sec, dt = 1 / 30) => {
   for (let t = 0; t < sec; t += dt) {
     battle.tick(game.phase === 'setup' ? 0 : dt);
     if (game.phase === 'fight') game.battleTime += dt;
-    for (const u of battle.units) { if (u.alive) animate(u, null); for (const m of u.view.mixers) m.update(dt); }
+    for (const u of battle.units) { if (u.alive) animate(u, null); stepAnim(u.anim, dt); if (u.ride) stepAnim(u.ride, dt); }
   }
   updateTally();
   return { alive: battle.alive.slice(), bolts: battle.bolts.list.length };
