@@ -380,11 +380,12 @@ namespace BattleSim.Core
                     if (c0 - t0 > 0.5f) F.Walls.Add(new FortWall { Ax = ax + ux * t0, Az = az + uz * t0, Bx = ax + ux * c0, Bz = az + uz * c0, W = T, H = H, Out = sd.Out });
                     t0 = c1;
                 }
-                // лестницы на боевой ход — только на ровном (не через реку и не через уступ)
-                const float rw = 4f, rl = 14f;
+                // широкие лестницы на боевой ход — только на ровном (не через реку и не через уступ);
+                // на южной стене, которую штурмуют, — чаще
+                const float rw = 7f, rl = 14f;
                 float inX = -sd.Out.x, inZ = -sd.Out.z, off = T / 2 + rw / 2 - 0.3f;
-                var rampTs = gatesT.Select(g => g + 7.2f + 3.6f).ToList();
-                int nr = Math.Max(1, M.Round(len / 34));
+                var rampTs = gatesT.Select(g => g + 7.2f + 3.6f).Concat(gatesT.Select(g => g - 7.2f - 3.6f - rl)).ToList();
+                int nr = Math.Max(1, M.Round(len / (south ? 22 : 30)));
                 for (int k = 0; k < nr; k++) rampTs.Add(len * (k + 0.5f) / nr - rl / 2);
                 var placed = new List<float>();
                 foreach (float t in rampTs)
@@ -392,7 +393,7 @@ namespace BattleSim.Core
                     float ta = M.Clamp(t, 5, len - rl - 5), tb = ta + rl;
                     foreach (float tt in towerTs) if (tb > tt - 4 && ta < tt + 4) { ta = tt + 4; tb = ta + rl; }
                     if (tb > len - 4 || cuts.Any(c => tb > c.a - 1 && ta < c.b + 1) || towerTs.Any(tt => tb > tt - 4 && ta < tt + 4)) continue;
-                    if (placed.Any(q => MathF.Abs(q - ta) < rl + 4)) continue;
+                    if (placed.Any(q => MathF.Abs(q - ta) < rl + 2)) continue;
                     bool flat = true;
                     for (float q = ta - 1; q <= tb + 1; q += 2)
                     {
@@ -415,7 +416,7 @@ namespace BattleSim.Core
                 {
                     float ax = cp[k].x, az = cp[k].z, bx = cp[k + 1].x, bz = cp[k + 1].z, len = M.Hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
                     var outv = MathF.Abs(ux) > 0.5f ? new V2(0, M.Sign((az + bz) / 2 - mz)) : new V2(M.Sign((ax + bx) / 2 - mx), 0);
-                    Tower(ax, az, 7.5f, CH + 2.5f, true);
+                    Tower(ax, az, 7.5f, CH + 1.5f, true); // на 1,5 м выше хода — по стенам можно обойти весь замок
                     if (k == 0)
                     { // южная стена: ворота и две надвратные башни
                         float tg = cas.GateX - ax;
@@ -428,22 +429,25 @@ namespace BattleSim.Core
                     else
                     {
                         F.Walls.Add(new FortWall { Ax = ax, Az = az, Bx = bx, Bz = bz, W = W, H = CH, Out = outv, Citadel = true });
-                        if (len > 30 && k != 2) Tower((ax + bx) / 2, (az + bz) / 2, 6.4f, CH + 2, true);
+                        if (len > 30 && k != 2) Tower((ax + bx) / 2, (az + bz) / 2, 6.4f, CH + 1.5f, true);
                     }
                 }
                 // всходы на стены изнутри — у восточной и западной стен
-                float rl = CH * 2.1f, off = W / 2 + 3.6f / 2 - 0.3f;
+                // широкие лестницы на стену — вдоль южной стены изнутри, по обе стороны от ворот
+                float rl = MathF.Min(CH * 1.8f, castleHX - 9.8f - 4.3f), off = W / 2 + 6f / 2 - 0.3f;
                 foreach (float side in new[] { -1f, 1f })
                 {
-                    float x = side < 0 ? cas.X0 + off : cas.X1 - off, za = cas.Z0 + 5, zb = za + rl;
-                    if (zb < cas.Z1 - 5) F.Ramps.Add(new FortRamp { Ax = x, Az = za, Bx = x, Bz = zb, W = 3.6f, H = CH, Citadel = true });
+                    float xa = cas.GateX + side * 9.8f, xb = xa + side * rl, z = cas.Z0 + off;
+                    if (rl > CH * 1.4f)
+                        F.Ramps.Add(new FortRamp { Ax = xa, Az = z, Bx = xb, Bz = z, W = 6f, H = CH, Citadel = true });
                 }
                 // донжон у северной стены; на его верх — всход по боевому ходу
                 cas.KeepS = MathF.Min(13, castleD * 0.5f); cas.KeepH = CH + 4;
                 float kx = cas.GateX + (R.Next() < 0.5 ? -1 : 1) * castleHX * 0.38f, kz = cas.Z1 - W / 2 - cas.KeepS / 2 + 0.2f;
                 cas.Keep = new V2(kx, kz);
                 F.Towers.Add(new FortTower { X = kx, Z = kz, S = cas.KeepS, H = cas.KeepH, Citadel = true, Keep = true });
-                cas.KeepRamp = new Seg { Ax = kx - cas.KeepS / 2 - 8.5f, Az = cas.Z1, Bx = kx - cas.KeepS / 2 + 0.8f, Bz = cas.Z1, W = W };
+                // всход лежит на боевом ходу и заходит на крышу донжона на 2,5 м (чтобы клетки сетки их связали)
+                cas.KeepRamp = new Seg { Ax = kx - cas.KeepS / 2 - 8.5f, Az = cas.Z1 - 0.9f, Bx = kx - cas.KeepS / 2 + 2.5f, Bz = cas.Z1 - 0.9f, W = W };
             }
 
             // --- улицы

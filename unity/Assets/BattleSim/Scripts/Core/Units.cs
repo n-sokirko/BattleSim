@@ -135,6 +135,9 @@ namespace BattleSim.Core
         public Unit Target, FleeFrom;
         public float RetargetT, Cooldown, AtkT = -1, AtkDur = 0.6f, ChargeT, DeadT, Phase, CurSpeed, LosT = -9, Scale;
         public bool Shot, HitDone, Aiming, AtkNew, Engaged, DeathShown, LosOk, Gone;
+        /// <summary>Реакция на удар для анимации: 1 — вздрогнул, 2 — принял удар на щит (показывается один раз).</summary>
+        public int HitReact;
+        public float HitAnimT;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;
@@ -189,6 +192,16 @@ namespace BattleSim.Core
         public V2 E, Dir;
         public int Team;
         public readonly List<Squad> Queue = new List<Squad>();
+    }
+
+    /// <summary>Что случилось в бою — для эффектов на экране (пыль, искры, брызги).</summary>
+    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround }
+
+    public struct FxEvent
+    {
+        public FxKind Kind;
+        public V3 Pos, Dir;
+        public int Team;
     }
 
     public sealed class LogEntry
@@ -266,6 +279,7 @@ namespace BattleSim.Core
                         || W.Decks.SolidTop(a.Pos.x, a.Pos.z, W.HeightAt(a.Pos.x, a.Pos.z)) > a.Pos.y || inTrees))
                     {
                         a.Flying = false; a.Stuck = 8; a.Dir = a.Dir.Normalized;
+                        battle.Emit(W.HeightAt(a.Pos.x, a.Pos.z) < World.Water && a.Pos.y < World.Water + 0.3f ? FxKind.Splash : FxKind.BoltGround, a.Pos);
                         continue;
                     }
                     if (s < 1) continue;

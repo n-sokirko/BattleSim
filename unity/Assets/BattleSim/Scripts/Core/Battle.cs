@@ -486,6 +486,13 @@ namespace BattleSim.Core
 
         // ---------------------------------------------------------------- главный цикл
 
+        /// <summary>События для эффектов; Unity-слой забирает и очищает их каждый кадр.</summary>
+        public readonly List<FxEvent> Fx = new List<FxEvent>();
+        public void Emit(FxKind k, V3 p, float dx = 0, float dz = 0, int team = 0)
+        {
+            if (Fx.Count < 600) Fx.Add(new FxEvent { Kind = k, Pos = p, Dir = new V3(dx, 0, dz), Team = team });
+        }
+
         /// <summary>Сколько миллисекунд ушло на каждую часть шага (накопительно) — для замеров.</summary>
         public readonly double[] Prof = new double[8];
         public static readonly string[] ProfNames = { "подготовка", "враги", "приказы", "строй", "решения", "движение", "расталкивание", "болты" };
@@ -617,7 +624,7 @@ namespace BattleSim.Core
             var t = u.T;
             var sq = u.Squad;
             var o = sq.Order;
-            u.Cooldown -= dt; u.RetargetT -= dt;
+            u.Cooldown -= dt; u.RetargetT -= dt; u.HitAnimT -= dt;
             u.Engaged = false; u.Aiming = false;
             if (t.Special == Special.Messenger) { ThinkMessenger(u, dt); return; }
             if (o.Mode == Mode.Rout) { Flee(u, dt); return; }
@@ -1059,6 +1066,7 @@ namespace BattleSim.Core
                 float tx = e.Pos.x - k.Pos.x, tz = e.Pos.z - k.Pos.z, d = M.Hypot(tx, tz);
                 if (d > 2.6f || tx * fx + tz * fz < 0) continue;
                 float s = 2.5f / e.T.Mass, dd = MathF.Max(d, 0.1f);
+                Emit(FxKind.Charge, e.Pos, fx, fz, e.Team);
                 Damage(e, k.T.Dmg * 0.6f, (tx / dd + fx) * s, (tz / dd + fz) * s, false, k);
                 if (e.Squad != null) e.Squad.Morale -= 2;
             }
@@ -1080,12 +1088,22 @@ namespace BattleSim.Core
                 if (arrow) { sq.LastHitT = Time; sq.Morale -= 0.6f; }
                 if (rear) sq.Morale -= 1.5f;
             }
+            if (!arrow)
+            { // пыль и искры в точке удара (на уровне груди)
+                float kl = M.Hypot(kx, kz);
+                var hp = new V3(t.Pos.x - (kl > 1e-4f ? kx / kl : 0) * t.T.Radius * 0.6f, t.Pos.y + (t.T.Mount ? 1.9f : 1.1f), t.Pos.z - (kl > 1e-4f ? kz / kl : 0) * t.T.Radius * 0.6f);
+                Emit(t.T.ArrowBlock > 0.3f && !rear && t.Hp > 0 ? FxKind.Block : FxKind.Hit, hp, kx, kz, t.Team);
+            }
             if (t.Hp <= 0) { Kill(t); return; }
+            // видимая реакция на удар: щитоносец спереди принимает удар на щит, остальные вздрагивают
+            if (!arrow && t.AtkT < 0 && t.HitAnimT <= 0) t.HitReact = t.T.ArrowBlock > 0.3f && !rear ? 2 : 1;
+            else if (arrow && t.AtkT < 0 && t.HitAnimT <= 0 && Rng.Rand() < 0.5f) t.HitReact = 1;
             if (src != null && !arrow && t.Target != src && Rng.Rand() < 0.5f) t.Target = src;
         }
 
         void Kill(Unit u)
         {
+            Emit(FxKind.Kill, u.Pos, 0, 0, u.Team);
             u.Alive = false; u.DeadT = 0; u.Target = null; u.AtkT = -1;
             if (u.T.Special != Special.Messenger) LastKillT = Time;
             u.Vel = new V3(0, 0, 0); u.CurSpeed = 0;
@@ -1312,6 +1330,14 @@ namespace BattleSim.Core
                 return;
             }
             if (cheer) { u.Anim.Play(a.Cheer); return; }
+            if (u.HitReact > 0 && !u.AtkNew)
+            { // вздрогнул или принял удар на щит — короткая анимация поверх стойки
+                string hit = u.HitReact == 2 ? "Block_Hit" : Rng.Rand() < 0.5f ? "Hit_A" : "Hit_B";
+                u.HitReact = 0;
+                float hd = ClipDur != null ? ClipDur(u.Type, hit) : 0;
+                if (hd > 0) { u.Anim.Play(hit, once: true, restart: true, speed: 1.3f); u.HitAnimT = hd / 1.3f; return; }
+            }
+            if (u.HitAnimT > 0 && !u.AtkNew) return; // реакция ещё идёт
             if (u.AtkNew)
             {
                 u.AtkNew = false;

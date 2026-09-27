@@ -25,6 +25,14 @@ KEEP_ANIMS = {
     "White_Horse": ["Idle", "Walk", "Gallop", "Death"],
 }
 
+# Боевые анимации для зрелищной рукопашной: блоки, реакции на удар, уклонения, спецприёмы
+COMBAT_EXTRA = ["Block", "Block_Hit", "Blocking", "Block_Attack", "Hit_A", "Hit_B", "Dodge_Backward", "Dodge_Left", "Dodge_Right",
+                "2H_Melee_Attack_Spin", "2H_Melee_Attack_Stab", "1H_Melee_Attack_Stab", "Throw", "Spellcast_Shoot", "Spellcast_Raise",
+                "Spellcasting", "Walking_Backwards", "Running_B", "Unarmed_Melee_Attack_Kick", "Unarmed_Melee_Attack_Punch_A",
+                "Jump_Full_Short", "Lie_Down", "Lie_Idle", "Lie_StandUp", "Idle", "2H_Melee_Idle", "Sit_Chair_Idle"]
+for k in ("Knight", "Barbarian", "Rogue_Hooded"):
+    KEEP_ANIMS[k] = sorted(set(KEEP_ANIMS[k]) | set(COMBAT_EXTRA))
+
 MODELS = {
     "Knight": "chars/Knight.glb", "Barbarian": "chars/Barbarian.glb", "Rogue_Hooded": "chars/Rogue_Hooded.glb",
     "Horse": "horse/Horse.glb", "White_Horse": "horse/White_Horse.glb", "arrow": "weapons/arrow.gltf",

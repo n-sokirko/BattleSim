@@ -171,7 +171,7 @@ namespace BattleSim
                 defs.Add(new ClipDef { Name = name, Loop = loop, Layers = { new ClipLayer { Src = doc, Anim = doc.Anim(name) } } });
             }
             foreach (var n in new[] { a.Idle, a.Run, "Walking_A", a.Cheer, a.Aim, a.Reload }) Add(n, true);
-            foreach (var n in a.Attack.Concat(new[] { a.Melee, "Death_A", "Death_B" })) Add(n, false);
+            foreach (var n in a.Attack.Concat(new[] { a.Melee, "Death_A", "Death_B", "Hit_A", "Hit_B", "Block_Hit" })) Add(n, false);
             return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh)));
         }
 

@@ -97,6 +97,7 @@ namespace BattleSim
             yield return Lib.Load((p, text) => { LoadProgress = p; LoadText = text; });
             Battle.ClipDur = (type, name) => type < 3 && Lib.Inf[type] != null ? Lib.Inf[type].Baked.Dur(name) : 0;
             overlays = new Overlays();
+            fx = new Effects();
             overlays.SetBolt(Lib);
             LoadText = "Рисуем карту…";
             yield return null;
@@ -166,6 +167,8 @@ namespace BattleSim
         }
 
         public void ShowToast(string text, float sec = 2.6f) { Toast = text; ToastT = sec; }
+
+        Effects fx;
 
         const float SimStep = 1f / 30;
         float simAcc;
@@ -253,6 +256,7 @@ namespace BattleSim
 
         public void StopBattle()
         {
+            fx?.Clear();
             ClearBanners();
             Battle.ResetToPlan();
             Phase = Phase.Setup;
@@ -365,6 +369,13 @@ namespace BattleSim
             overlays.DrawRings(Battle);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
+            if (fx != null)
+            {
+                fx.Spawn(Battle.Fx);
+                fx.Update(animDt);
+                fx.Draw();
+            }
+            Battle.Fx.Clear();
             UpdateBanners();
             view.Draw();
         }
