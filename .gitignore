@@ -1,0 +1,22 @@
+# Веб-версия: локальная обёртка и мусор сборки
+web/local.html
+web/publish_files.json
+__pycache__/
+
+# Unity (когда проект появится в unity/)
+unity/[Ll]ibrary/
+unity/[Tt]emp/
+unity/[Oo]bj/
+unity/[Bb]uild/
+unity/[Bb]uilds/
+unity/[Ll]ogs/
+unity/[Uu]ser[Ss]ettings/
+unity/*.csproj
+unity/*.sln
+unity/*.user
+*.apk
+*.aab
+
+# Система
+.DS_Store
+Thumbs.db

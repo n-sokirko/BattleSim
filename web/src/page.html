@@ -1,0 +1,266 @@
+<title>Сеча</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Ruslan+Display&display=swap">
+<style>
+  /* Игра намеренно в одной тёмной теме: панели лежат поверх 3D-сцены. */
+  :root {
+    color-scheme: dark;
+    --ink: #10141a;
+    --panel: rgba(16, 20, 26, 0.8);
+    --panel-hi: rgba(34, 40, 50, 0.92);
+    --line: rgba(236, 226, 204, 0.14);
+    --line-hi: rgba(236, 226, 204, 0.32);
+    --text: #ece2cc;
+    --muted: #a59d8b;
+    --brass: #d7a33f;
+    --brass-ink: #251904;
+    --blue: #4a86ea;
+    --red: #de4f41;
+    --gutter: 16px;
+    --display: 'Ruslan Display', 'Georgia', serif;
+    --ui: 'Onest', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ink); color: var(--text); font: 500 13px/1.35 var(--ui); overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+  .hud { position: fixed; left: 0; right: 0; display: flex; gap: 10px; padding-inline: var(--gutter); pointer-events: none; z-index: 2; }
+  .hud > * { pointer-events: auto; }
+  .hud-top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 12px); justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+  .hud-bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); align-items: flex-end; justify-content: space-between; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .tally { padding: 8px 12px 10px; width: min(320px, calc(100vw - 2 * var(--gutter))); display: grid; gap: 6px; }
+  .tally-row { display: flex; justify-content: space-between; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+  .tally-row .b { color: #8db4f5; } .tally-row .r { color: #f08a7e; }
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(0, 0, 0, 0.45); }
+  .bar i { display: block; height: 100%; transition: width 0.25s ease; }
+  #barBlue { background: var(--blue); } #barRed { background: var(--red); }
+  .map-name { color: var(--muted); font-size: 12px; font-weight: 500; }
+
+  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .btn { font: 600 13px/1 var(--ui); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 13px; min-height: 40px; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    transition: background 0.15s, border-color 0.15s, transform 0.08s; white-space: nowrap; }
+  .btn:hover { background: var(--panel-hi); border-color: var(--line-hi); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible, .card:focus-visible, .team:focus-visible, .fight:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .btn[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.2); color: #f6d792; }
+
+  .dock { display: flex; gap: 8px; align-items: stretch; min-width: 0; flex: 1 1 auto; }
+  .teams { display: grid; gap: 6px; padding: 6px; }
+  .team { display: flex; align-items: center; gap: 8px; font: 700 13px/1 var(--ui); color: var(--text); padding: 8px 12px; min-height: 36px;
+    border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+  .team::before { content: ''; width: 12px; height: 14px; clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); background: var(--c); }
+  .team[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 30%, transparent); border-color: var(--c); }
+  #team-0 { --c: var(--blue); } #team-1 { --c: var(--red); }
+
+  #cards { display: flex; gap: 6px; padding: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  #cards::-webkit-scrollbar { display: none; }
+  .card { position: relative; display: grid; gap: 2px; text-align: left; min-width: 118px; padding: 8px 10px 8px; border-radius: 8px; cursor: pointer;
+    color: var(--text); background: rgba(255, 255, 255, 0.03); border: 1px solid transparent; font: 500 12px/1.25 var(--ui); }
+  .card b { font-size: 14px; font-weight: 700; }
+  .card small { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .card .note { color: #cdbb8f; }
+  .card-key { position: absolute; top: 6px; right: 8px; font-size: 10px; color: var(--muted); }
+  .card:hover { background: rgba(255, 255, 255, 0.07); }
+  .card[aria-pressed="true"] { border-color: var(--brass); background: rgba(215, 163, 63, 0.16); }
+  .eraser-wrap { display: flex; align-items: center; padding: 6px; }
+
+  .fight { font: 400 22px/1 var(--display); letter-spacing: 0.04em; color: var(--brass-ink); background: linear-gradient(#f0c565, var(--brass));
+    border: 1px solid #f7da98; border-radius: 12px; padding: 0 26px; min-height: 64px; cursor: pointer; flex: none;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 -3px 0 rgba(0, 0, 0, 0.18); }
+  .fight:hover { filter: brightness(1.06); }
+  .fight:disabled { filter: grayscale(1) brightness(0.7); cursor: not-allowed; }
+
+  #hint { position: fixed; left: var(--gutter); right: var(--gutter); bottom: calc(env(safe-area-inset-bottom, 0px) + 104px); text-align: center; color: var(--text);
+    font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); pointer-events: none; z-index: 1; }
+  body:has(#setupBar[hidden]) #hint { display: none; }
+  #toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--gutter));
+    padding: 10px 16px; border-radius: 10px; background: var(--panel-hi); border: 1px solid var(--line); z-index: 3; text-align: center; pointer-events: none; }
+
+  #result { position: fixed; inset: 0; display: grid; place-items: center; padding-inline: var(--gutter); z-index: 4; pointer-events: none; }
+  .result-card { pointer-events: auto; width: min(520px, 100%); padding: 26px 24px 22px; text-align: center; display: grid; gap: 14px; background: rgba(12, 15, 20, 0.88); }
+  #resultTitle { margin: 0; font: 400 clamp(28px, 6vw, 44px)/1.05 var(--display); text-wrap: balance; letter-spacing: 0.02em; }
+  #resultTitle[data-team="0"] { color: #8db4f5; } #resultTitle[data-team="1"] { color: #f08a7e; }
+  #resultText { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .result-card .row { justify-content: center; }
+  .btn.primary { background: linear-gradient(#f0c565, var(--brass)); color: var(--brass-ink); border-color: #f7da98; }
+
+  #loading { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding-inline: var(--gutter);
+    background: radial-gradient(ellipse at 50% 40%, #1d2530, var(--ink) 70%); }
+  .load-box { width: min(420px, 100%); display: grid; gap: 14px; text-align: center; }
+  .load-box h1 { margin: 0; font: 400 clamp(48px, 12vw, 84px)/1 var(--display); color: var(--brass); letter-spacing: 0.04em; }
+  .load-box p { margin: 0; color: var(--muted); }
+  .load-track { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+  #loadBar { height: 100%; width: 0; background: var(--brass); transition: width 0.2s; }
+  .credits { font-size: 11px; color: var(--muted); }
+  .credits a { color: #cdbb8f; }
+
+  .map-meta { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 500; }
+  .wind { display: inline-flex; align-items: center; gap: 4px; color: var(--text); }
+  #windArrow { display: inline-block; font-weight: 700; color: #9fd0ff; transition: transform 0.2s linear; }
+  #cmdInfo { color: #cdbb8f; }
+
+  #labels { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+  .olabel { position: absolute; left: 0; top: 0; padding: 3px 8px; border-radius: 6px; font: 600 12px/1.2 var(--ui); white-space: nowrap;
+    color: var(--text); background: rgba(16, 20, 26, 0.78); border: 1px solid var(--line); will-change: transform; }
+  .olabel.team0 { border-color: rgba(74, 134, 234, 0.8); } .olabel.team1 { border-color: rgba(222, 79, 65, 0.8); }
+  .olabel.cmd { font-size: 13px; color: #f6d792; border-color: var(--brass); }
+
+  #chronicle { position: fixed; left: var(--gutter); bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); z-index: 2; margin: 0;
+    width: min(440px, calc(100vw - 2 * var(--gutter))); padding: 8px 10px; list-style: none; display: grid; gap: 4px; pointer-events: none; }
+  #chronicle li { display: grid; grid-template-columns: 34px 1fr; gap: 6px; font-size: 12px; line-height: 1.3; color: var(--text);
+    padding-left: 8px; border-left: 3px solid var(--muted); animation: logIn 0.3s ease; }
+  #chronicle li[data-team="0"] { border-left-color: var(--blue); } #chronicle li[data-team="1"] { border-left-color: var(--red); }
+  #chronicle li:not(:first-child) { opacity: 0.72; }
+  #chronicle time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  @keyframes logIn { from { transform: translateY(4px); } to { transform: none; } }
+
+  #helpBox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; padding-inline: var(--gutter); background: rgba(8, 10, 14, 0.55); overflow-y: auto; }
+  .help-card { width: min(980px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 22px 24px 18px; display: grid; gap: 14px; background: rgba(14, 17, 22, 0.95); margin-block: 16px; }
+  #helpTitle { margin: 0; font: 400 clamp(24px, 4vw, 34px)/1.1 var(--display); color: var(--brass); letter-spacing: 0.02em; }
+  .help-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .help-cols h3 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: #cdbb8f; }
+  .help-cols ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--text); font-size: 13px; line-height: 1.45; max-width: 62ch; }
+  .help-cols b { color: #f6d792; }
+  .help-card .row { justify-content: flex-end; }
+
+  @media (max-width: 760px) {
+    .hud-bottom { flex-wrap: wrap; }
+    .dock { flex-basis: 100%; }
+    .fight { flex: 1 1 100%; min-height: 52px; }
+    #hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 176px); }
+  }
+  @media (max-height: 460px) {
+    .card .note, .map-name { display: none; }
+    .card { min-width: 104px; padding: 6px 8px; }
+    .fight { min-height: 52px; font-size: 19px; padding: 0 18px; }
+    .btn { min-height: 34px; padding: 8px 10px; }
+    #hint { bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
+    #toast { top: calc(env(safe-area-inset-top, 0px) + 70px); }
+    #chronicle { width: min(360px, calc(100vw - 2 * var(--gutter))); bottom: calc(env(safe-area-inset-bottom, 0px) + 56px); }
+    #chronicle li { font-size: 11px; }
+    #cmdInfo, .map-meta #sunText { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<canvas id="c" tabindex="0" aria-label="Поле боя"></canvas>
+
+<header class="hud hud-top">
+  <div class="panel tally">
+    <div class="tally-row"><span class="b">Синие <span id="nBlue">0</span></span><span class="r"><span id="nRed">0</span> Красные</span></div>
+    <div class="bar"><i id="barBlue"></i><i id="barRed"></i></div>
+    <div class="map-name" id="mapName">Готовим поле…</div>
+    <div class="map-meta"><span class="wind"><span id="windArrow" aria-hidden="true">↑</span> <span id="windText">Безветрие</span></span><span id="sunText" hidden>· низкое солнце слепит стрелков</span></div>
+    <div class="map-name" id="cmdInfo"></div>
+  </div>
+  <div class="row" id="setupTop">
+    <button class="btn" id="newMap">Новая карта</button>
+    <button class="btn" id="random">Случайные армии</button>
+    <button class="btn" id="clear">Очистить</button>
+    <button class="btn" id="cmdToggle">Полководцы: есть</button>
+    <button class="btn" id="helpBtn">Как устроен бой</button>
+  </div>
+  <div class="row" id="fightTop" hidden>
+    <button class="btn" id="pause">Пауза</button>
+    <button class="btn" id="slow">×0,25</button>
+    <button class="btn" id="normal">×1</button>
+    <button class="btn" id="fast">×2</button>
+    <button class="btn" id="orbit">Облёт</button>
+    <button class="btn" id="helpBtn2" aria-label="Как устроен бой">?</button>
+  </div>
+</header>
+
+<div id="labels" aria-hidden="true"></div>
+<ol id="chronicle" class="panel" hidden aria-live="polite"></ol>
+<div id="hint"></div>
+<div id="toast" hidden></div>
+
+<footer class="hud hud-bottom" id="setupBar">
+  <div class="dock">
+    <div class="panel teams">
+      <button class="team" id="team-0">Синие</button>
+      <button class="team" id="team-1">Красные</button>
+    </div>
+    <div class="panel" style="display:flex;min-width:0">
+      <div id="cards"></div>
+      <div class="eraser-wrap"><button class="btn" id="eraser">Ластик</button></div>
+    </div>
+  </div>
+  <button class="fight" id="fight">В бой!</button>
+</footer>
+
+<footer class="hud hud-bottom" id="fightBar" hidden>
+  <button class="btn" id="stop">■ К расстановке</button>
+</footer>
+
+<div id="result" hidden>
+  <div class="panel result-card">
+    <h2 id="resultTitle">Победа</h2>
+    <p id="resultText"></p>
+    <div class="row">
+      <button class="btn primary" id="rematch">Реванш</button>
+      <button class="btn" id="edit">Изменить армии</button>
+      <button class="btn" id="resultMap">Новая карта</button>
+    </div>
+  </div>
+</div>
+
+<div id="helpBox" hidden>
+  <div class="panel help-card" role="dialog" aria-labelledby="helpTitle">
+    <h2 id="helpTitle">Как устроен бой</h2>
+    <div class="help-cols">
+      <section>
+        <h3>Рельеф решает</h3>
+        <ul>
+          <li><b>Высота.</b> В гору идут медленнее, натиск конницы на склоне гаснет. Удар сверху сильнее до 35%, снизу слабее до 30%. Арбалетчики на холме бьют дальше.</li>
+          <li><b>Укрытия.</b> Болт — настоящий снаряд: он врезается в склон или каменную ограду. Без прямой видимости стрелок не стреляет.</li>
+          <li><b>Ограды и проёмы.</b> Через ограду лезут втрое медленнее, через проём проходят свободно.</li>
+          <li><b>Низины.</b> Отряд в овраге издали не виден, пока не выстрелит или враг не подойдёт ближе 20 м. Кольцо под ним темнеет.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Полководцы думают</h3>
+        <ul>
+          <li>У каждой армии свой полководец на белом коне со знаменем: осторожный, яростный или хитрый.</li>
+          <li>Раз в 3–4 секунды он оценивает силы и рельеф и отдаёт приказы: занять высоту, уйти в укрытие, устроить засаду, обойти с фланга, ударить конницей по стрелкам, прикрыть стрелков, отойти и разогнаться снова.</li>
+          <li>Все решения видны в летописи боя слева внизу и подписями над отрядами.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Чего нет в других играх</h3>
+        <ul>
+          <li><b>Гонцы.</b> Приказ дальнему отряду везёт всадник. Перехватите его, и приказ не дойдёт. Убейте полководца, и армия останется без управления.</li>
+          <li><b>Солнце и ветер.</b> На закате и рассвете низкое солнце слепит стрелков, которые смотрят на него. Ветер сносит болты и меняет дальность: попутный добавляет, встречный отнимает.</li>
+          <li><b>Засады.</b> Первый удар из укрытия сильнее в 1,6 раза. Удар в спину сильнее в 1,35 раза, щит от него не спасает.</li>
+          <li><b>Боевой дух.</b> Потери, болты и удары в спину его подтачивают. Сломленный отряд бежит, а рядом со знаменем полководца приходит в себя.</li>
+        </ul>
+      </section>
+    </div>
+    <div class="row"><button class="btn primary" id="helpClose">Понятно</button></div>
+  </div>
+</div>
+
+<div id="loading">
+  <div class="load-box">
+    <h1>Сеча</h1>
+    <p id="loadText">Собираем войска и рисуем карту…</p>
+    <div class="load-track"><div id="loadBar"></div></div>
+    <p class="credits">Модели: <a href="https://kaylousberg.com" target="_blank" rel="noopener">KayKit</a> и <a href="https://quaternius.com" target="_blank" rel="noopener">Quaternius</a> (CC0)</p>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+/*__GAME__*/
+</script>
