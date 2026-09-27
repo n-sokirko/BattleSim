@@ -106,9 +106,9 @@ class Unit {
     this.atkT = -1; this.atkDur = 0.6; this.shot = false; this.hitDone = false; this.aiming = false; this.atkNew = false; this.engaged = false;
     this.chargeT = 0; this.deadT = 0; this.phase = Math.random() * 6; this.deathShown = false; this.curSpeed = 0;
     this.losT = -9; this.losTarget = null; this.losOk = false; this.carry = null; this.gone = false; this.squad = null;
-    this.scale = this.t.special === 'commander' ? 1.12 : 0.95 + Math.random() * 0.1;
+    this.scale = this.t.special === 'commander' ? 1.12 : this.t.special === 'captain' ? 1.06 : 0.95 + Math.random() * 0.1;
     if (this.t.mount) {
-      this.horse = this.t.special === 'commander' ? 1 : this.t.special === 'messenger' ? 0 : this.variant % 2;
+      this.horse = this.t.special === 'commander' ? 1 : this.t.special ? 0 : this.variant % 2;
       const hd = ASSETS.horses[this.horse];
       this.riderBase = new THREE.Vector3(hd.saddle.x, hd.saddle.y - ASSETS.riderHipsY, hd.saddle.z);
       this.anim = animState('Idle');
@@ -139,6 +139,8 @@ class Battle {
     this.push = new Float32Array(2048);
     this.time = 0; this.squadSeq = 0;
     this.commanders = [null, null];
+    this.captains = [[], []];
+    this.wings = [[], []];
     this.couriers = [null, null];
     this.log = []; this.onLog = null; this.glareLogged = [false, false];
     this.bolts = new Bolts(this);
@@ -203,6 +205,7 @@ class Battle {
   clearUnits() {
     this.units = []; this.squads = [];
     this.commanders = [null, null]; this.couriers = [null, null];
+    this.captains = [[], []]; this.wings = [[], []];
     this.bolts.clear();
     this.fighting = false;
     this.time = 0; this.log = []; this.glareLogged = [false, false];
@@ -293,32 +296,67 @@ class Battle {
     for (let team = 0; team < 2; team++) this.spawnCommander(team);
   }
 
+  /**
+   * Главнокомандующий за центром армии. У большой армии (от 7 отрядов) — три крыла
+   * с воеводами и резерв из самых дальних отрядов при главнокомандующем.
+   */
   spawnCommander(team) {
-    const mine = this.units.filter((u) => u.team === team && u.alive && !u.t.special);
+    const mine = this.squads.filter((s) => s.team === team && !s.special && s.alive > 0);
     if (!mine.length) return;
-    const c = new THREE.Vector3();
-    for (const u of mine) c.add(u.pos);
-    c.divideScalar(mine.length);
-    const back = team === 0 ? -1 : 1;
-    const x = clamp(c.x, -FIELD + 4, FIELD - 4), z = clamp(c.z + back * 16, -FIELD + 4, FIELD - 4);
-    const plan = { type: T_CMD, team, x, z, yaw: team === 0 ? 0 : Math.PI, variant: 1 };
-    const u = new Unit(plan);
-    this.units.push(u);
-    const sq = new Squad('cmd' + team, T_CMD, team, plan.yaw);
-    sq.units.push(u); u.squad = sq; sq.size = 1;
-    sq.order = { kind: 'hold', mode: 'hold', x, z };
-    this.squads.push(sq);
-    this.couriers[team] = new Squad('msg' + team, T_MSG, team, plan.yaw);
-    const spec = this.commanderSpec(team);
-    this.commanders[team] = new Commander(this, team, u, spec.trait, spec.name);
-    this.addLog(team, `${spec.name}, ${TRAITS[spec.trait].name} полководец, ведёт ${team === 0 ? 'синих' : 'красных'}: ${TRAITS[spec.trait].note}`);
+    const spec = this.commanderSpec(team), back = team === 0 ? -1 : 1, yaw = team === 0 ? 0 : Math.PI;
+    const c = Commander.center(mine);
+    const leader = (type, x, z, key) => {
+      const p = clampField({ x, z }, 4);
+      const u = new Unit({ type, team, x: p.x, z: p.z, yaw, variant: type === T_CMD ? 1 : 0 });
+      this.units.push(u);
+      const sq = new Squad(key, type, team, yaw);
+      sq.units.push(u); u.squad = sq; sq.size = 1;
+      sq.order = { kind: 'hold', mode: 'hold', x: p.x, z: p.z };
+      this.squads.push(sq);
+      return u;
+    };
+    const role = mine.length >= 7 ? 'general' : 'solo';
+    const gen = new Commander(this, team, leader(T_CMD, c.x, c.z + back * 18, 'cmd' + team), spec.trait, spec.name, role);
+    this.commanders[team] = gen;
+    this.couriers[team] = new Squad('msg' + team, T_MSG, team, yaw);
+    const army = team === 0 ? 'синих' : 'красных';
+    if (role === 'solo') {
+      this.addLog(team, `${spec.name}, ${TRAITS[spec.trait].name} полководец, ведёт ${army}: ${TRAITS[spec.trait].note}`);
+      return;
+    }
+    // Резерв: самые дальние от врага отряды
+    let rest = mine.slice().sort((a, b) => b.center.z * back - a.center.z * back);
+    let reserve = [];
+    if (mine.length >= 12) {
+      reserve = rest.splice(0, Math.max(1, Math.round(mine.length * 0.15)));
+      for (const sq of reserve) { sq.reserve = true; sq.order = { kind: 'reserve', mode: 'hold', x: sq.center.x, z: sq.center.z, leash: 18 }; }
+    }
+    // Три крыла по ширине фронта. Синие смотрят на +z, их правое крыло — со стороны -x.
+    rest.sort((a, b) => a.center.x - b.center.x);
+    const n = rest.length, cuts = [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+    const keys = team === 0 ? ['right', 'center', 'left'] : ['left', 'center', 'right'];
+    const names = CMD_NAMES[team].filter((x) => x !== spec.name).sort(() => Math.random() - 0.5);
+    const traitKeys = Object.keys(TRAITS), desc = [];
+    for (let k = 0; k < 3; k++) {
+      const list = rest.slice(cuts[k], cuts[k + 1]);
+      if (!list.length) continue;
+      const w = { key: keys[k], squads: list, captain: null, mission: { kind: 'attack' }, pendingMission: null };
+      for (const sq of list) sq.wing = w;
+      const wc = Commander.center(list), trait = traitKeys[(Math.random() * traitKeys.length) | 0];
+      const cap = new Commander(this, team, leader(T_CAP, wc.x, wc.z + back * 11, 'cap' + team + keys[k]), trait, names[k], 'captain', w);
+      w.captain = cap;
+      this.captains[team].push(cap);
+      this.wings[team].push(w);
+      desc.push(`${WING_NAMES[w.key]} — ${cap.name} (${TRAITS[trait].name})`);
+    }
+    this.addLog(team, `${spec.name}, ${TRAITS[spec.trait].name} главнокомандующий, ведёт ${army}. Воеводы: ${desc.join('; ')}${reserve.length ? `. Резерв — ${reserve.length} отр.` : ''}`);
   }
 
-  spawnMessenger(cmd, sq, order) {
+  spawnMessenger(cmd, sq, order, extra = null) {
     const c = cmd.unit.pos, side = Math.random() < 0.5 ? -1.5 : 1.5;
     const plan = { type: T_MSG, team: cmd.team, x: clamp(c.x + side, -FIELD + 1, FIELD - 1), z: c.z, yaw: cmd.unit.yaw, variant: 0 };
     const u = new Unit(plan);
-    u.carry = { squad: sq, order, cmd, delivered: false };
+    u.carry = { squad: sq, order, cmd, delivered: false, ...(extra || {}) };
     u.squad = this.couriers[cmd.team];
     this.couriers[cmd.team].units.push(u);
     this.units.push(u);
@@ -363,6 +401,7 @@ class Battle {
       if ((this.foesT = (this.foesT || 0) - dt) <= 0) { this.foesT = 0.8; this.updateFoes(); }
       this.updateSquads(dt);
       for (const c of this.commanders) if (c) c.tick(dt);
+      for (const list of this.captains) for (const c of list) c.tick(dt);
       for (const u of this.units) if (u.alive) this.think(u, dt);
       for (const u of this.units) if (u.alive) this.integrate(u, dt);
       this.separate();
@@ -384,7 +423,8 @@ class Battle {
     for (const sq of this.squads) {
       if (sq.special || sq.alive === 0) continue;
       const o = sq.order, cmd = this.commanders[sq.team];
-      const cmdNear = cmd && cmd.unit.alive && d2d(cmd.unit.pos, sq.center) < 26;
+      const wcap = sq.wing && sq.wing.captain;
+      const cmdNear = (cmd && cmd.unit.alive && d2d(cmd.unit.pos, sq.center) < 26) || (wcap && wcap.unit.alive && d2d(wcap.unit.pos, sq.center) < 22);
       if (!sq.engaged && this.time - sq.lastHitT > 3) sq.morale += dt * (cmdNear ? 4 : 1.2);
       if (sq.alive < sq.size * 0.3) sq.morale = Math.min(sq.morale, 55);
       sq.morale = clamp(sq.morale, 0, 100);
@@ -432,7 +472,7 @@ class Battle {
     if (!u.target || !u.target.alive || u.retargetT <= 0) { u.retargetT = 0.45 + Math.random() * 0.45; u.target = this.pickTarget(u); }
     const tg = u.target;
     let dx = 0, dz = 0;
-    let wantSlot = o.mode === 'move' || o.mode === 'hold' || o.mode === 'ambush' || t.special === 'commander';
+    let wantSlot = o.mode === 'move' || o.mode === 'hold' || o.mode === 'ambush' || isLeader(u);
     if (tg) {
       const tx = tg.pos.x - u.pos.x, tz = tg.pos.z - u.pos.z, d = Math.hypot(tx, tz);
       const nx = d > 1e-4 ? tx / d : Math.sin(u.yaw), nz = d > 1e-4 ? tz / d : Math.cos(u.yaw);
@@ -460,13 +500,13 @@ class Battle {
     }
     if (wantSlot) {
       let gx, gz;
-      if (t.special === 'commander') { const c = this.commanders[u.team]; gx = c ? c.post.x : u.pos.x; gz = c ? c.post.z : u.pos.z; }
+      if (isLeader(u)) { const c = u.cmd; gx = c ? c.post.x : u.pos.x; gz = c ? c.post.z : u.pos.z; }
       else [gx, gz] = sq.slot(u);
       const sd0 = Math.hypot(gx - u.pos.x, gz - u.pos.z);
       if (sd0 > 4) [gx, gz] = this.navTarget(u, gx, gz);
       const sx = gx - u.pos.x, sz = gz - u.pos.z, sd = Math.hypot(sx, sz);
       if (sd0 > 0.7) {
-        const k = (sd0 > 5 ? 1 : 0.55) * (t.special === 'commander' ? 0.6 : 1);
+        const k = (sd0 > 5 ? 1 : 0.55) * (isLeader(u) ? 0.6 : 1);
         dx = sx / (sd || 1) * t.speed * k; dz = sz / (sd || 1) * t.speed * k;
       } else if (o.face != null && !u.aiming) u.face(Math.sin(o.face), Math.cos(o.face), dt, 3);
     }
@@ -528,7 +568,7 @@ class Battle {
 
   mayChase(u, tg) {
     const o = u.squad.order;
-    if (u.t.special === 'commander') return d2d(u.pos, tg.pos) < 7;
+    if (isLeader(u)) return d2d(u.pos, tg.pos) < 7;
     if (o.mode === 'advance' || o.mode === 'charge') return true;
     if (o.mode === 'hold' || o.mode === 'ambush') return d2d(o, tg.pos) < (o.leash ?? (u.t.mount ? 16 : 10));
     return false;
@@ -545,7 +585,7 @@ class Battle {
     const allowed = (e, d2) => {
       if (e.squad && e.squad.hidden && d2 > 196) return false; // в низине не видно
       if (e.t.special === 'messenger' && !ranged && d2 > 64) return false;
-      if (u.t.special === 'commander' && d2 > 64) return false;
+      if (isLeader(u) && d2 > 64) return false;
       if (o.mode === 'move' && d2 > 10) return false;
       if ((o.mode === 'hold' || o.mode === 'ambush') && !ranged) {
         const lx = e.pos.x - gx, lz = e.pos.z - gz;
@@ -657,7 +697,14 @@ class Battle {
   thinkMessenger(u, dt) {
     const c = u.carry;
     let gx = u.pos.x, gz = u.pos.z;
-    if (!c.delivered) {
+    if (!c.delivered && c.captain) {
+      const cap = c.captain;
+      if (!cap.unit.alive) { c.delivered = true; if (c.wing.pendingMission === c.mission) c.wing.pendingMission = null; }
+      else {
+        gx = cap.unit.pos.x; gz = cap.unit.pos.z;
+        if (d2d(cap.unit.pos, u.pos) < 6) { c.delivered = true; if (c.wing.pendingMission === c.mission) cap.receive(c.mission); }
+      }
+    } else if (!c.delivered) {
       const sq = c.squad;
       if (!sq || sq.alive === 0 || sq.order.mode === 'rout') { c.delivered = true; if (sq && sq.pending === c.order) sq.pending = null; }
       else {
@@ -753,14 +800,24 @@ class Battle {
     const sq = u.squad;
     if (u.t.special === 'messenger') {
       const c = u.carry;
-      if (c && !c.delivered) {
+      if (c && !c.delivered && c.captain) {
+        if (c.wing.pendingMission === c.mission) c.wing.pendingMission = null;
+        this.addLog(u.team, `Гонец к воеводе ${c.captain.name} перехвачен — приказ «${MISSION_TEXT[c.mission.kind]}» не дошёл`);
+      } else if (c && !c.delivered) {
         if (c.squad.pending === c.order) c.squad.pending = null;
         this.addLog(u.team, `Гонец к отряду «${c.squad.name}» перехвачен — приказ «${ORDER_TEXT[c.order.kind].toLowerCase()}» не дошёл`);
       }
+    } else if (u.t.special === 'captain') {
+      const cp = u.cmd, gen = this.commanders[u.team], wing = cap(WING_NAMES[cp.wing.key]);
+      for (const s of cp.wing.squads) s.morale -= 15;
+      this.addLog(u.team, gen && gen.unit.alive
+        ? `Воевода ${cp.name} пал! ${wing}: теперь приказы отдаёт ${gen.name}`
+        : `Воевода ${cp.name} пал! ${wing} осталось без начальства`);
     } else if (u.t.special === 'commander') {
       const cmd = this.commanders[u.team];
       for (const s of this.squads) if (s.team === u.team && !s.special) s.morale -= 25;
-      this.addLog(u.team, `${cmd ? cmd.name : 'Полководец'} пал! Армия осталась без приказов`);
+      const caps = this.captains[u.team].filter((c) => c.unit.alive).length;
+      this.addLog(u.team, `${cmd ? cmd.name : 'Полководец'} пал! ${caps ? 'Воеводы бьются дальше своим умом' : 'Армия осталась без приказов'}`);
     } else if (sq) sq.morale -= 6;
     animate(u);
   }

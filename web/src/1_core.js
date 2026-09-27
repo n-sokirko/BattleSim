@@ -127,10 +127,21 @@ const COMMANDER = { key: 'cmd', name: 'Полководец', model: 'Knight', m
 /** Гонец: везёт приказ от полководца к отряду. Его можно перехватить. */
 const MESSENGER = { key: 'msg', name: 'Гонец', model: 'Rogue_Hooded', mount: true, special: 'messenger', hp: 45, armor: 0, speed: 11, accel: 10,
   radius: 0.9, mass: 2.5, reach: 0.5, dmg: 0, cd: 99, atkTime: 0.5, arrowBlock: 0, vsCav: 1, charge: 1, keep: ['Rogue_Cape'], anim: { attack: [] } };
-const TYPES_ALL = [...TYPES, COMMANDER, MESSENGER];
-const T_CMD = 4, T_MSG = 5;
+/** Воевода: командует крылом армии (левым, центром или правым) и сам раздаёт приказы отрядам. */
+const CAPTAIN = { key: 'cap', name: 'Воевода', model: 'Knight', mount: true, special: 'captain', hp: 240, armor: 0.4, speed: 6.8, accel: 6,
+  radius: 1.05, mass: 3.5, reach: 0.9, dmg: 22, cd: 1.2, atkTime: 0.7, arrowBlock: 0.35, vsCav: 1, charge: 1, keep: ['1H_Sword', 'Badge_Shield', 'Knight_Helmet', 'Knight_Cape'],
+  anim: { attack: ['1H_Melee_Attack_Slice_Horizontal'] } };
+const TYPES_ALL = [...TYPES, COMMANDER, MESSENGER, CAPTAIN];
+const T_CMD = 4, T_MSG = 5, T_CAP = 6;
+const isLeader = (u) => u.t.special === 'commander' || u.t.special === 'captain';
 
-const CMD_NAMES = [['Ратибор', 'Ярополк', 'Мстислав', 'Добрыня', 'Святослав'], ['Всеслав', 'Изяслав', 'Горислав', 'Судислав', 'Братислав']];
+const WING_NAMES = { left: 'левое крыло', center: 'центр', right: 'правое крыло' };
+const MISSION_TEXT = {
+  attack: 'наступать', hold: 'держать позицию', flank: 'обойти врага с фланга',
+  support: 'идти на помощь соседям', reserve: 'стоять в резерве',
+};
+
+const CMD_NAMES = [['Ратибор', 'Ярополк', 'Мстислав', 'Добрыня', 'Святослав', 'Вышата', 'Путята', 'Любомир'], ['Всеслав', 'Изяслав', 'Горислав', 'Судислав', 'Братислав', 'Ставр', 'Радим', 'Твердислав']];
 const TRAITS = {
   cautious: { name: 'осторожный', think: 3.6, note: 'бережёт людей, держит высоты и укрытия' },
   fierce: { name: 'яростный', think: 2.6, note: 'рвётся в бой и давит числом' },
@@ -138,6 +149,6 @@ const TRAITS = {
 };
 const ORDER_TEXT = {
   advance: 'Вперёд', hold: 'Держать строй', high: 'Занять высоту', cover: 'В укрытие', ambush: 'Засада', flank: 'Обход с фланга',
-  charge: 'Натиск', screen: 'Прикрыть стрелков', withdraw: 'Отход', rally: 'Сбор у знамени', rout: 'Бегут!', reserve: 'В резерв',
+  charge: 'Натиск', screen: 'Прикрыть стрелков', withdraw: 'Отход', rally: 'Сбор у знамени', rout: 'Бегут!', reserve: 'В резерв', support: 'На помощь',
 };
 const SQUAD_NAME = ['мечники', 'варвары', 'арбалетчики', 'рыцари'];

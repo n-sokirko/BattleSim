@@ -232,6 +232,7 @@ async function loadAssets(onProgress) {
   // Полководец (рыцарь с двуручным мечом) и гонец (разбойник в плаще) — тоже всадники
   ASSETS.units[T_CMD] = TEAM.map((team) => prepareCharacter(G.Knight, 'Knight', COMMANDER.keep, team, 1.85));
   ASSETS.units[T_MSG] = TEAM.map((team) => prepareCharacter(G.Rogue_Hooded, 'Rogue_Hooded', MESSENGER.keep, team, 1.7));
+  ASSETS.units[T_CAP] = TEAM.map((team) => prepareCharacter(G.Knight, 'Knight', CAPTAIN.keep, team, 1.8));
   ASSETS.clips = { Knight: clipsFor(G.Knight), Barbarian: clipsFor(G.Barbarian), Rogue_Hooded: clipsFor(G.Rogue_Hooded) };
 
   // Анимации всадника: ноги сидят, руки рубят
@@ -294,7 +295,7 @@ async function loadAssets(onProgress) {
   ];
   ASSETS.crowd = {
     inf: [0, 1, 2].map((i) => new CrowdModel(ASSETS.units[i], infantryDefs(TYPES[i]), cap)),
-    rider: { 3: new CrowdModel(ASSETS.units[3], riderDefs, cap), [T_CMD]: new CrowdModel(ASSETS.units[T_CMD], riderDefs, 24), [T_MSG]: new CrowdModel(ASSETS.units[T_MSG], riderDefs, 96) },
+    rider: { 3: new CrowdModel(ASSETS.units[3], riderDefs, cap), [T_CMD]: new CrowdModel(ASSETS.units[T_CMD], riderDefs, 24), [T_MSG]: new CrowdModel(ASSETS.units[T_MSG], riderDefs, 96), [T_CAP]: new CrowdModel(ASSETS.units[T_CAP], riderDefs, 24) },
     horse: ASSETS.horses.map((h) => new CrowdModel([h.template], ['Idle', 'Walk', 'Gallop', 'Death'].map((n) => ({ name: n, clips: [h.clips[n]], loop: n !== 'Death' })), cap)),
   };
   ASSETS.crowdList = [...ASSETS.crowd.inf, ...Object.values(ASSETS.crowd.rider), ...ASSETS.crowd.horse];

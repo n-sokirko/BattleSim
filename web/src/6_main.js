@@ -301,11 +301,13 @@ function updateLabels() {
     for (const sq of battle.squads) {
       if (sq.alive === 0) continue;
       if (sq.special) {
-        const c = battle.commanders[sq.team];
-        if (!c || !c.unit.alive) continue;
-        const el = labelFor('c' + sq.team, 'cmd team' + sq.team);
-        placeLabel(el, c.unit.pos.x, c.unit.pos.y + 4.9, c.unit.pos.z, '★ ' + c.name, 1);
-        seen.add('c' + sq.team);
+        const lead = sq.units[0], c = lead && lead.cmd;
+        if (!c || !lead.alive) continue;
+        const key = 'lead' + sq.id, general = c.role !== 'captain';
+        const el = labelFor(key, (general ? 'cmd' : 'cap') + ' team' + sq.team);
+        const mission = !general && c.mission ? ' · ' + MISSION_TEXT[c.mission.kind] : '';
+        placeLabel(el, lead.pos.x, lead.pos.y + (general ? 4.9 : 4.4), lead.pos.z, general ? '★ ' + c.name : 'Воевода ' + c.name + mission, 1);
+        seen.add(key);
         continue;
       }
       let text = null, op = 1;
@@ -366,7 +368,7 @@ function renderCrowd(animDt) {
       _rm.multiplyMatrices(_m4, _off);
       rm.add(u.team, lod, _rm, rr, u.ride.prevRow, u.ride.blend);
       u.ride.lastRow = rr;
-      if (u.t.special === 'commander') u.bannerMatrix = (u.bannerMatrix || new THREE.Matrix4()).copy(_rm);
+      if (isLeader(u)) u.bannerMatrix = (u.bannerMatrix || new THREE.Matrix4()).copy(_rm);
     } else {
       const im = C.inf[u.type], r = im.row(u.anim);
       im.add(u.team, lod, _m4, r, u.anim.prevRow, u.anim.blend);
@@ -376,27 +378,35 @@ function renderCrowd(animDt) {
   for (const m of ASSETS.crowdList) m.end();
 }
 
-/** Знамёна полководцев едут за всадником и колышутся на ветру. */
-const banners = [null, null];
+/** Знамёна едут за всадником и колышутся на ветру: у главнокомандующего большое, у воевод — поменьше. */
+const banners = new Map();
 function updateBanners(time) {
-  for (let team = 0; team < 2; team++) {
-    const c = battle.commanders[team];
-    let b = banners[team];
-    if (!c || !c.unit.alive || !c.unit.bannerMatrix) { if (b) b.visible = false; continue; }
+  const leaders = [];
+  for (const c of battle.commanders) if (c) leaders.push(c);
+  for (const list of battle.captains) leaders.push(...list);
+  const seen = new Set();
+  for (const c of leaders) {
+    const u = c.unit;
+    if (!u.alive || !u.bannerMatrix) continue;
+    let b = banners.get(u);
     if (!b) {
-      b = banners[team] = new THREE.Group();
-      const flag = makeBanner(team);
+      b = new THREE.Group();
+      const flag = makeBanner(u.team);
       flag.position.set(-0.3, ASSETS.riderHipsY, -0.38);
+      if (c.role === 'captain') flag.scale.setScalar(0.72);
       b.add(flag);
       b.userData.flag = flag;
       b.matrixAutoUpdate = false;
       scene.add(b);
+      banners.set(u, b);
     }
+    seen.add(u);
     b.visible = true;
-    b.matrix.copy(c.unit.bannerMatrix);
+    b.matrix.copy(u.bannerMatrix);
     b.matrixWorldNeedsUpdate = true;
     waveBanner(b.userData.flag, time, world.wind.length());
   }
+  for (const [u, b] of banners) if (!seen.has(u)) { scene.remove(b); banners.delete(u); }
 }
 
 // ------------------------------------------------------------------ цикл
