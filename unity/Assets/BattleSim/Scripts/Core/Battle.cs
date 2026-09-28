@@ -296,13 +296,13 @@ namespace BattleSim.Core
             {
                 if (placedDef >= def + 2) break;
                 if (cl.High > town.L1 + 0.1f) continue;
-                if (Hold(Rng.Rand() < 0.5f ? 0 : 1, cl.Bx, cl.Bz + 3.5f, M.PI, 10, "держать подъём")) placedDef++;
+                if (Hold(Foot(1, Rng.Rand() < 0.5f ? 0 : 1), cl.Bx, cl.Bz + 3.5f, M.PI, 10, "держать подъём")) placedDef++;
             }
             var cas = town.Castle;
             if (cas != null)
             {
                 Hold(0, cas.GateX, cas.Z0 + 7, M.PI, 9, "держать ворота замка");
-                Hold(1, cas.Keep.x + (cas.Keep.x > cas.GateX ? -1 : 1) * (cas.KeepS / 2 + 6), cas.Z0 + 8, M.PI, 12, "оборонять двор замка");
+                Hold(Foot(1, 1), cas.Keep.x + (cas.Keep.x > cas.GateX ? -1 : 1) * (cas.KeepS / 2 + 6), cas.Z0 + 8, M.PI, 12, "оборонять двор замка");
             }
             for (int i = placedDef; i < def; i++) Put(Rng.Rand() < 0.55f ? 0 : 1, new V2((Rng.Rand() - 0.5f) * town.CX * 1.6f, -town.CZ * 0.3f), 60);
             int dx = Pick(xbow);
@@ -605,6 +605,7 @@ namespace BattleSim.Core
         void UpdateSquads(float dt)
         {
             UpdateRage(dt);
+            UpdateRaces(dt);
             foreach (var sq in Squads.ToList())
             {
                 if (sq.Special || sq.Alive == 0) continue;
@@ -620,8 +621,9 @@ namespace BattleSim.Core
 
                 bool roaring = Time < RoarUntil[sq.Team];
                 if (roaring) sq.Morale = MathF.Max(sq.Morale, 60);
-                if (o.Mode != Mode.Rout && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
+                if ((o.Mode != Mode.Rout || sq.Feigning) && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
                 {
+                    sq.Feigning = false;
                     ApplyOrder(sq, new Order(OrderKind.Rout, Mode.Rout));
                     sq.Pending = null;
                     AddLog(sq.Team, $"{Defs.Cap(sq.Name)} дрогнули и бегут!");
@@ -640,7 +642,7 @@ namespace BattleSim.Core
                         if (e.Team != sq.Team && !e.Special && e.Alive > 0 && D2d(e.Center, sq.Center) < 16) e.Morale -= 4;
                 }
                 // Бегущих рядом — добивать: конница бросается в погоню
-                if (sq.T.Mount && !sq.Engaged && o.Mode != Mode.Charge)
+                if (sq.T.Mount && !sq.T.Ranged && !sq.Engaged && o.Mode != Mode.Charge && o.Mode != Mode.Rout && sq.Morale > sq.T.RoutAt + 20)
                 {
                     Squad prey = null; float best = 45;
                     foreach (var e in Squads)
@@ -653,6 +655,7 @@ namespace BattleSim.Core
                 }
                 if (o.Mode == Mode.Rout)
                 {
+                    if (sq.Feigning) { if (Time > sq.FeignUntil) EndFeign(sq); continue; }
                     if (sq.Morale > 45)
                     {
                         V2 p = cmd != null && cmd.Unit.Alive ? cmd.Unit.P : new V2(sq.Center.x, (sq.Team == 0 ? -1 : 1) * (World.Field - 12));
@@ -736,6 +739,7 @@ namespace BattleSim.Core
                 engageR = t.Mount ? 14 : u.Row <= 0 ? 7 : u.Row == 1 ? 4.5f : sq.EngagedFor > 4 ? 5.5f : 3f;
             if (sq.Front != null && !u.IsLeader)
                 engageR = u.Row <= 0 ? t.Radius * 2 + t.Reach + 0.8f : 0; // строй держит линию: только выпад первой шеренги
+            if (t.Skirmish && Skirmish(u, tg, dt, out dx, out dz)) { wantSlot = false; tg = null; }
             if (tg != null)
             {
                 float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = M.Hypot(tx, tz);
@@ -1129,7 +1133,17 @@ namespace BattleSim.Core
         {
             var tg = u.Target;
             if (tg == null || !tg.Alive) return;
-            if (u.Shot) { Bolts.Fire(u, tg); return; }
+            if (u.Shot)
+            {
+                if (u.T.Magic)
+                { // порча: бьёт сразу, щит не спасает
+                    Emit(FxKind.Curse, new V3(tg.Pos.x, tg.Pos.y + 1.2f, tg.Pos.z), 0, 0, u.Team);
+                    Damage(tg, u.T.Dmg, 0, 0, false, u);
+                    if (tg.Squad != null && !tg.T.Fearless) tg.Squad.Morale -= 0.4f;
+                    return;
+                }
+                Bolts.Fire(u, tg); return;
+            }
             float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = M.Hypot(tx, tz);
             if (d > u.T.Radius + tg.T.Radius + u.T.Reach + 0.6f || MathF.Abs(tg.Pos.y - u.Pos.y) > 2) return; // промах: цель отошла
             float nx = d > 1e-4f ? tx / d : 0, nz = d > 1e-4f ? tz / d : 1;
@@ -1161,7 +1175,9 @@ namespace BattleSim.Core
                             Damage(e, dmg * 0.7f, ex / ed * ek, ez / ed * ek, false, u);
                         }
             }
+            if (tg.Squad != null && tg.Squad.ShieldWall && !rear && charge) dmg *= 0.5f; // натиск вязнет в стене щитов
             Damage(tg, dmg, nx * kb, nz * kb, false, u, rear);
+            if (u.T.Leech > 0) u.Hp = MathF.Min(u.T.Hp, u.Hp + dmg * u.T.Leech * (1 - tg.T.Armor));
         }
 
         /// <summary>Натиск рыцаря задевает и сбивает соседей цели.</summary>
@@ -1176,7 +1192,7 @@ namespace BattleSim.Core
                 float s = 2.5f / e.T.Mass, dd = MathF.Max(d, 0.1f);
                 Emit(FxKind.Charge, e.Pos, fx, fz, e.Team);
                 Damage(e, k.T.Dmg * 0.6f, (tx / dd + fx) * s, (tz / dd + fz) * s, false, k);
-                if (e.Squad != null) e.Squad.Morale -= 2;
+                if (e.Squad != null && !e.T.Fearless) e.Squad.Morale -= k.T.Terror ? 5 : 2;
             }
         }
 
@@ -1185,6 +1201,7 @@ namespace BattleSim.Core
             if (!t.Alive) return;
             amount *= 0.8f + Rng.Rand() * 0.4f;
             if (arrow && !rear) amount *= 1 - t.T.ArrowBlock;
+            if (arrow && !rear && t.Squad != null && t.Squad.ShieldWall) amount *= 0.3f; // стена щитов
             if (arrow && t.Pos.y > World.HeightAt(t.Pos.x, t.Pos.z) + 3) amount *= 0.55f; // за зубцами стены
             amount *= 1 - t.T.Armor;
             t.Hp -= amount;
@@ -1445,7 +1462,7 @@ namespace BattleSim.Core
             float vRel = (k.Vel.x - e.Vel.x) * nx + (k.Vel.z - e.Vel.z) * nz;
             if (vRel < 2.5f || e.DownT > 0 || Time - k.LastImpactT < 0.12f) return;
             float fx = MathF.Sin(e.Yaw), fz = MathF.Cos(e.Yaw);
-            bool braced = e.Settled && e.Squad != null && e.Squad.Order.Mode == Mode.Hold && -(fx * nx + fz * nz) > 0.7f;
+            bool braced = e.Squad != null && -(fx * nx + fz * nz) > 0.7f && (e.Squad.ShieldWall || e.Settled && e.Squad.Order.Mode == Mode.Hold);
             float brace = braced ? MathF.Min(4, 1 + 0.4f * Math.Max(0, (e.Squad?.Rows ?? 1) - 1 - e.Row)) : 1;
             float me = e.T.Mass * brace, mk = k.T.Mass;
             float J = mk * me / (mk + me) * vRel * 1.2f;
@@ -1597,7 +1614,15 @@ namespace BattleSim.Core
             }
             if (cheer) { u.Anim.Play(a.Cheer); return; }
             if (u.DownT > 0)
-            { // упал — лежит — встаёт
+            { // упал — лежит — встаёт (поднятый колдуном — встаёт из земли)
+                if (u.DownAnim == 3)
+                {
+                    bool own = ClipDur != null && ClipDur(u.Type, "Rise_Undead") > 0;
+                    u.Anim.Play(own ? "Rise_Undead" : "Lie_StandUp", once: true, restart: true, speed: own ? 1 : 1.2f);
+                    u.DownAnim = 4;
+                    return;
+                }
+                if (u.DownAnim == 4) return;
                 float up = ClipDur != null ? ClipDur(u.Type, "Lie_StandUp") : 0;
                 if (u.DownAnim == 0) { u.Anim.Play("Lie_Down", once: true, restart: true, speed: 1.6f); u.DownAnim = 1; }
                 else if (u.DownAnim == 1 && up > 0 && u.DownT < up / 1.4f) { u.Anim.Play("Lie_StandUp", once: true, restart: true, speed: 1.4f); u.DownAnim = 2; }
@@ -1610,6 +1635,12 @@ namespace BattleSim.Core
                 u.HitReact = 0;
                 float hd = ClipDur != null ? ClipDur(u.Type, hit) : 0;
                 if (hd > 0) { u.Anim.Play(hit, once: true, restart: true, speed: 1.3f); u.HitAnimT = hd / 1.3f; return; }
+            }
+            if (u.CastNew)
+            { // колдун поднимает мёртвых
+                u.CastNew = false;
+                float cd = ClipDur != null ? ClipDur(u.Type, "Spellcast_Raise") : 0;
+                if (cd > 0 && !u.AtkNew) { u.Anim.Play("Spellcast_Raise", once: true, restart: true); u.HitAnimT = cd; return; }
             }
             if (u.HitAnimT > 0 && !u.AtkNew) return; // реакция ещё идёт
             if (u.AtkNew)
@@ -1624,6 +1655,13 @@ namespace BattleSim.Core
             }
             if (u.AtkT >= 0) return; // удар ещё идёт
             if (u.T.Ranged && u.Aiming) { u.Anim.Play(u.Cooldown > 0.6f ? a.Reload : a.Aim); return; }
+            if (u.Squad != null && u.Squad.ShieldWall && !u.Engaged)
+            { // стена щитов: щит вперёд, шаг медленный
+                bool own = ClipDur != null && ClipDur(u.Type, "Shield_Wall_Idle") > 0;
+                if (speed > 0.3f) u.Anim.Play(own && ClipDur(u.Type, "Shield_Wall_Walk") > 0 ? "Shield_Wall_Walk" : "Walking_A", speed: M.Clamp(speed / 1.4f, 0.5f, 1.2f));
+                else u.Anim.Play(own ? "Shield_Wall_Idle" : "Blocking");
+                return;
+            }
             if (speed > 1.6f) u.Anim.Play(a.Run, speed: M.Clamp(speed / 3.4f, 0.6f, 1.5f));
             else if (speed > 0.3f) u.Anim.Play("Walking_A", speed: M.Clamp(speed / 1.4f, 0.6f, 1.4f));
             else u.Anim.Play(a.Idle);

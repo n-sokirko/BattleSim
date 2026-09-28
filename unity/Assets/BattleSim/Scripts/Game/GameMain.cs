@@ -102,7 +102,14 @@ namespace BattleSim
         IEnumerator Load()
         {
             yield return null;
-            yield return Lib.Load((p, text) => { LoadProgress = p; LoadText = text; });
+            // расы из командной строки (снимки) — до загрузки, чтобы грузить только нужные модели
+            string shotsArg = Arg("-shots");
+            for (int tm = 0; tm < 2 && shotsArg != null; tm++)
+            {
+                var rk = Arg("-race" + tm);
+                if (rk != null) foreach (var r in Defs.Races) if (r.Key == rk) Battle.Races[tm] = r;
+            }
+            yield return Lib.Load((p, text) => { LoadProgress = p; LoadText = text; }, Battle.Races);
             Battle.ClipDur = (type, name) => Lib.Inf.TryGetValue(type, out var cm) ? cm.Baked.Dur(name) : 0;
             overlays = new Overlays();
             fx = new Effects();
@@ -117,11 +124,6 @@ namespace BattleSim
                 if (Arg("-map") != null) MapSel = int.Parse(Arg("-map"));
                 if (Arg("-size") != null) ArmySize = int.Parse(Arg("-size"));
                 if (Arg("-seed") != null) Seed = int.Parse(Arg("-seed"));
-                for (int tm = 0; tm < 2; tm++)
-                {
-                    var rk = Arg("-race" + tm);
-                    if (rk != null) foreach (var r in Defs.Races) if (r.Key == rk) Battle.Races[tm] = r;
-                }
             }
             NewMap(Seed != 0 ? Seed : 0);
             Battle.RandomArmies(ArmySize);
@@ -260,6 +262,7 @@ namespace BattleSim
         {
             int i = System.Array.IndexOf(Defs.Races, Battle.Races[team]);
             Battle.Races[team] = Defs.Races[(i + 1) % Defs.Races.Length];
+            Lib.EnsureRace(Battle.Races[team]);
             MakeArmies();
             ShowToast($"{Defs.Teams[team].Name}: {Battle.Races[team].Name}");
         }

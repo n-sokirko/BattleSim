@@ -85,6 +85,15 @@ namespace BattleSim.Core
         public bool[] RowOk = new bool[0];
         /// <summary>Сдвиг от назначенной точки, чтобы не стоять на месте соседнего отряда.</summary>
         public V2 Offset;
+        /// <summary>Стена щитов: сомкнуты до WallUntil (ShieldT — когда последний раз смыкали, для летописи).</summary>
+        public bool ShieldWall;
+        public float WallUntil, ShieldT = -99;
+        /// <summary>Колдуны: отряд поднятых ими мертвецов (Raised) и когда колдовать снова; у поднятых — их хозяин (Master).</summary>
+        public Squad Raised, Master;
+        public float RaiseT = 3, RaiseLogT = -99;
+        /// <summary>Ложное отступление: бегут понарошку до FeignUntil, FeignT — когда затевали последний раз.</summary>
+        public bool Feigning;
+        public float FeignUntil, FeignT = -99;
 
         public Squad(string id, int type, int team, float yaw)
         {
@@ -163,6 +172,8 @@ namespace BattleSim.Core
         public float DriftSeed;
         /// <summary>Время боя, когда солдата последний раз ранили (для вспышки удара на экране).</summary>
         public float FlashT = -99;
+        /// <summary>Поднят колдуном из павших (рассыпается, если колдуны гибнут); CastNew — колдун начинает поднимать мёртвых (анимация).</summary>
+        public bool Risen, CastNew;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;
@@ -234,7 +245,7 @@ namespace BattleSim.Core
     }
 
     /// <summary>Что случилось в бою — для эффектов на экране (пыль, искры, брызги).</summary>
-    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar }
+    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar, Raise, Curse, Wall }
 
     public struct FxEvent
     {
@@ -291,7 +302,8 @@ namespace BattleSim.Core
                 B.GlareLogged[src.Team] = true;
                 B.AddLog(src.Team, "Низкое солнце бьёт арбалетчикам в глаза — болты уходят мимо");
             }
-            float spread = (0.3f + d * 0.03f) * (glare ? 2.4f : 1), ang = Rng.Rand() * M.PI * 2, rad = MathF.Sqrt(Rng.Rand()) * spread;
+            // на скаку метят хуже
+            float spread = (0.3f + d * 0.03f) * (glare ? 2.4f : 1) * (src.CurSpeed > 2 ? 1.5f : 1), ang = Rng.Rand() * M.PI * 2, rad = MathF.Sqrt(Rng.Rand()) * spread;
             var to = new V3(dst.Pos.x + dst.Vel.x * dur + MathF.Cos(ang) * rad + W.Wind.x * dur * 0.8f, 0,
                             dst.Pos.z + dst.Vel.z * dur + MathF.Sin(ang) * rad + W.Wind.z * dur * 0.8f);
             to.y = W.GroundAt(to.x, to.z) + 0.9f;

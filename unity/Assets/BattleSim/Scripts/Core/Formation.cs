@@ -70,6 +70,7 @@ namespace BattleSim.Core
                 float speed = sq.T.Speed * (sq.T.Mount ? 0.95f : 0.9f);
                 if (Time < sq.CryUntil) speed = 0;                 // кричат — стоят
                 else if (Time < sq.RushUntil) speed *= 1.35f;      // разбег после клича
+                if (sq.ShieldWall) speed *= 0.6f;                  // стена щитов идёт медленнее
                 // точка отряда ждёт своих; если строй долго не собирается (кто-то застрял) — идёт дальше потихоньку
                 sq.LagT = sq.Lag > 6 ? sq.LagT + dt : 0;
                 float lagK = M.Clamp(1.25f - sq.Lag / 6f, sq.LagT > 8 ? 0.3f : 0f, 1f);

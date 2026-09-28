@@ -109,26 +109,44 @@ namespace BattleSim
 
         string ImageOf(GltfDoc d, MeshData m) => m.Image >= 0 && m.Image < d.Images.Count ? d.Images[m.Image] : null;
 
-        /// <summary>Грузит всё по шагам (для полосы загрузки). progress — 0..1.</summary>
-        public IEnumerator Load(System.Action<float, string> progress)
+        readonly HashSet<string> loadedRaces = new HashSet<string>();
+
+        /// <summary>Шаги загрузки моделей одной расы: три вида пехоты, конница и вожди.</summary>
+        List<(string, System.Action)> RaceSteps(RaceDef rc)
         {
             var steps = new List<(string, System.Action)>();
-            foreach (var race in Defs.Races)
+            if (!loadedRaces.Add(rc.Key)) return steps;
+            for (int i = 0; i < 3; i++)
             {
-                var rc = race;
-                for (int i = 0; i < 3; i++)
-                {
-                    var t = rc.Units[i];
-                    steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => Inf[t.Id] = MakeInfantry(t)));
-                }
-                steps.Add((rc.Name + ": конница и вожди", () =>
-                {
-                    Rider[rc.Units[3].Id] = MakeRider(rc.Units[3], 1.75f);
-                    Rider[rc.Cmd.Id] = MakeRider(rc.Cmd, 1.85f);
-                    Rider[rc.Msg.Id] = MakeRider(rc.Msg, 1.7f);
-                    Rider[rc.Cap.Id] = MakeRider(rc.Cap, 1.8f);
-                }));
+                var t = rc.Units[i];
+                steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => Inf[t.Id] = MakeInfantry(t)));
             }
+            steps.Add((rc.Name + ": конница и вожди", () =>
+            {
+                Rider[rc.Units[3].Id] = MakeRider(rc.Units[3], 1.75f);
+                Rider[rc.Cmd.Id] = MakeRider(rc.Cmd, 1.85f);
+                Rider[rc.Msg.Id] = MakeRider(rc.Msg, 1.7f);
+                Rider[rc.Cap.Id] = MakeRider(rc.Cap, 1.8f);
+            }));
+            return steps;
+        }
+
+        /// <summary>
+        /// Модели расы — по требованию (при первом выборе расы): на телефоне все расы сразу — это лишние
+        /// секунды загрузки и десятки мегабайт запечённых анимаций в памяти.
+        /// </summary>
+        public bool EnsureRace(RaceDef rc)
+        {
+            var steps = RaceSteps(rc);
+            foreach (var s in steps) s.Item2();
+            return steps.Count > 0;
+        }
+
+        /// <summary>Грузит всё по шагам (для полосы загрузки). progress — 0..1. Расы — только нужные на старте.</summary>
+        public IEnumerator Load(System.Action<float, string> progress, IEnumerable<RaceDef> races)
+        {
+            var steps = new List<(string, System.Action)>();
+            foreach (var race in races) steps.AddRange(RaceSteps(race));
             steps.Add(("Кони", () => { for (int h = 0; h < 2; h++) MakeHorse(h); }));
             steps.Add(("Посадка всадника", () =>
             {
