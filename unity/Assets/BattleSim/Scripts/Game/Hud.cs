@@ -358,6 +358,14 @@ namespace BattleSim
                     text = general ? "★ " + c.Name : "Воевода " + c.Name + (c.Mission != null ? " · " + Defs.MissionText(c.Mission.Kind) : "");
                     p = lead.Pos; h = general ? 4.9f : 4.4f;
                 }
+                else if (sq.T.Hero && sq.Title != null)
+                { // богатырь — всегда подписан: крупный боец не должен казаться «выросшим» солдатом
+                    var hu = sq.Units.Count > 0 ? sq.Units[0] : null;
+                    if (hu == null || !hu.Alive) continue;
+                    text = sq.T.Name + " " + sq.Title + (hu.Duel != null ? " · поединок" : "");
+                    leader = true; general = true;
+                    p = hu.Pos; h = 2.2f * sq.T.Scale + 0.6f;
+                }
                 else
                 {
                     if (sq.LabelT > 0) { text = Defs.OrderText(sq.Order.Kind); op = Mathf.Min(1, sq.LabelT); }
