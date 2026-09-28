@@ -837,15 +837,19 @@ namespace BattleSim.Core
                 float l = M.Hypot(dx, dz), max = t.Speed * (Time < sq.RushUntil ? 1.4f : 1.08f);
                 if (l > max) { dx *= max / l; dz *= max / l; }
             }
-            YieldAhead(u, ref dx, ref dz);
+            YieldAhead(u, ref dx, ref dz, sd > 2.5f);
         }
 
+        /// <summary>Сколько солдату до его места в строю (для проверок «стоит, а место далеко»).</summary>
+        public float SlotGap(Unit u) { var s = FormSlot(u); return M.Hypot(s.x - u.Pos.x, s.z - u.Pos.z); }
+
         /// <summary>Не лезть в спину идущему впереди: притормаживаем, а не толкаемся.</summary>
-        void YieldAhead(Unit u, ref float dx, ref float dz)
+        void YieldAhead(Unit u, ref float dx, ref float dz, bool sidestep = true)
         {
             float l = M.Hypot(dx, dz);
             if (l < 0.3f) return;
-            float fx = dx / l, fz = dz / l, k = 1;
+            float fx = dx / l, fz = dz / l, k = 1, bov = 0;
+            Unit blk = null;
             CellOf(u.Pos.x, u.Pos.z, out int cx, out int cz);
             for (int z = Math.Max(cz - 1, 0); z <= Math.Min(cz + 1, gridDim - 1); z++)
                 for (int x = Math.Max(cx - 1, 0); x <= Math.Min(cx + 1, gridDim - 1); x++)
@@ -862,9 +866,20 @@ namespace BattleSim.Core
                         // тот, кто впереди, сам идёт туда же — держим дистанцию
                         float ov = o.Vel.x * fx + o.Vel.z * fz;
                         float free = M.Clamp((d - min) / (min * 0.7f), 0, 1);
-                        float mine = M.Clamp(ov / l, 0, 1);
-                        k = MathF.Min(k, MathF.Max(free, mine));
+                        float mine = M.Clamp(ov / l, 0, 1), kk = MathF.Max(free, mine);
+                        if (kk < k) { k = kk; blk = o; bov = ov; }
                     }
+            // упёрлись в стоящего из чужого отряда — не ждём вечно, а обходим его сбоку
+            // (в своём строю ждём: там впереди своя шеренга, её не обгоняют)
+            if (sidestep && blk != null && k < 0.4f && blk.Squad != u.Squad && bov < 0.3f * l)
+            {
+                float ox = blk.Pos.x - u.Pos.x, oz = blk.Pos.z - u.Pos.z;
+                float lat = ox * fz - oz * fx;
+                float sx = lat > 0 ? -fz : fz, sz = lat > 0 ? fx : -fx;
+                dx = (fx * 0.35f + sx * 0.94f) * l * 0.7f;
+                dz = (fz * 0.35f + sz * 0.94f) * l * 0.7f;
+                return;
+            }
             dx *= k; dz *= k;
         }
     }
