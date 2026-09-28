@@ -55,6 +55,8 @@ namespace BattleSim.Core
         public const float Water = 0f;
         /// <summary>Глубже этого вброд не пройти (вода по пояс): так размечена сетка путей, так же проверяется каждый шаг.</summary>
         public const float WadeMax = 0.9f;
+        /// <summary>Ступенька на край настила (въезд на мост, первая ступень лестницы) — шагом, без прыжка.</summary>
+        public const float DeckStep = 0.3f;
         public const int TreeKinds = 7, RockKinds = 5;
         public static readonly string[] TreeModels = { "tree_single_A", "tree_single_B", "trees_A_large", "trees_A_medium", "trees_B_large", "trees_B_medium", "trees_B_small" };
         public static readonly float[] TreeHeights = { 6.5f, 7f, 9f, 7.5f, 9f, 7.5f, 6f };
@@ -509,14 +511,50 @@ namespace BattleSim.Core
             var bestFord = new bool[n];
             PathMask = new float[n];
             float w = 6f, R0 = w / 2 + 3.5f;
+            var raw = new Dictionary<MountainPath, float[]>();
             foreach (var p in Mt.Paths)
             {
-                var pts = Spline.Catmull(p.Ctrl, 1);
+                var pts = p.Pts = Spline.Catmull(p.Ctrl, 1);
                 var prof = new float[pts.Count];
                 for (int i = 0; i < pts.Count; i++) prof[i] = HeightAt(pts[i].x, pts[i].z);
                 // к броду тропа спускается до самой воды: дно реки там — по колено
                 if (p.Ford) for (int i = 0; i < pts.Count; i++) prof[i] = MathF.Max(prof[i], -0.55f);
                 if (p.Ford) prof[prof.Length - 1] = -0.55f;
+                else
+                { // площадка перед мостом: у края ущелья рельеф уже опущен к реке — держим высоту террасы за ним, настил ляжет вровень
+                    int k0 = pts.Count - 1;
+                    while (k0 > 0 && M.PolyDist(pts[k0].x, pts[k0].z, Mt.GorgePts) < Mt.GorgeW / 2 + 4.5f) k0--;
+                    for (int i = k0 + 1; i < pts.Count; i++) prof[i] = prof[k0];
+                }
+                raw[p] = prof;
+            }
+            // мост не круче 1:4 — иначе концы площадок подрезаем и подсыпаем навстречу друг другу
+            foreach (var br in Mt.Bridges)
+            {
+                if (br.Paths.Count != 2) continue;
+                float[] fa = raw[br.Paths[0]], fb = raw[br.Paths[1]];
+                V2 ea = br.Paths[0].Pts[br.Paths[0].Pts.Count - 1], eb = br.Paths[1].Pts[br.Paths[1].Pts.Count - 1];
+                float ha = fa[fa.Length - 1], hb = fb[fb.Length - 1], lim = M.Hypot(eb.x - ea.x, eb.z - ea.z) * 0.25f, mid = (ha + hb) / 2;
+                if (MathF.Abs(ha - hb) <= lim) continue;
+                float na = mid + M.Sign(ha - hb) * lim / 2, nb = mid - M.Sign(ha - hb) * lim / 2;
+                for (int i = 0; i < fa.Length; i++) if (fa[i] == ha) fa[i] = na;
+                for (int i = 0; i < fb.Length; i++) if (fb[i] == hb) fb[i] = nb;
+            }
+            foreach (var p in Mt.Paths)
+            {
+                var pts = p.Pts;
+                var prof = raw[p];
+                // у моста тропа шире: отряд собирается перед настилом, не толкаясь на краю обрыва
+                var wide = new float[pts.Count];
+                if (!p.Ford)
+                {
+                    float acc = 0;
+                    for (int i = pts.Count - 1; i >= 0 && acc < 14; i--)
+                    {
+                        wide[i] = 1.5f * M.Smooth(14, 9, acc);
+                        if (i > 0) acc += M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+                    }
+                }
                 for (int it = 0; it < 4; it++)
                 {
                     for (int i = 1; i < pts.Count; i++) { float d = M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i - 1] - d, prof[i - 1] + d); }
@@ -529,17 +567,17 @@ namespace BattleSim.Core
                     for (int k = -3; k <= 3; k++) { int j = i + k; if (j >= 0 && j < prof.Length) { a += prof[j]; c++; } }
                     sm[i] = a / c;
                 }
-                p.Pts = pts; p.Prof = sm;
+                p.Prof = sm;
                 for (int i = 0; i < pts.Count; i++)
                 {
-                    float px = pts[i].x, pz = pts[i].z;
-                    int ix0 = Math.Max(0, M.Floor((px - R0 + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((px + R0 + Half) / Cell));
-                    int iz0 = Math.Max(0, M.Floor((pz - R0 + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((pz + R0 + Half) / Cell));
+                    float px = pts[i].x, pz = pts[i].z, r = R0 + wide[i];
+                    int ix0 = Math.Max(0, M.Floor((px - r + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((px + r + Half) / Cell));
+                    int iz0 = Math.Max(0, M.Floor((pz - r + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((pz + r + Half) / Cell));
                     for (int iz = iz0; iz <= iz1; iz++)
                         for (int ix = ix0; ix <= ix1; ix++)
                         {
                             int k = iz * V + ix;
-                            float d = M.Hypot(ix * Cell - Half - px, iz * Cell - Half - pz);
+                            float d = M.Hypot(ix * Cell - Half - px, iz * Cell - Half - pz) - wide[i];
                             if (d < best[k]) { best[k] = d; bestH[k] = sm[i]; bestFord[k] = p.Ford; }
                         }
                 }
@@ -586,6 +624,20 @@ namespace BattleSim.Core
                     HA = pa.Prof[pa.Prof.Length - 1] + 0.05f, HB = pb.Prof[pb.Prof.Length - 1] + 0.05f, Rel = false, Walk = true, Solid = false,
                 });
                 Bridges.Add(d);
+            }
+            // под настилом земля не выше него: иначе у бровки ущелья настил уходит под землю и выныривает ступенькой
+            foreach (var d in Bridges)
+            {
+                float r = d.Len / 2 + d.W;
+                int ix0 = Math.Max(0, M.Floor((d.X - r + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((d.X + r + Half) / Cell));
+                int iz0 = Math.Max(0, M.Floor((d.Z - r + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((d.Z + r + Half) / Cell));
+                for (int iz = iz0; iz <= iz1; iz++)
+                    for (int ix = ix0; ix <= ix1; ix++)
+                    {
+                        if (!Decks.Locate(d, ix * Cell - Half, iz * Cell - Half, out float t, out _)) continue;
+                        int k = iz * V + ix;
+                        H[k] = MathF.Min(H[k], Decks.HeightOf(d, t, 0) - 0.04f);
+                    }
             }
             // Сторожевые башни над переправами и стенки поперёк троп
             Watchtowers = new List<Watchtower>();

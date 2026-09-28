@@ -56,17 +56,21 @@ namespace BattleSim.Core
                 var b = new V2(bx + tilt, zc + rim);
                 var br = new MountainBridge { A = a, B = b };
                 m.Bridges.Add(br);
+                float bl = M.Hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / bl, uz = (b.z - a.z) / bl;
                 foreach (var (side, end) in new[] { (-1f, a), (1f, b) })
                 {
                     var start = new V2(M.Clamp(end.x + M.Lerp(-18, 18, R.F()), -F + 8, F - 8), side * F * 0.66f);
+                    // последние 12 м — прямо по оси моста: отряд входит на настил в лоб, а не вдоль обрыва
+                    var pre = new V2(end.x + side * ux * 12, end.z + side * uz * 12);
                     int n = 4 + (int)(R.Next() * 3);
                     var ctrl = new List<V2> { start };
                     for (int j = 1; j < n; j++)
                     {
                         float t = (float)j / n, zig = (j % 2 == 1 ? 1 : -1) * M.Lerp(9, 17, R.F()) * MathF.Sin(M.PI * t);
-                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, end.x, t) + zig, -F + 6, F - 6), M.Lerp(start.z, end.z, t)));
+                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, pre.x, t) + zig, -F + 6, F - 6), M.Lerp(start.z, pre.z, t)));
                     }
-                    ctrl.Add(new V2(end.x, end.z - side * 3));
+                    ctrl.Add(pre);
+                    ctrl.Add(new V2(end.x + side * ux * 5, end.z + side * uz * 5));
                     ctrl.Add(end);
                     var p = new MountainPath { Ctrl = ctrl, W = 6f, Side = side, Bridge = br };
                     m.Paths.Add(p);
@@ -87,13 +91,16 @@ namespace BattleSim.Core
                 foreach (float side in new[] { -1f, 1f })
                 {
                     var start = new V2(M.Clamp(fx + M.Lerp(-16, 16, R.F()), -F + 8, F - 8), side * F * 0.66f);
+                    // к воде — прямо поперёк ущелья: спуск в его стенку не косой
+                    var pre = new V2(fx, fzc + side * (m.GorgeW / 2 + 12));
                     int n = 3 + (int)(R.Next() * 3);
                     var ctrl = new List<V2> { start };
                     for (int j = 1; j < n; j++)
                     {
                         float t = (float)j / n, zig = (j % 2 == 1 ? 1 : -1) * M.Lerp(8, 15, R.F()) * MathF.Sin(M.PI * t);
-                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, fx, t) + zig, -F + 6, F - 6), M.Lerp(start.z, fzc, t)));
+                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, pre.x, t) + zig, -F + 6, F - 6), M.Lerp(start.z, pre.z, t)));
                     }
+                    ctrl.Add(pre);
                     ctrl.Add(new V2(fx, fzc + side * (m.GorgeW / 2 + 4)));
                     ctrl.Add(ford);
                     m.Paths.Add(new MountainPath { Ctrl = ctrl, W = 7f, Side = side, Ford = true });

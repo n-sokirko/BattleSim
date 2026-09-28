@@ -270,6 +270,11 @@ namespace BattleSim.Core
         /// и путь через него класть нельзя, иначе бойцы упираются в уступ, куда их ведёт поиск.
         /// </summary>
         readonly byte[] Sheer;
+        /// <summary>
+        /// Добавка к цене пути за крутизну склона в клетке: по крутому идти дольше и тяжелее, поэтому поиск выбирает
+        /// дорогу — серпантин, подъём-улицу, — а не прямую через щель в уступе, где отряд застревает давкой.
+        /// </summary>
+        readonly float[] SlopeCost;
 
         readonly Search main;
 
@@ -284,6 +289,7 @@ namespace BattleSim.Core
             Crowd = new float[n];
             Canopy = new byte[n];
             Sheer = new byte[n];
+            SlopeCost = new float[n];
             Build(w);
             main = new Search(n);
             Region = new[] { Label(0), Label(1) };
@@ -319,6 +325,18 @@ namespace BattleSim.Core
                     if (ob != null && (ob.Rect || ob.R > 1)) si = sc = 0;           // дом, колодец, башня
                     Speed[0][i] = si; Speed[1][i] = sc;
                     Conceal[i] = hide; Canopy[i] = canopy;
+                }
+            // крутизна склона в клетке (по земле; настил ровный) — к цене пути
+            for (int iz = 0; iz < D; iz++)
+                for (int ix = 0; ix < D; ix++)
+                {
+                    int i = iz * D + ix;
+                    if (Speed[0][i] == 0 && Speed[1][i] == 0) continue;
+                    var p = Center(i);
+                    if (w.OnDeck(p.x, p.z)) continue;
+                    float h = c * 0.5f;
+                    float gx = (w.HeightAt(p.x + h, p.z) - w.HeightAt(p.x - h, p.z)) / c, gz = (w.HeightAt(p.x, p.z + h) - w.HeightAt(p.x, p.z - h)) / c;
+                    SlopeCost[i] = MathF.Max(0, M.Hypot(gx, gz) - 0.35f) * 2.5f;
                 }
             // отвесы между центрами соседних клеток: профиль рельефа (с настилами) с шагом ~0,3 м, как правило шага бойца
             for (int iz = 0; iz < D; iz++)
@@ -451,7 +469,7 @@ namespace BattleSim.Core
             {
                 float x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, h = w.GroundAt(x, z);
                 bool deck = w.OnDeck(x, z);
-                if (MathF.Abs(h - prev) > step * 1.3f + (deck != prevDeck ? 0.2f : 0.02f)) return true;
+                if (MathF.Abs(h - prev) > (deck != prevDeck ? World.DeckStep + step * 0.5f : step * 1.3f + 0.02f)) return true;
                 prev = h; prevDeck = deck;
             }
             return false;
@@ -468,12 +486,15 @@ namespace BattleSim.Core
         public bool ConcealAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Conceal[i] == 1; }
         public bool CanopyAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Canopy[i] == 1; }
 
+        /// <summary>Прямая не только свободна, но и полога: напрямую по ней идти не хуже, чем по найденной дороге.</summary>
+        public const float Gentle = 0.75f;
+
         /// <summary>
-        /// Свободна ли прямая: обход всех клеток, через которые она проходит (DDA), переходы — только через стороны клеток.
+        /// Свободна ли прямая (maxSlope — и не круче этого по цене склона): обход всех клеток, через которые она проходит (DDA), переходы — только через стороны клеток.
         /// Раньше проверялись точки через полклетки, и прямая, чиркнувшая угол ограды, считалась свободной — по такому
         /// спрямлённому пути точка отряда упиралась в ограду навсегда.
         /// </summary>
-        public bool LineClear(float ax, float az, float bx, float bz, int cls)
+        public bool LineClear(float ax, float az, float bx, float bz, int cls, float maxSlope = float.PositiveInfinity)
         {
             var sp = Speed[cls];
             float fx = (ax + Half) / CellSize, fz = (az + Half) / CellSize, tx = (bx + Half) / CellSize, tz = (bz + Half) / CellSize;
@@ -499,7 +520,7 @@ namespace BattleSim.Core
                 }
                 if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
                 int i = z * Dim + x;
-                if (sp[i] == 0 || !Step(prev, i, false)) return false;
+                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope) return false;
                 prev = i;
             }
             return true;
@@ -641,7 +662,7 @@ namespace BattleSim.Core
                             int a = cz * D + nx, b2 = nz * D + cx;
                             if (sp[a] == 0 || sp[b2] == 0 || !Step(c, a, false) || !Step(c, b2, false)) continue;
                         }
-                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost) + MathF.Abs(S[ni] - S[c]) * 0.4f;
+                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni]) + MathF.Abs(S[ni] - S[c]) * 0.4f;
                         if (avoidR > 0)
                         {
                             float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;
@@ -668,7 +689,16 @@ namespace BattleSim.Core
             for (int i = 0; i < pts.Count - 1;)
             {
                 int j = Math.Min(pts.Count - 1, i + 24);
-                while (j > i + 1 && !LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, q.cls)) j--;
+                // спрямляем, не срезая по крутому то, что поиск обошёл по дороге (серпантин не превращается в прямую по склону)
+                float steep = 0;
+                for (int k = i; k <= j; k++) steep = MathF.Max(steep, SlopeCost[cells[k]]);
+                while (j > i + 1)
+                {
+                    if (LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, q.cls, MathF.Max(Gentle, steep))) break;
+                    j--;
+                    steep = 0;
+                    for (int k = i; k <= j; k++) steep = MathF.Max(steep, SlopeCost[cells[k]]);
+                }
                 output.Add(pts[j]);
                 i = j;
             }

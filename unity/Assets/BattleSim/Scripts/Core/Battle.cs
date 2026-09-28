@@ -80,6 +80,9 @@ namespace BattleSim.Core
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
             int id = ++squadSeq;
             var sq = new Squad(id.ToString(), type, team, yaw);
+            // бойца — только туда, откуда можно дойти до середины отряда (не на отрезанный уступ рядом с ней)
+            var nav = World.Nav; int cls = t.Mount ? 1 : 0, ci = nav.Idx(cx, cz);
+            int region = ci >= 0 && nav.Speed[cls][ci] > 0 ? nav.Region[cls][ci] : -1;
             for (int r = 0; r < t.Rows; r++)
                 for (int c = 0; c < t.Cols; c++)
                 {
@@ -88,6 +91,8 @@ namespace BattleSim.Core
                     float jx = ox + (Rng.Rand() - 0.5f) * 0.2f, jz = oz + (Rng.Rand() - 0.5f) * 0.2f;
                     float x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
                     if (!World.InField(x, z, 1) || !World.Walkable(x, z, t.Radius) || Occupied(x, z, t.Radius)) continue;
+                    int ui = nav.Idx(x, z);
+                    if (region >= 0 && ui >= 0 && nav.Region[cls][ui] != region) continue;
                     var plan = new UnitPlan { Type = type, Team = team, X = x, Z = z, Yaw = yaw, Variant = (int)(Rng.Rand() * 2), Squad = id, Ox = ox, Oz = oz };
                     Plan.Add(plan);
                     var u = new Unit(plan, World) { Squad = sq };
@@ -862,13 +867,14 @@ namespace BattleSim.Core
             {
                 u.NavT = Time + 0.7f + Rng.Rand() * 0.4f;
                 u.NavGX = gx; u.NavGZ = gz;
-                if (nav.LineClear(u.Pos.x, u.Pos.z, gx, gz, cls)) u.Path = null;
+                if (nav.LineClear(u.Pos.x, u.Pos.z, gx, gz, cls, NavGrid.Gentle)) u.Path = null;
                 else
                 {
                     var sq = u.Squad;
                     var pc = sq.PathCache;
                     List<V2> path;
-                    if (pc != null && pc.Cls == cls && M.Hypot(pc.Gx - gx, pc.Gz - gz) < 6 && Time - pc.T < 3 && D2d(sq.Center, u.Pos) < 12) path = pc.Path;
+                    if (pc != null && pc.Cls == cls && M.Hypot(pc.Gx - gx, pc.Gz - gz) < 6 && Time - pc.T < 3 && D2d(sq.Center, u.Pos) < 12
+                        && nav.LineClear(u.Pos.x, u.Pos.z, sq.Center.x, sq.Center.z, cls)) path = pc.Path;
                     else if (PathBudget <= 0 || PathWork <= 0)
                     {
                         u.NavT = Time + 0.2f;
@@ -878,7 +884,9 @@ namespace BattleSim.Core
                     {
                         // не больше нескольких поисков пути за шаг — иначе рывки при сотнях отрядов
                         PathBudget--;
-                        bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0;
+                        // общий путь от середины строя — только если до неё прямая свободна: не с другого витка серпантина
+                        bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0
+                            && nav.LineClear(u.Pos.x, u.Pos.z, sq.Center.x, sq.Center.z, cls);
                         float fx = fromCenter ? sq.Center.x : u.Pos.x, fz = fromCenter ? sq.Center.z : u.Pos.z;
                         path = nav.FindPath(fx, fz, gx, gz, cls, 0, 0, 0, 0, 8000, 1.35f, fromCenter ? sq.Center.y : u.Pos.y);
                         PathWork -= nav.LastExpanded;
@@ -887,13 +895,17 @@ namespace BattleSim.Core
                     u.Path = path;
                     u.PathI = 1;
                     if (path != null)
-                    { // начинаем с ближайшей точки пути
+                    { // начинаем с ближайшей точки пути, до которой прямая свободна: ближняя может быть над обрывом, на следующем витке.
+                      // Начало пути — тоже кандидат: поиск начинается с клетки на уровне бойца, а она бывает соседней
                         float best = float.PositiveInfinity;
-                        for (int i = 1; i < path.Count; i++)
+                        int pick = -1;
+                        for (int i = 0; i < path.Count; i++)
                         {
                             float d = M.Hypot(path[i].x - u.Pos.x, path[i].z - u.Pos.z);
-                            if (d < best) { best = d; u.PathI = i; }
+                            if (i == 0 && d < 1f) continue;
+                            if (d < best && nav.LineClear(u.Pos.x, u.Pos.z, path[i].x, path[i].z, cls)) { best = d; pick = i; }
                         }
+                        u.PathI = pick >= 0 ? pick : M.Hypot(path[0].x - u.Pos.x, path[0].z - u.Pos.z) >= 1f ? 0 : 1;
                     }
                 }
             }
@@ -1355,9 +1367,10 @@ namespace BattleSim.Core
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
             float dy = MathF.Abs(g - oy), d = M.Hypot(nx - ox, nz - oz);
             if (dy <= d * 1.3f + 0.005f) return true;
-            // ступенька круче уклона — только на краю настила (въезд на мост, начало лестницы). На склоне такой поблажки нет:
-            // толкотня дёргает бойца по 1–2 см несколько раз за шаг, и по 6 см за раз он сползал по отвесу ущелья
-            return dy <= d * 1.3f + 0.06f && World.OnDeck(ox, oz) != World.OnDeck(nx, nz);
+            // ступенька круче уклона — только на край настила (въезд на мост, начало лестницы), не выше DeckStep, как и в сетке
+            // путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз за шаг, и с поблажкой он
+            // сползал по отвесу ущелья
+            return dy <= World.DeckStep && World.OnDeck(ox, oz) != World.OnDeck(nx, nz);
         }
 
         // ---------------------------------------------------------------- соседи
