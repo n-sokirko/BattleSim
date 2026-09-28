@@ -24,12 +24,20 @@ namespace BattleSim
         {
             public readonly List<Matrix4x4[]> M = new List<Matrix4x4[]>();
             public readonly List<Vector4[]> A = new List<Vector4[]>();
+            public readonly List<Vector4[]> C = new List<Vector4[]>();
             public int Count;
         }
 
         readonly Bucket[,] buckets;
         readonly MaterialPropertyBlock mpb = new MaterialPropertyBlock();
         static readonly int AnimId = Shader.PropertyToID("_Anim");
+        static readonly int ColorId = Shader.PropertyToID("_InstColor");
+
+        /// <summary>
+        /// Цвет копии по умолчанию. В шейдере: rgb до 1 — множитель цвета, выше 1 — свечение поверх
+        /// освещения (вспышка удара); альфа меньше 1 — выцветание (бегущие).
+        /// </summary>
+        public static readonly Color White = new Color(1, 1, 1, 1);
 
         public CrowdModel(SkinnedModel model, IList<ClipDef> defs, Material[] mats)
         {
@@ -86,13 +94,16 @@ namespace BattleSim
             foreach (var b in buckets) b.Count = 0;
         }
 
-        public void Add(int team, int lod, Matrix4x4 m, int rowA, int rowB, float blend)
+        public void Add(int team, int lod, Matrix4x4 m, int rowA, int rowB, float blend) => Add(team, lod, m, rowA, rowB, blend, White);
+
+        public void Add(int team, int lod, Matrix4x4 m, int rowA, int rowB, float blend, Color color)
         {
             var b = buckets[Mathf.Min(team, Mats.Length - 1), lod];
             int bi = b.Count / Batch, i = b.Count % Batch;
-            if (bi >= b.M.Count) { b.M.Add(new Matrix4x4[Batch]); b.A.Add(new Vector4[Batch]); }
+            if (bi >= b.M.Count) { b.M.Add(new Matrix4x4[Batch]); b.A.Add(new Vector4[Batch]); b.C.Add(new Vector4[Batch]); }
             b.M[bi][i] = m;
             b.A[bi][i] = new Vector4(rowA, rowB, blend, 0);
+            b.C[bi][i] = new Vector4(color.r, color.g, color.b, color.a);
             b.Count++;
         }
 
@@ -109,6 +120,7 @@ namespace BattleSim
                         int n = Mathf.Min(Batch, b.Count - k * Batch);
                         mpb.Clear();
                         mpb.SetVectorArray(AnimId, b.A[k]);
+                        mpb.SetVectorArray(ColorId, b.C[k]);
                         Graphics.DrawMeshInstanced(Lod[l], 0, Mats[t], b.M[k], n, mpb,
                             sh ? ShadowCastingMode.On : ShadowCastingMode.Off, true, 0, null);
                     }

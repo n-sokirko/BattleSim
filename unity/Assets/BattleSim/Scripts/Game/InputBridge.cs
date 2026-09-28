@@ -16,7 +16,7 @@ namespace BattleSim
         public bool Began, Ended;
     }
 
-    public enum K { W, A, S, D, Q, E, R, F, Up, Down, Left, Right, Space, Escape, Tab, T, Enter, D1, D2, D3, D4 }
+    public enum K { W, A, S, D, Q, E, R, F, Up, Down, Left, Right, Space, Escape, Tab, T, Enter, D1, D2, D3, D4, N }
 
     /// <summary>
     /// Единый ввод для нового Input System и старого Input Manager —
@@ -141,6 +141,7 @@ namespace BattleSim
                 case K.D2: return Key.Digit2;
                 case K.D3: return Key.Digit3;
                 case K.D4: return Key.Digit4;
+                case K.N: return Key.N;
                 default: return Key.Tab;
             }
         }
@@ -169,6 +170,7 @@ namespace BattleSim
                 case K.D2: return KeyCode.Alpha2;
                 case K.D3: return KeyCode.Alpha3;
                 case K.D4: return KeyCode.Alpha4;
+                case K.N: return KeyCode.N;
                 default: return KeyCode.Tab;
             }
         }

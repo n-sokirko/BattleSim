@@ -138,6 +138,8 @@ namespace BattleSim.Core
         /// <summary>Реакция на удар для анимации: 1 — вздрогнул, 2 — принял удар на щит (показывается один раз).</summary>
         public int HitReact;
         public float HitAnimT;
+        /// <summary>Время боя, когда солдата последний раз ранили (для вспышки удара на экране).</summary>
+        public float FlashT = -99;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;

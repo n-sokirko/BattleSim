@@ -1080,6 +1080,7 @@ namespace BattleSim.Core
             if (arrow && t.Pos.y > World.HeightAt(t.Pos.x, t.Pos.z) + 3) amount *= 0.55f; // за зубцами стены
             amount *= 1 - t.T.Armor;
             t.Hp -= amount;
+            t.FlashT = Time;
             LastHitT = Time;
             t.Knock.x += kx; t.Knock.z += kz;
             var sq = t.Squad;
