@@ -19,6 +19,10 @@ namespace BattleSim
         public Action<Vector2> OnTap, OnHover;
         public Func<V3?> Focus;
         public bool Cinematic;
+        /// <summary>Камерой правит режиссёр боя: свой облёт выключен, любое движение камеры игроком возвращает ему управление.</summary>
+        public bool Directed;
+        /// <summary>Когда игрок последний раз трогал камеру (время без масштаба) — для возврата режиссёра после простоя.</summary>
+        public float InputT = -99;
 
         public float Yaw, Pitch = 34 * M.DEG, Dist = 85, GroundY;
         public V3 Target = new V3(0, 0, -48);
@@ -41,8 +45,31 @@ namespace BattleSim
         public void LookAt(float x, float z, float yaw, float pitch, float dist, bool instant)
         {
             gYaw = yaw; gPitch = pitch; gDist = dist; gTarget = new V3(x, 0, z);
-            if (instant) { Yaw = yaw; Pitch = pitch; Dist = dist; Target = gTarget; }
+            if (instant)
+            {
+                Yaw = yaw; Pitch = pitch; Dist = dist; Target = gTarget;
+                if (World != null) GroundY = World.GroundAt(x, z); // склейка: высота взгляда — сразу, без подтягивания
+            }
         }
+
+        /// <summary>Ставит камеру ровно сюда (плавность считает тот, кто ведёт камеру), высота взгляда подтягивается как обычно.</summary>
+        public void Drive(float x, float z, float yaw, float pitch, float dist)
+        {
+            gYaw = Yaw = yaw; gPitch = Pitch = pitch; gDist = Dist = dist;
+            gTarget = Target = new V3(x, 0, z);
+        }
+
+        /// <summary>Сразу переносит камеру в текущее положение — чтобы отсечение толпы в этом же кадре видело новый ракурс.</summary>
+        public void Apply()
+        {
+            if (World != null && cam != null) UpdateCamera(0);
+        }
+
+        /// <summary>Игрок двигает карту: облёт и режиссёр отдают ему камеру.</summary>
+        void Took() { Cinematic = false; InputT = Time.unscaledTime; }
+
+        /// <summary>Игрок крутит, наклоняет или приближает камеру: облёт это переживает, режиссёр — отдаёт управление.</summary>
+        void Touched() { InputT = Time.unscaledTime; if (Directed) Cinematic = false; }
 
         V3 RayO(Vector2 screen, out V3 dir)
         {
@@ -74,7 +101,7 @@ namespace BattleSim
             if (l > max) { dx *= max / l; dz *= max / l; }
             gTarget.x += dx; gTarget.z += dz;
             Target.x += dx; Target.z += dz;
-            Cinematic = false;
+            Took();
         }
 
         void LateUpdate()
@@ -101,13 +128,14 @@ namespace BattleSim
                 // вправо = (-cos, 0, sin) для камеры, смотрящей вдоль (sin, 0, cos)
                 gTarget.x += (fx * mz - fz * mx) * sp;
                 gTarget.z += (fz * mz + fx * mx) * sp;
-                Cinematic = false;
+                Took();
             }
+            if (InputBridge.Held(K.Q) || InputBridge.Held(K.E) || InputBridge.Held(K.R) || InputBridge.Held(K.F)) Touched();
             if (InputBridge.Held(K.Q)) gYaw += 1.6f * dt;
             if (InputBridge.Held(K.E)) gYaw -= 1.6f * dt;
             if (InputBridge.Held(K.R)) gPitch = M.Clamp(gPitch + 0.8f * dt, MinPitch, MaxPitch);
             if (InputBridge.Held(K.F)) gPitch = M.Clamp(gPitch - 0.8f * dt, MinPitch, MaxPitch);
-            if (!overUI && Mathf.Abs(InputBridge.Scroll) > 0.01f) gDist = M.Clamp(gDist * Mathf.Pow(1.16f, -InputBridge.Scroll), 6, 170);
+            if (!overUI && Mathf.Abs(InputBridge.Scroll) > 0.01f) { Touched(); gDist = M.Clamp(gDist * Mathf.Pow(1.16f, -InputBridge.Scroll), 6, 170); }
 
             // Вращение правой кнопкой
             if (InputBridge.MouseHeld(1) && !InputBridge.MouseDown(1))
@@ -115,7 +143,7 @@ namespace BattleSim
                 var d = mp - mouseLast;
                 gYaw -= d.x * 0.005f;
                 gPitch = M.Clamp(gPitch - d.y * 0.004f, MinPitch, MaxPitch);
-                if (d.sqrMagnitude > 0) Cinematic = false;
+                if (d.sqrMagnitude > 0) Took();
             }
             // Левая: клик = действие, перетаскивание = сдвиг карты. Средняя: сдвиг.
             if (InputBridge.MouseDown(0))
@@ -150,7 +178,7 @@ namespace BattleSim
             if (live.Count >= 2)
             {
                 multi = true;
-                Cinematic = false;
+                Took();
                 var (f0, p0) = live[0];
                 var (f1, p1) = live[1];
                 Vector2 a = f0.Last, b = f1.Last;
@@ -183,7 +211,7 @@ namespace BattleSim
 
         void UpdateCamera(float dt)
         {
-            if (Cinematic)
+            if (Cinematic && !Directed)
             {
                 gYaw += 0.12f * dt;
                 var focus = Focus?.Invoke();

@@ -1189,6 +1189,7 @@ namespace BattleSim.Core
             amount *= 1 - t.T.Armor;
             t.Hp -= amount;
             t.LastKnock = new V3(t.Knock.x + kx, 0, t.Knock.z + kz);
+            t.FlashT = Time;
             LastHitT = Time;
             t.Knock.x += kx; t.Knock.z += kz;
             var sq = t.Squad;

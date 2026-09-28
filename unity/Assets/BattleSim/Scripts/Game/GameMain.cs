@@ -24,6 +24,13 @@ namespace BattleSim
         public Camera Cam;
         public Style Style;
         public bool LowEnd;
+        /// <summary>Режиссёр боя: сам выбирает планы, когда включён автоматический режим камеры.</summary>
+        public Director Director;
+        /// <summary>Автоматическая камера — режиссёр (иначе — простой облёт).</summary>
+        public bool DirectorOn = true;
+        /// <summary>Замедление времени от режиссёра (1 — нет), множится на скорость боя.</summary>
+        public float SlowMo = 1;
+        bool directorWanted; // игрок включил режиссёра: вернуть ему камеру после простоя
 
         // выбор игрока
         public int Type, Team, MapSel = -1, ArmySize = 2;
@@ -87,6 +94,7 @@ namespace BattleSim
             Rig.IsOverUI = hud.IsOverUI;
             Battle = new Battle(World);
             Battle.OnLog += e => { Chronicle.Insert(0, e); if (Chronicle.Count > 12) Chronicle.RemoveAt(Chronicle.Count - 1); };
+            Director = new Director(this);
             Battle.Bolts.Cap = LowEnd ? 700 : 1600;
             StartCoroutine(Load());
         }
@@ -131,6 +139,8 @@ namespace BattleSim
         /// <summary>Автосъёмка для проверки: расстановка, начало боя, разгар, итог — и выход.</summary>
         IEnumerator AutoShots(string dir)
         {
+            // -director: снимки в бою делает режиссёр (что он сам выбрал), плюс промежуточные кадры
+            bool directed = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-director") >= 0;
             System.IO.Directory.CreateDirectory(dir);
             string tag = MapType.ToString().ToLowerInvariant();
             yield return new WaitForSeconds(2f);
@@ -144,15 +154,21 @@ namespace BattleSim
             StartBattle();
             Speed = 2;
             Perf.Clear();
-            foreach (int t in new[] { 8, 20, 35 })
+            if (directed) SetDirector(true);
+            foreach (int t in directed ? new[] { 8, 12, 16, 20, 24, 28, 35, 42, 50 } : new[] { 8, 20, 35 })
             {
                 while (BattleTime < t && Phase == Phase.Fight) yield return null;
-                var focus = Battle.Centroid();
-                if (focus.HasValue) Rig.LookAt(focus.Value.x, focus.Value.z - 30, 0.4f * t, (28 + t) * M.DEG, 60 + t, true);
-                yield return new WaitForSeconds(0.6f);
-                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{tag}_{t:00}s.png"));
-                yield return new WaitForSeconds(0.4f);
+                if (!directed)
+                {
+                    var focus = Battle.Centroid();
+                    if (focus.HasValue) Rig.LookAt(focus.Value.x, focus.Value.z - 30, 0.4f * t, (28 + t) * M.DEG, 60 + t, true);
+                    yield return new WaitForSeconds(0.6f);
+                }
+                string name = !directed || t == 20 || t == 35 ? $"{tag}_{t:00}s.png" : $"{tag}_dir{t:00}s.png";
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, name));
+                yield return new WaitForSeconds(directed ? 0.1f : 0.4f);
             }
+            if (directed) SetDirector(false);
             var c = Battle.Centroid();
             if (c.HasValue) Rig.LookAt(c.Value.x, c.Value.z, 2.2f, 22 * M.DEG, 22, true);
             yield return new WaitForSeconds(0.8f);
@@ -167,11 +183,18 @@ namespace BattleSim
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
                 $"perf: {Perf}\n" +
-                string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")));
+                string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")) +
+                (directed ? "\nрежиссёр:\n" + string.Join("\n", Director.History) : ""));
             Application.Quit();
         }
 
         public void ShowToast(string text, float sec = 2.6f) { Toast = text; ToastT = sec; }
+
+        /// <summary>Tab / кнопка «Режиссёр»: камера сама выбирает, что показать.</summary>
+        public void SetDirector(bool on) { Rig.Cinematic = on; DirectorOn = true; directorWanted = on; }
+
+        /// <summary>Кнопка «Облёт»: простой облёт над центром боя.</summary>
+        public void SetOrbit(bool on) { Rig.Cinematic = on; DirectorOn = false; directorWanted = false; }
 
         Effects fx;
 
@@ -264,6 +287,8 @@ namespace BattleSim
             ClearBanners();
             Chronicle.Clear();
             Battle.StartFight();
+            Director.Reset();
+            SlowMo = 1;
             Phase = Phase.Fight; Paused = false; Speed = 1; Winner = -1; BattleTime = 0; resultDelay = 0; Eraser = false;
             overlays.GhostCount = 0;
         }
@@ -325,7 +350,8 @@ namespace BattleSim
             if (!HelpOpen)
             {
                 if (InputBridge.Pressed(K.Space) && Phase == Phase.Fight) Paused = !Paused;
-                if (InputBridge.Pressed(K.Tab)) Rig.Cinematic = !Rig.Cinematic;
+                if (InputBridge.Pressed(K.Tab)) SetDirector(!Rig.Cinematic);
+                if (InputBridge.Pressed(K.N) && Phase == Phase.Fight) { SetDirector(true); Director.Next(); }
                 if (Phase == Phase.Setup)
                 {
                     if (InputBridge.Pressed(K.D1)) { Type = 0; Eraser = false; }
@@ -337,9 +363,13 @@ namespace BattleSim
                 }
             }
 
+            // игрок тронул камеру и 10 с её не трогает — режиссёр забирает её обратно
+            if (Phase == Phase.Fight && directorWanted && !Rig.Cinematic && Time.unscaledTime - Rig.InputT > 10) { Rig.Cinematic = true; DirectorOn = true; }
+
             // Расчёт боя — ровными шагами по 1/30 с (не зависит от частоты кадров);
-            // между шагами солдаты рисуются плавно (Alpha — доля пути до следующего шага)
-            float simDt = Phase == Phase.Setup || Paused ? 0 : dt * Speed;
+            // между шагами солдаты рисуются плавно (Alpha — доля пути до следующего шага).
+            // SlowMo — замедление от режиссёра в ударные мгновения (эффекты и анимации замедляются вместе с боем)
+            float simDt = Phase == Phase.Setup || Paused ? 0 : dt * Speed * SlowMo;
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (simDt <= 0) { Battle.Tick(0); simAcc = 0; Alpha = 1; }
             else
@@ -373,8 +403,14 @@ namespace BattleSim
                 }
             }
 
+            // Режиссёр читает события боя этого кадра и, если ему доверена камера, ставит её
+            // до отрисовки толпы — чтобы отсечение по видимости уже видело новый ракурс
+            Director.Update(dt, simDt);
+            Rig.Directed = Director.Driving;
+            SlowMo = Director.TimeScale;
+
             // Анимации и отрисовка толпы
-            float animDt = Phase == Phase.Setup ? dt : Paused ? 0 : dt * Speed;
+            float animDt = Phase == Phase.Setup ? dt : Paused ? 0 : dt * Speed * SlowMo;
             bool cheer = Phase == Phase.Result;
             foreach (var u in Battle.Units) if (u.Alive) Battle.Animate(u, cheer && u.Team == Winner);
             RenderCrowd(animDt);
@@ -403,6 +439,8 @@ namespace BattleSim
             GeometryUtility.CalculateFrustumPlanes(Cam, frustum);
             var cp = Cam.transform.position;
             float lod = LowEnd ? LodDistLow : LodDistHigh, lod2 = lod * lod;
+            // вспышка удара — ~0,12 с на экране при любой скорости боя (в замедлении — дольше)
+            float now = Battle.Time, flash = FlashDur * Mathf.Max(1, Speed);
             bannerM.Clear();
             foreach (var u in Battle.Units)
             {
@@ -414,11 +452,12 @@ namespace BattleSim
                 int l = dd < lod2 ? 0 : dd < lod2 * 6.25f ? 1 : 2;
                 float sink = u.Alive ? 0 : Mathf.Max(0, u.DeadT - 18) * 0.25f;
                 var m = Matrix4x4.TRS(new Vector3(p.x, p.y - sink, p.z), Conv.Yaw(u.RenderYaw(Alpha)), Vector3.one * u.Scale);
+                var col = UnitColor(u, now, flash);
                 if (u.T.Mount)
                 {
                     var hm = Lib.Horse[u.Horse];
                     int hr = hm.Row(u.Anim);
-                    hm.Add(0, l, m, hr, u.Anim.PrevRow, u.Anim.Blend);
+                    hm.Add(0, l, m, hr, u.Anim.PrevRow, u.Anim.Blend, col);
                     u.Anim.LastRow = hr;
                     if (!Lib.Rider.TryGetValue(u.Type, out var rm)) continue;
                     int rr = rm.Row(u.Ride);
@@ -431,7 +470,7 @@ namespace BattleSim
                     }
                     else off = new Vector3(1.2f, 0, 0.3f); // всадник падает рядом с конём
                     var riderM = m * Matrix4x4.Translate(off);
-                    rm.Add(u.Team, l, riderM, rr, u.Ride.PrevRow, u.Ride.Blend);
+                    rm.Add(u.Team, l, riderM, rr, u.Ride.PrevRow, u.Ride.Blend, col);
                     u.Ride.LastRow = rr;
                     if (u.IsLeader && u.Alive) bannerM[u] = riderM;
                 }
@@ -439,7 +478,7 @@ namespace BattleSim
                 {
                     if (!Lib.Inf.TryGetValue(u.Type, out var im)) continue;
                     int r = im.Row(u.Anim);
-                    im.Add(u.Team, l, m, r, u.Anim.PrevRow, u.Anim.Blend);
+                    im.Add(u.Team, l, m, r, u.Anim.PrevRow, u.Anim.Blend, col);
                     u.Anim.LastRow = r;
                 }
             }
@@ -447,6 +486,24 @@ namespace BattleSim
             foreach (var m in Lib.Inf.Values) m.End(shadows);
             foreach (var m in Lib.Rider.Values) m.End(shadows);
             foreach (var m in Lib.Horse) m.End(shadows);
+        }
+
+        const float FlashDur = 0.12f;
+
+        /// <summary>Цвет копии солдата: белая вспышка при ударе (свечение поверх света), бегущие — бледные, выцветшие.</summary>
+        static Color UnitColor(Unit u, float now, float flash)
+        {
+            var c = CrowdModel.White;
+            float since = now - u.FlashT;
+            if (since >= 0 && since < flash)
+            {
+                float f = 1 - since / flash;
+                c = new Color(1 + 0.75f * f, 1 + 0.7f * f, 1 + 0.6f * f, 1);
+            }
+            var sq = u.Squad;
+            if (u.Alive && sq != null && !sq.Special && sq.Order.Mode == Mode.Rout)
+                c.a = 1 - 0.6f * Mathf.Clamp01((now - sq.OrderT) / 0.8f);
+            return c;
         }
 
         /// <summary>Знамёна едут за всадником: у главнокомандующего большое, у воевод поменьше.</summary>

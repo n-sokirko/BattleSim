@@ -14,7 +14,7 @@ namespace BattleSim
         float s = 1f;
         Rect safe;
         Texture2D round, white;
-        GUIStyle btn, btnOn, big, label, small, title, panel, labelTag, center;
+        GUIStyle btn, btnOn, big, label, small, title, panel, labelTag, center, caption;
         int styleBase = -1;
         string openDrop;
 
@@ -79,6 +79,8 @@ namespace BattleSim
             center = Base(Mathf.RoundToInt(14f * s), FontStyle.Normal, TextAnchor.MiddleCenter, Ink);
             center.wordWrap = true;
             title = Base(Mathf.RoundToInt(38f * s), FontStyle.Bold, TextAnchor.MiddleCenter, Brass);
+            caption = Base(Mathf.RoundToInt(17f * s), FontStyle.Bold, TextAnchor.MiddleCenter, Ink);
+            caption.wordWrap = true;
             panel = new GUIStyle { normal = { background = round }, border = new RectOffset(10, 10, 10, 10) };
             labelTag = Base(Mathf.RoundToInt(12f * s), FontStyle.Bold, TextAnchor.MiddleCenter, Ink);
             labelTag.normal.background = round;
@@ -155,6 +157,7 @@ namespace BattleSim
             DrawTally();
             if (Game.Phase == Phase.Setup) DrawSetup(); else DrawFight();
             if (Game.Phase != Phase.Setup) DrawChronicle();
+            if (Game.Phase == Phase.Fight) DrawCaption();
             if (Game.Phase == Phase.Result) DrawResult();
             DrawToast();
             if (Game.HelpOpen) DrawHelp();
@@ -281,14 +284,16 @@ namespace BattleSim
         void DrawFight()
         {
             float y = safe.y + Pad, bw = 88 * s, x = safe.xMax - Pad;
-            var r = new Rect[6];
-            for (int i = 5; i >= 0; i--) { float w = i == 5 ? 44 * s : i == 4 ? 96 * s : bw; x -= w; r[i] = new Rect(x, y, w, BtnH); x -= 6 * s; }
+            var r = new Rect[7];
+            for (int i = 6; i >= 0; i--) { float w = i == 6 ? 44 * s : i == 5 ? 106 * s : i == 4 ? 96 * s : bw; x -= w; r[i] = new Rect(x, y, w, BtnH); x -= 6 * s; }
             if (Button(r[0], Game.Paused ? "Дальше" : "Пауза", Game.Paused)) Game.Paused = !Game.Paused;
             if (Button(r[1], "×0,25", Game.Speed == 0.25f && !Game.Paused)) { Game.Speed = 0.25f; Game.Paused = false; }
             if (Button(r[2], "×1", Game.Speed == 1f && !Game.Paused)) { Game.Speed = 1f; Game.Paused = false; }
             if (Button(r[3], "×2", Game.Speed == 2f && !Game.Paused)) { Game.Speed = 2f; Game.Paused = false; }
-            if (Button(r[4], "Облёт", Game.Rig.Cinematic)) Game.Rig.Cinematic = !Game.Rig.Cinematic;
-            if (Button(r[5], "?")) Game.OpenHelp(true);
+            bool orbit = Game.Rig.Cinematic && !Game.DirectorOn, direct = Game.Rig.Cinematic && Game.DirectorOn;
+            if (Button(r[4], "Облёт", orbit)) Game.SetOrbit(!orbit);
+            if (Button(r[5], "Режиссёр", direct)) Game.SetDirector(!direct);
+            if (Button(r[6], "?")) Game.OpenHelp(true);
             if (Game.Phase == Phase.Fight && Button(new Rect(safe.x + Pad, safe.yMax - Pad - BtnH, 180 * s, BtnH), "■ К расстановке")) Game.StopBattle();
         }
 
@@ -308,6 +313,28 @@ namespace BattleSim
                 var st = new GUIStyle(small) { normal = { textColor = i == 0 ? Ink : new Color(Ink.r, Ink.g, Ink.b, 0.75f) } };
                 GUI.Label(new Rect(r.x + 10 * s, r.y, r.width - 14 * s, r.height), $"<color=#a59d8b>{Time(e.T)}</color>  {e.Text}", st);
             }
+        }
+
+        /// <summary>Подпись режиссёра в нижней трети кадра: что сейчас показывают (цветная черта — чья армия).</summary>
+        void DrawCaption()
+        {
+            var d = Game.Director;
+            if (d == null || d.CaptionT <= 0 || string.IsNullOrEmpty(d.Caption)) return;
+            float a = Mathf.Clamp01(d.CaptionT / 0.4f) * Mathf.Clamp01((2.5f - d.CaptionT) / 0.2f);
+            var content = new GUIContent(d.Caption);
+            float w = Mathf.Min(Mathf.Max(360 * s, caption.CalcSize(content).x + 40 * s), safe.width - 2 * Pad);
+            float h = Mathf.Max(46 * s, caption.CalcHeight(content, w - 30 * s) + 14 * s);
+            // правее летописи, на уровне её нижней строки; на узком экране — над летописью
+            float chronR = safe.x + Pad + Mathf.Min(440 * s, safe.width - 2 * Pad) + Pad;
+            float x = Mathf.Max(safe.center.x - w / 2, chronR), y = safe.yMax - Pad - BtnH - 10 * s - h;
+            if (x + w > safe.xMax - Pad) { x = safe.center.x - w / 2; y -= (Screen.height < 500 ? 3 : 6) * 34 * s + 6 * s; }
+            var r = new Rect(x, y, w, h);
+            var old = GUI.color;
+            GUI.color = new Color(1, 1, 1, a);
+            Box(r, new Color(0.047f, 0.06f, 0.08f, 0.86f), false);
+            Fill(new Rect(r.x, r.y + 6 * s, 4 * s, r.height - 12 * s), d.CaptionTeam == 0 ? Blue : d.CaptionTeam == 1 ? Red : Brass);
+            GUI.Label(new Rect(r.x + 16 * s, r.y, r.width - 26 * s, r.height), content, caption);
+            GUI.color = old;
         }
 
         /// <summary>Над отрядами — свежие приказы, над полководцами — имя.</summary>
@@ -426,6 +453,9 @@ namespace BattleSim
             "• <color=#f6d792><b>Гонцы.</b></color> Приказ дальнему отряду или воеводе везёт всадник. Перехватите его, и приказ не дойдёт.\n" +
             "• <color=#f6d792><b>Солнце и ветер.</b></color> Низкое солнце слепит стрелков. Ветер сносит болты и меняет дальность.\n" +
             "• <color=#f6d792><b>Засады.</b></color> Первый удар из укрытия сильнее в 1,6 раза. Удар в спину сильнее в 1,35 раза, щит от него не спасает.\n" +
-            "• <color=#f6d792><b>Боевой дух.</b></color> Потери, болты и удары в спину его подтачивают. Сломленный отряд бежит, а рядом со знаменем полководца приходит в себя.";
+            "• <color=#f6d792><b>Боевой дух.</b></color> Потери, болты и удары в спину его подтачивают. Сломленный отряд бежит, а рядом со знаменем полководца приходит в себя.\n\n" +
+            "<color=#cdbb8f><b>КАМЕРА</b></color>\n" +
+            "• <color=#f6d792><b>Режиссёр</b></color> (Tab или кнопка «Режиссёр»). Камера сама показывает главное: натиск конницы — ещё до удара и с замедлением, первые сшибки, бегство, гибель полководцев, самую гущу сечи; время от времени — общий план. N — следующий план. Тронули камеру — она ваша, а через 10 с покоя режиссёр вернётся.\n" +
+            "• <color=#f6d792><b>Облёт.</b></color> Медленный облёт над центром боя.";
     }
 }

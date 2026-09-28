@@ -1,6 +1,8 @@
 // Основной шейдер игры (URP): текстура × цвет × цвет вершин × цвет копии,
 // солнце с тенями, свет неба, туман. С ключом _BAKED_SKIN — солдаты и кони
 // с запечённой анимацией (скиннинг на видеокарте, тысячи копий одним вызовом).
+// Цвет копии (_InstColor): rgb до 1 — множитель, всё, что выше 1, — свечение поверх
+// освещения (вспышка удара); альфа меньше 1 — выцветание к бледно-серому (бегущие).
 Shader "BattleSim/Lit"
 {
     Properties
@@ -46,6 +48,7 @@ Shader "BattleSim/Lit"
                 float3 normalWS   : TEXCOORD2;
                 half4 color       : TEXCOORD3;
                 half fog          : TEXCOORD4;
+                half4 fx          : TEXCOORD5; // rgb — свечение, a — выцветание
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -60,7 +63,9 @@ Shader "BattleSim/Lit"
                 o.normalWS = TransformObjectToWorldNormal(nrm);
                 o.positionCS = TransformWorldToHClip(o.positionWS);
                 o.uv = TRANSFORM_TEX(v.uv, _BaseMap);
-                o.color = v.color * UNITY_ACCESS_INSTANCED_PROP(BattleProps, _InstColor);
+                half4 inst = (half4)UNITY_ACCESS_INSTANCED_PROP(BattleProps, _InstColor);
+                o.color = v.color * half4(min(inst.rgb, 1.0h), 1.0h);
+                o.fx = half4(max(inst.rgb - 1.0h, 0.0h), saturate(1.0h - inst.a));
                 o.fog = ComputeFogFactor(o.positionCS.z);
                 return o;
             }
@@ -76,6 +81,11 @@ Shader "BattleSim/Lit"
                     half dB = SAMPLE_TEXTURE2D(_DetailMap, sampler_DetailMap, i.uv * 23.0).g;
                     albedo *= 0.74 + dA * 0.38 + dB * 0.16;
                 }
+                if (i.fx.a > 0.004h)
+                {
+                    half lum = dot(albedo, half3(0.3h, 0.59h, 0.11h));
+                    albedo = lerp(albedo, lum * 0.85h + 0.1h, i.fx.a);
+                }
                 float3 n = normalize(i.normalWS);
                 if (!front) n = -n;
                 float4 shadowCoord = TransformWorldToShadowCoord(i.positionWS);
@@ -86,7 +96,7 @@ Shader "BattleSim/Lit"
                 float3 viewDir = normalize(GetWorldSpaceViewDir(i.positionWS));
                 float3 h = normalize(light.direction + viewDir);
                 half spec = pow(saturate(dot(n, h)), 24.0) * _Spec * light.shadowAttenuation;
-                half3 col = albedo * (direct + ambient) + light.color * spec;
+                half3 col = albedo * (direct + ambient) + light.color * spec + i.fx.rgb;
                 col = MixFog(col, i.fog);
                 return half4(col, 1);
             }

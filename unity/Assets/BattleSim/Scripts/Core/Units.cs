@@ -161,6 +161,8 @@ namespace BattleSim.Core
         /// <summary>Колонна в строю (номер места в шеренге) и зерно «дрейфа» — строй не выглядит роботом.</summary>
         public int File;
         public float DriftSeed;
+        /// <summary>Время боя, когда солдата последний раз ранили (для вспышки удара на экране).</summary>
+        public float FlashT = -99;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;
