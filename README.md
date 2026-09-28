@@ -61,8 +61,12 @@ python -m http.server 8766
 
 Клипы, которых нет в KayKit, собираются в `tools/blender/`: стена щитов мечников Руси (`Shield_Wall_Idle`, `Shield_Wall_Walk`), восстание мертвецов Нави (`Rise_Undead`), выстрел из лука и прицел (`Bow_Shoot`, `Bow_Aim`). Поза строится в Blender из клипов KayKit с правками поверх и IK рук и ног, снимается в локальные повороты костей и дописывается в `Resources/Models/*.bytes` (Knight; лук ещё и в Rogue_Hooded — всадники берут верх тела для атак из Knight). Меши, скелет и остальные клипы остаются байт в байт.
 
+Свои меши (лук степных лучников) `tools/blender/make_meshes.py` дописывает узлами в исходные модели `web/models/chars/*.glb`; дальше их пакует `web/pack_models.py`, а он стирает дописанные клипы — поэтому после него всегда `make_clips.py`.
+
 ```bash
 pip install bpy pillow                        # Blender как модуль Python (нужен Python 3.11)
-python tools/blender/make_clips.py            # пересобрать клипы в Knight.bytes (повторный запуск их заменяет)
+python tools/blender/make_meshes.py           # меши в исходные GLB (повторный запуск их заменяет)
+python web/pack_models.py                     # GLB -> Resources/Models/*.bytes и web/pack
+python tools/blender/make_clips.py            # клипы в *.bytes (повторный запуск их заменяет)
 RENDER=1 python tools/blender/make_clips.py   # и нарисовать превью в tools/blender/out/
 ```

@@ -21,11 +21,11 @@ out = os.path.join(here, 'out'); os.makedirs(out, exist_ok=True)
 rig = ik = arms = None
 
 
-def load(model):
+def load(model, src=None):
     """Модель игры -> Blender (импортёр узнаёт формат по расширению, поэтому копия в out/*.glb)."""
     global rig, ik, arms
     import shutil
-    src = os.path.join(MODELS_DIR, model + '.bytes')
+    src = src or os.path.join(MODELS_DIR, model + '.bytes')
     tmp = os.path.join(out, model + '.glb'); shutil.copyfile(src, tmp)
     rig = rigio.Rig(tmp)
     ik = pk.LegIK(rig)
@@ -164,7 +164,7 @@ KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk
 BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
 # всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
 MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS}
-KEEP = {'Rise_Undead': preview.KEEP_DEAD}
+KEEP = {'Rise_Undead': preview.KEEP_DEAD, 'Bow_Shoot': {'Rogue_Cape', 'Bow'}, 'Bow_Aim': {'Rogue_Cape', 'Bow'}}
 only = os.environ.get('ONLY')
 pick = lambda name: not only or name in only.split(',')
 

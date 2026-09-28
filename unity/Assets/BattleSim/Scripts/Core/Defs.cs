@@ -203,12 +203,13 @@ namespace BattleSim.Core
             Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" } } };
         static readonly UnitDef StArcher = new UnitDef { Key = "archer", Name = "Лучники", SquadName = "лучники", Model = "Rogue_Hooded", Hp = 58, Armor = 0.05f, Speed = 3.7f, Accel = 12, Radius = 0.5f, Mass = 0.85f,
             Reach = 0.5f, Dmg = 18, Cd = 1.6f, AtkTime = 0.6f, Ranged = true, Range = 34, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 5, Rows = 2, Spacing = 1.45f,
-            Note = "Стреляют часто", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
-            Anim = new AnimSet { Idle = "2H_Ranged_Aiming", Run = "Running_A", Attack = new[] { "2H_Ranged_Shoot" }, Aim = "2H_Ranged_Aiming", Reload = "2H_Ranged_Reload", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
+            Note = "Стреляют часто", Keep = new[] { "Bow", "Rogue_Cape" },
+            // лук и клипы из tools/blender: стрела срывается на 55% Bow_Shoot
+            Anim = new AnimSet { Idle = "Idle", Run = "Running_A", Attack = new[] { "Bow_Shoot" }, Aim = "Bow_Aim", Reload = "Idle", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
         static readonly UnitDef StHorseArcher = new UnitDef { Key = "horsearcher", Name = "Конные лучники", SquadName = "конные лучники", Model = "Rogue_Hooded", Mount = true, Ranged = true, Skirmish = true,
             Hp = 160, Armor = 0.1f, Speed = 8.2f, Accel = 6, Radius = 1.1f, Mass = 3.2f, Reach = 0.6f, Dmg = 17, Cd = 1.6f, AtkTime = 0.6f, Range = 32, ArrowBlock = 0.1f, VsCav = 1, Charge = 1,
-            Cols = 4, Rows = 2, Spacing = 2.8f, Note = "Стреляют на скаку, не даются в руки", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
-            Anim = new AnimSet { Attack = new[] { "2H_Ranged_Shoot" } } };
+            Cols = 4, Rows = 2, Spacing = 2.8f, Note = "Стреляют на скаку, не даются в руки", Keep = new[] { "Bow", "Rogue_Cape" },
+            Anim = new AnimSet { Attack = new[] { "Bow_Shoot" } } };
         static readonly UnitDef StKhan = new UnitDef { Key = "khan", Name = "Хан", Model = "Barbarian", Mount = true, Special = Special.Commander, Hp = 320, Armor = 0.4f,
             Speed = 7.0f, Accel = 6, Radius = 1.1f, Mass = 3.5f, Reach = 1.0f, Dmg = 24, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.08f, ScaleJit = 0,
             Keep = new[] { "2H_Axe", "Barbarian_Hat", "Barbarian_Cape" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
@@ -292,7 +293,7 @@ namespace BattleSim.Core
         {
             "1H_Sword_Offhand", "Badge_Shield", "Rectangle_Shield", "Round_Shield", "Spike_Shield", "1H_Sword", "2H_Sword",
             "Knight_Helmet", "Knight_Cape", "1H_Axe_Offhand", "Barbarian_Round_Shield", "1H_Axe", "2H_Axe", "Mug", "Barbarian_Hat", "Barbarian_Cape",
-            "Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Knife", "Throwable", "Rogue_Cape",
+            "Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Knife", "Throwable", "Rogue_Cape", "Bow",
         };
 
         public static readonly TeamDef[] Teams =
