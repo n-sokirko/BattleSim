@@ -119,6 +119,8 @@ namespace BattleSim.Core
         /// <summary>Каменный мост (для отрисовки; деревянные — в горах).</summary>
         public bool Stone;
         public float Len, Ux, Uz, X, Z;
+        /// <summary>Профиль верха (абсолютные высоты, равномерно от A к B) — вместо линейного HA→HB: боевой ход стены.</summary>
+        public float[] Prof;
     }
 
     public sealed class Decks
@@ -152,6 +154,7 @@ namespace BattleSim.Core
 
         public static float HeightOf(Deck d, float t, float ground)
         {
+            if (d.Prof != null) return M.Sample(d.Prof, t);
             float h = d.HA + (d.HB - d.HA) * t;
             return d.Rel ? ground + h : h;
         }
@@ -499,7 +502,7 @@ namespace BattleSim.Core
             {
                 float x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, h = w.GroundAt(x, z);
                 bool deck = w.OnDeck(x, z);
-                if (MathF.Abs(h - prev) > (deck != prevDeck ? World.DeckStep + step * 0.5f : step * 1.3f + 0.02f)) return true;
+                if (MathF.Abs(h - prev) > (deck || prevDeck ? World.DeckStep + step * 0.5f : step * 1.3f + 0.02f)) return true;
                 prev = h; prevDeck = deck;
             }
             return false;

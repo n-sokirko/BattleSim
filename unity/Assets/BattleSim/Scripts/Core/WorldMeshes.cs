@@ -90,16 +90,18 @@ namespace BattleSim.Core
             foreach (var wl in F.Walls)
             {
                 float len = M.Hypot(wl.Bx - wl.Ax, wl.Bz - wl.Az), ux = (wl.Bx - wl.Ax) / len, uz = (wl.Bz - wl.Az) / len, yaw = MathF.Atan2(ux, uz) - M.PI / 2;
-                for (float t = 0; t < len; t += 2)
+                // верх — профиль боевого хода (тот же, по которому ходят), кусками по 1 м, чтобы всходы к башням были ровными
+                float Top(float t) => wl.Top != null ? wl.TopAt(t) : w.HeightAt(wl.Ax + ux * t, wl.Az + uz * t) + wl.H;
+                for (float t = 0; t < len; t += 1)
                 {
-                    float l = MathF.Min(2.05f, len - t + 0.05f), x = wl.Ax + ux * (t + l / 2), z = wl.Az + uz * (t + l / 2), g = w.HeightAt(x, z);
-                    float bas = g - 1.5f, top = g + wl.H;
+                    float l = MathF.Min(1.03f, len - t + 0.03f), x = wl.Ax + ux * (t + l / 2), z = wl.Az + uz * (t + l / 2), g = w.HeightAt(x, z);
+                    float bas = MathF.Min(g, MathF.Min(w.HeightAt(x + wl.Out.x * wl.W / 2, z + wl.Out.z * wl.W / 2), w.HeightAt(x - wl.Out.x * wl.W / 2, z - wl.Out.z * wl.W / 2))) - 1.5f, top = Top(t + l / 2);
                     Box(x, (bas + top) / 2, z, l, top - bas, wl.W, yaw, stone);
                 }
                 for (float t = 0.7f; t < len - 0.3f; t += 1.45f)
                 {
                     float x = wl.Ax + ux * t + wl.Out.x * (wl.W / 2 - 0.28f), z = wl.Az + uz * t + wl.Out.z * (wl.W / 2 - 0.28f);
-                    Box(x, w.HeightAt(wl.Ax + ux * t, wl.Az + uz * t) + wl.H + 0.55f, z, 0.75f, 1.1f, 0.55f, yaw, stone);
+                    Box(x, Top(t) + 0.55f, z, 0.75f, 1.1f, 0.55f, yaw, stone);
                 }
             }
             foreach (var t in F.Towers)
@@ -127,7 +129,7 @@ namespace BattleSim.Core
                 int n = (int)MathF.Ceiling(len / 0.45f);
                 for (int k = 0; k < n; k++)
                 {
-                    float t = (k + 0.5f) / n, x = r.Ax + ux * len * t, z = r.Az + uz * len * t, g = w.HeightAt(x, z), top = g + 0.15f + (r.H - 0.15f) * t;
+                    float t = (k + 0.5f) / n, x = r.Ax + ux * len * t, z = r.Az + uz * len * t, g = w.HeightAt(x, z), top = r.TopAt(t);
                     Box(x, (top + g - 0.6f) / 2, z, len / n + 0.02f, top - g + 0.6f, r.W, yaw, stone);
                 }
             }

@@ -702,6 +702,7 @@ namespace BattleSim.Core
                     WallSpots.Add((new V2(x, z), w.Out));
                 }
             }
+            FortressHeights(F);
             foreach (var w in F.Walls)
             {
                 float len = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);
@@ -709,10 +710,20 @@ namespace BattleSim.Core
                 float ux = (w.Bx - w.Ax) / len, uz = (w.Bz - w.Az) / len;
                 float outSign = M.Sign(-uz * w.Out.x + ux * w.Out.z);
                 if (outSign == 0) outSign = 1;
-                Decks.Add(new Deck { Kind = DeckKind.Wall, Ax = w.Ax, Az = w.Az, Bx = w.Bx, Bz = w.Bz, W = w.W, HA = w.H, HB = w.H, Rel = true, Walk = true, Solid = true, Parapet = 1.1f, OutSign = outSign });
+                Decks.Add(new Deck { Kind = DeckKind.Wall, Ax = w.Ax, Az = w.Az, Bx = w.Bx, Bz = w.Bz, W = w.W, HA = w.Top[0], HB = w.Top[w.Top.Length - 1], Prof = w.Top, Rel = false, Walk = true, Solid = true, Parapet = 1.1f, OutSign = outSign });
             }
-            foreach (var t in F.Towers) Decks.Add(new Deck { Kind = DeckKind.Tower, Ax = t.X - t.S / 2, Az = t.Z, Bx = t.X + t.S / 2, Bz = t.Z, W = t.S, HA = t.H, HB = t.H, Rel = true, Walk = true, Solid = true });
-            foreach (var r in F.Ramps) Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = r.Ax, Az = r.Az, Bx = r.Bx, Bz = r.Bz, W = r.W, HA = 0.15f, HB = r.H, Rel = true, Walk = true, Solid = true });
+            foreach (var t in F.Towers)
+            {
+                float top = HeightAt(t.X, t.Z) + t.H;
+                Decks.Add(new Deck { Kind = DeckKind.Tower, Ax = t.X - t.S / 2, Az = t.Z, Bx = t.X + t.S / 2, Bz = t.Z, W = t.S, HA = top, HB = top, Rel = false, Walk = true, Solid = true });
+            }
+            foreach (var r in F.Ramps)
+            {
+                int n = Math.Max(2, (int)MathF.Ceiling(M.Hypot(r.Bx - r.Ax, r.Bz - r.Az) / 0.5f));
+                var prof = new float[n + 1];
+                for (int i = 0; i <= n; i++) prof[i] = r.TopAt((float)i / n);
+                Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = r.Ax, Az = r.Az, Bx = r.Bx, Bz = r.Bz, W = r.W, HA = r.YA, HB = r.YB, Prof = prof, Rel = false, Walk = true, Solid = true });
+            }
             // Каменные мосты через реку и мост через ров к воротам замка
             var spans = new List<Seg>();
             if (Town.River != null) spans.AddRange(Town.River.Bridges);
@@ -725,9 +736,95 @@ namespace BattleSim.Core
             // Всход с боевого хода северной стены на верх донжона
             var c = Town.Castle;
             if (c?.KeepRamp != null)
-            {
+            { // всход начинается на боевом ходу — с его высоты
                 var kr = c.KeepRamp;
-                Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = kr.Ax, Az = kr.Az, Bx = kr.Bx, Bz = kr.Bz, W = kr.W, HA = HeightAt(kr.Ax, kr.Az) + c.WallH, HB = HeightAt(c.Keep.x, c.Keep.z) + c.KeepH, Rel = false, Walk = true, Solid = true });
+                float ha = HeightAt(kr.Ax, kr.Az) + c.WallH;
+                foreach (var w in F.Walls)
+                    if (M.SegDist(kr.Ax, kr.Az, w.Ax, w.Az, w.Bx, w.Bz) < w.W / 2 + 0.1f) ha = w.TopAt(M.Hypot(kr.Ax - w.Ax, kr.Az - w.Az));
+                Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = kr.Ax, Az = kr.Az, Bx = kr.Bx, Bz = kr.Bz, W = kr.W, HA = ha, HB = HeightAt(c.Keep.x, c.Keep.z) + c.KeepH, Rel = false, Walk = true, Solid = true });
+            }
+        }
+
+        /// <summary>
+        /// Высоты крепости — одни для ходьбы и для кладки. Боевой ход не повторяет каждую кочку и уступ под стеной
+        /// (раньше верх был «земля + 7 м» в каждой точке, и ход рвался ступенями на краю уступа): профиль по середине стены,
+        /// где земля уходит вниз — стена выше, уклон хода не круче ~1:2. К башне ход поднимается всходом до её площадки
+        /// (площадка на 1–3 м выше хода). Лестница кончается вровень с ходом там, где к нему примыкает.
+        /// </summary>
+        void FortressHeights(Fort F)
+        {
+            const float slope = 0.45f;
+            bool InTower(FortTower t, float x, float z, float pad) => MathF.Abs(x - t.X) < t.S / 2 + pad && MathF.Abs(z - t.Z) < t.S / 2 + pad;
+            foreach (var w in F.Walls)
+            {
+                float len = MathF.Max(0.01f, M.Hypot(w.Bx - w.Ax, w.Bz - w.Az));
+                int n = Math.Max(1, (int)MathF.Ceiling(len));
+                w.Top = new float[n + 1];
+                for (int i = 0; i <= n; i++) w.Top[i] = HeightAt(M.Lerp(w.Ax, w.Bx, (float)i / n), M.Lerp(w.Az, w.Bz, (float)i / n)) + w.H;
+                Rise(w.Top, len / n);
+            }
+            // площадка башни — не ниже хода, который через неё проходит; ход у башни — вровень с площадкой
+            foreach (var t in F.Towers)
+            {
+                if (t.Keep) continue;
+                float g = HeightAt(t.X, t.Z), top = g + t.H;
+                foreach (var w in F.Walls)
+                    for (int i = 0; i < w.Top.Length; i++)
+                    {
+                        float f = (float)i / (w.Top.Length - 1);
+                        if (InTower(t, M.Lerp(w.Ax, w.Bx, f), M.Lerp(w.Az, w.Bz, f), 0)) top = MathF.Max(top, w.Top[i]);
+                    }
+                t.H = top - g;
+            }
+            foreach (var w in F.Walls)
+                for (int i = 0; i < w.Top.Length; i++)
+                {
+                    float f = (float)i / (w.Top.Length - 1), x = M.Lerp(w.Ax, w.Bx, f), z = M.Lerp(w.Az, w.Bz, f);
+                    foreach (var t in F.Towers)
+                        if (!t.Keep && InTower(t, x, z, 1.1f)) w.Top[i] = MathF.Max(w.Top[i], HeightAt(t.X, t.Z) + t.H); // и метр за краем: без ступеньки на площадку
+                }
+            // лестница: от земли у подножия до хода стены рядом с верхним концом; ход напротив её площадки — ровный,
+            // вровень с ней (иначе сойти вбок можно только в одной точке, где уклон хода пересекает площадку)
+            var rampWall = new Dictionary<FortRamp, (FortWall w, int i0, int i1)>();
+            foreach (var r in F.Ramps)
+            {
+                r.YA = HeightAt(r.Ax, r.Az) + 0.15f;
+                r.YB = HeightAt(r.Bx, r.Bz) + r.H;
+                float best = float.PositiveInfinity, rl = M.Hypot(r.Bx - r.Ax, r.Bz - r.Az), flat = MathF.Min(2.5f, rl * 0.25f);
+                foreach (var w in F.Walls)
+                {
+                    float len = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);
+                    if (len < 0.01f) continue;
+                    float wx = (w.Bx - w.Ax) / len, wz = (w.Bz - w.Az) / len;
+                    float along = (r.Bx - w.Ax) * wx + (r.Bz - w.Az) * wz, d = M.SegDist(r.Bx, r.Bz, w.Ax, w.Az, w.Bx, w.Bz);
+                    if (d >= best || d > w.W / 2 + r.W / 2 + 0.5f) continue;
+                    best = d;
+                    float back = M.Sign((r.Ax - r.Bx) * wx + (r.Az - r.Bz) * wz); // в какую сторону по стене от верха лестницы — её площадка
+                    float a0 = M.Clamp(MathF.Min(along - back, along + back * (flat + 1)), 0, len), a1 = M.Clamp(MathF.Max(along - back, along + back * (flat + 1)), 0, len);
+                    int n = w.Top.Length - 1;
+                    rampWall[r] = (w, M.Clamp((int)MathF.Floor(a0 / len * n), 0, n), M.Clamp((int)MathF.Ceiling(a1 / len * n), 0, n));
+                }
+            }
+            for (int pass = 0; pass < 2; pass++)
+            {
+                foreach (var (r, (w, i0, i1)) in rampWall)
+                {
+                    float level = float.NegativeInfinity;
+                    for (int i = i0; i <= i1; i++) level = MathF.Max(level, w.Top[i]);
+                    for (int i = i0; i <= i1; i++) w.Top[i] = level;
+                    r.YB = level;
+                }
+                foreach (var w in F.Walls) Rise(w.Top, MathF.Max(0.01f, M.Hypot(w.Bx - w.Ax, w.Bz - w.Az)) / (w.Top.Length - 1));
+            }
+
+            // только вверх: каждая точка не ниже соседей минус уклон — ход без ступеней, стена не ниже задуманного
+            static void Rise(float[] p, float step)
+            {
+                for (int it = 0; it < 2; it++)
+                {
+                    for (int i = 1; i < p.Length; i++) p[i] = MathF.Max(p[i], p[i - 1] - step * slope);
+                    for (int i = p.Length - 2; i >= 0; i--) p[i] = MathF.Max(p[i], p[i + 1] - step * slope);
+                }
             }
         }
 

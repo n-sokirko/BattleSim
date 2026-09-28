@@ -152,9 +152,26 @@ namespace BattleSim.Core
         public Rect4(float x0, float x1, float z0, float z1) { X0 = x0; X1 = x1; Z0 = z0; Z1 = z1; }
     }
 
-    public sealed class FortWall { public float Ax, Az, Bx, Bz, W, H; public V2 Out; public bool Citadel; }
+    /// <summary>Крепостная стена; Top — высота боевого хода (абсолютная) через каждый метр от A к B, её строит мир.</summary>
+    public sealed class FortWall
+    {
+        public float Ax, Az, Bx, Bz, W, H; public V2 Out; public bool Citadel;
+        public float[] Top;
+        /// <summary>Высота боевого хода в t метрах от A.</summary>
+        public float TopAt(float t) => M.Sample(Top, t / M.Hypot(Bx - Ax, Bz - Az));
+    }
     public sealed class FortTower { public float X, Z, S, H; public bool Citadel, Keep; }
-    public sealed class FortRamp { public float Ax, Az, Bx, Bz, W, H; public bool Citadel; }
+    /// <summary>Лестница на боевой ход; YA, YB — высоты концов (абсолютные), их задаёт мир по стене.</summary>
+    public sealed class FortRamp
+    {
+        public float Ax, Az, Bx, Bz, W, H, YA, YB; public bool Citadel;
+        /// <summary>Верх лестницы в доле f длины: подъём от YA, последние 2,5 м — площадка вровень с боевым ходом (сойти на него вбок).</summary>
+        public float TopAt(float f)
+        {
+            float len = M.Hypot(Bx - Ax, Bz - Az), flat = MathF.Min(2.5f, len * 0.25f), along = M.Clamp01(f) * len;
+            return along >= len - flat ? YB : M.Lerp(YA, YB, along / MathF.Max(0.01f, len - flat));
+        }
+    }
     public sealed class FortArch { public float X, Z, Ux, Uz, H, W; public bool Citadel; }
 
     public sealed class Fort
@@ -579,6 +596,14 @@ namespace BattleSim.Core
                 if (M.Sign(r.Z0 - city.EdgeZ(bd.X)) != M.Sign(r.Z1 - city.EdgeZ(bd.X))) return true;
                 foreach (var cl in city.Climbs) if (M.SegDist(bd.X, bd.Z, cl.Ax, cl.Az, cl.Bx, cl.Bz) < cl.W / 2 + MathF.Max(bd.Hx, bd.Hz) + 1) return true;
                 foreach (var q in city.Squares) if (Overlaps(r, new Rect4(q.X - q.Hx, q.X + q.Hx, q.Z - q.Hz, q.Z + q.Hz), 0.5f)) return true;
+                // и не на лестнице на стену: к её нижнему концу — свободный подход
+                foreach (var rp in F.Ramps)
+                {
+                    float rl = M.Hypot(rp.Bx - rp.Ax, rp.Bz - rp.Az), ux = (rp.Bx - rp.Ax) / rl, uz = (rp.Bz - rp.Az) / rl, sx = rp.Ax - ux * 4, sz = rp.Az - uz * 4;
+                    var rr = new Rect4(MathF.Min(sx, rp.Bx) - rp.W / 2 * MathF.Abs(uz), MathF.Max(sx, rp.Bx) + rp.W / 2 * MathF.Abs(uz),
+                                       MathF.Min(sz, rp.Bz) - rp.W / 2 * MathF.Abs(ux), MathF.Max(sz, rp.Bz) + rp.W / 2 * MathF.Abs(ux));
+                    if (Overlaps(r, rr, 0.8f)) return true;
+                }
                 return city.Streets.Any(st => M.SegDist(bd.X, bd.Z, st.Ax, st.Az, st.Bx, st.Bz) < st.W / 2 + MathF.Min(bd.Hx, bd.Hz) * 0.6f);
             }
             city.Buildings = city.Buildings.Where(bd => !Bad(bd)).ToList();

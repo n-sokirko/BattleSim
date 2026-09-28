@@ -28,6 +28,14 @@ namespace BattleSim.Core
             return t * t * (3.0 - 2.0 * t);
         }
 
+        /// <summary>Значение ломаной, заданной равномерно по [0, 1] (профиль высоты вдоль стены), в доле t.</summary>
+        public static float Sample(float[] p, float t)
+        {
+            float f = Clamp01(t) * (p.Length - 1);
+            int i = Math.Min((int)f, p.Length - 2);
+            return i < 0 ? p[0] : Lerp(p[i], p[i + 1], f - i);
+        }
+
         public static float Hypot(float x, float z) => MathF.Sqrt(x * x + z * z);
         public static float Hypot(float x, float y, float z) => MathF.Sqrt(x * x + y * y + z * z);
 

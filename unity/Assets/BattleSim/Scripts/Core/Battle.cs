@@ -80,9 +80,11 @@ namespace BattleSim.Core
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
             int id = ++squadSeq;
             var sq = new Squad(id.ToString(), type, team, yaw);
-            // бойца — только туда, откуда можно дойти до середины отряда (не на отрезанный уступ рядом с ней)
+            // бойца — только туда, откуда можно дойти до середины отряда (не на отрезанный уступ рядом с ней),
+            // и на её уровне: не на башню или боевой ход над ней (туда тоже можно дойти — но кругом, по лестнице)
             var nav = World.Nav; int cls = t.Mount ? 1 : 0, ci = nav.Idx(cx, cz);
             int region = ci >= 0 && nav.Speed[cls][ci] > 0 ? nav.Region[cls][ci] : -1;
+            float cy = World.GroundAt(cx, cz);
             for (int r = 0; r < t.Rows; r++)
                 for (int c = 0; c < t.Cols; c++)
                 {
@@ -93,6 +95,7 @@ namespace BattleSim.Core
                     if (!World.InField(x, z, 1) || !World.Walkable(x, z, t.Radius) || Occupied(x, z, t.Radius)) continue;
                     int ui = nav.Idx(x, z);
                     if (region >= 0 && ui >= 0 && nav.Region[cls][ui] != region) continue;
+                    if (MathF.Abs(World.GroundAt(x, z) - cy) > 1.5f) continue;
                     var plan = new UnitPlan { Type = type, Team = team, X = x, Z = z, Yaw = yaw, Variant = (int)(Rng.Rand() * 2), Squad = id, Ox = ox, Oz = oz };
                     Plan.Add(plan);
                     var u = new Unit(plan, World) { Squad = sq };
@@ -1350,11 +1353,15 @@ namespace BattleSim.Core
         {
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y;
             if (!CanMove(ox, oz, oy, x, z, cls)) return false;
-            float r = u.T.Radius * 0.8f;
+            float r = u.T.Radius * 0.8f, ix = x, iz = z;
             World.Obs.PushOut(ref x, ref z, r, oy);
-            if ((x != ox || z != oz) && !CanMove(ox, oz, oy, x, z, cls)) return false;
-            // зажат между стволами так, что не вытолкнуть, — туда не шагаем (если только уже не стоим внутри)
+            // препятствие отклоняет шаг, а не переносит бойца: выталкивание не длиннее самого шага (иначе конь в тесной
+            // роще или богатырь у ограды прыгали на полметра из стороны в сторону)
+            float px = x - ix, pz = z - iz, pl = M.Hypot(px, pz), cap = MathF.Max(0.12f, M.Hypot(ix - ox, iz - oz) * 1.5f);
+            if (pl > cap) { x = ix + px / pl * cap; z = iz + pz / pl * cap; }
+            // туда, откуда не вытолкнуть, не шагаем (если только уже не стоим внутри — тогда выбираемся понемногу)
             if (World.Obs.Hit(x, z, r - 0.05f, oy) != null && World.Obs.Hit(ox, oz, r - 0.05f, oy) == null) return false;
+            if ((x != ox || z != oz) && !CanMove(ox, oz, oy, x, z, cls)) return false;
             u.Pos.x = x; u.Pos.z = z;
             u.Pos.y = World.GroundAt(x, z);
             return true;
@@ -1378,10 +1385,10 @@ namespace BattleSim.Core
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
             float dy = MathF.Abs(g - oy), d = M.Hypot(nx - ox, nz - oz);
             if (dy <= d * 1.3f + 0.005f) return true;
-            // ступенька круче уклона — только на край настила (въезд на мост, начало лестницы), не выше DeckStep, как и в сетке
-            // путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз за шаг, и с поблажкой он
-            // сползал по отвесу ущелья
-            return dy <= World.DeckStep && World.OnDeck(ox, oz) != World.OnDeck(nx, nz);
+            // ступенька круче уклона — только на настиле или на его край (въезд на мост, с лестницы на боевой ход), не выше
+            // DeckStep, как и в сетке путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз
+            // за шаг, и с поблажкой он сползал по отвесу ущелья
+            return dy <= World.DeckStep && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz));
         }
 
         // ---------------------------------------------------------------- соседи
