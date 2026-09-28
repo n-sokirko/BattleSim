@@ -204,7 +204,7 @@ namespace BattleSim
             return go.transform;
         }
 
-        static Mesh Cylinder(float rTop, float rBottom, float h, int seg)
+        internal static Mesh Cylinder(float rTop, float rBottom, float h, int seg)
         {
             var v = new List<Vector3>();
             var t = new List<int>();
@@ -223,7 +223,7 @@ namespace BattleSim
             return m;
         }
 
-        static Mesh Octahedron(float r)
+        internal static Mesh Octahedron(float r)
         {
             var p = new[] { new Vector3(r, 0, 0), new Vector3(-r, 0, 0), new Vector3(0, r, 0), new Vector3(0, -r, 0), new Vector3(0, 0, r), new Vector3(0, 0, -r) };
             int[] f = { 2, 4, 0, 2, 0, 5, 2, 5, 1, 2, 1, 4, 3, 0, 4, 3, 5, 0, 3, 1, 5, 3, 4, 1 };

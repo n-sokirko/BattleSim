@@ -113,6 +113,9 @@ namespace BattleSim
             Battle.ClipDur = (type, name) => Lib.Inf.TryGetValue(type, out var cm) ? cm.Baked.Dur(name) : 0;
             overlays = new Overlays();
             fx = new Effects();
+            squadBanners = new SquadBanners();
+            weather = new Weather();
+            if (Style != null) weather.Setup(Style, LowEnd);
             Sound = new Sound(Cam) { Muted = PlayerPrefs.GetInt("muted", 0) == 1 || System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-mute") >= 0 };
             overlays.SetBolt(Lib);
             LoadText = "Рисуем карту…";
@@ -210,6 +213,15 @@ namespace BattleSim
             yield return new WaitForSeconds(0.8f);
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_macro.png"));
             yield return new WaitForSeconds(1f);
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-toend") >= 0)
+            { // досмотреть бой до конца (быстро) и снять экран итогов
+                Speed = 4;
+                float wait = 0;
+                while (Phase == Phase.Fight && wait < 240) { wait += Time.unscaledDeltaTime; yield return null; }
+                yield return new WaitForSeconds(1.5f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_result.png"));
+                yield return new WaitForSeconds(1f);
+            }
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
                 $"perf: {Perf}\n" + $"нет модели: {(NoModel.Count > 0 ? string.Join(", ", NoModel) : "—")}\n" +
@@ -228,6 +240,8 @@ namespace BattleSim
         public void SetOrbit(bool on) { Rig.Cinematic = on; DirectorOn = false; directorWanted = false; }
 
         Effects fx;
+        SquadBanners squadBanners;
+        Weather weather;
         /// <summary>Звук боя (синтезирован в коде); Muted — кнопка «Звук» и клавиша M.</summary>
         public Sound Sound;
 
@@ -287,6 +301,7 @@ namespace BattleSim
             Rig.Cinematic = false;
             Rig.LookAt(0, -(World.SpawnZ + 22), 0, 36 * M.DEG, Big ? 115 : 85, true);
             MapName = $"{MapTypeName} · {Style.Title} · карта №{MapSeed}";
+            weather?.Setup(Style, LowEnd);
         }
 
         public void NewMapButton()
@@ -457,12 +472,23 @@ namespace BattleSim
             bool cheer = Phase == Phase.Result;
             foreach (var u in Battle.Units) if (u.Alive) Battle.Animate(u, cheer && u.Team == Winner);
             RenderCrowd(animDt);
+            squadBanners?.Draw(Battle, Alpha, Time.time, Lib.RiderHipsY, Cam);
+            weather?.Draw(Conv.U(Rig.Target), new Vector3(World.Wind.x, 0, -World.Wind.z), Time.deltaTime, Time.time);
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (Phase == Phase.Fight && !Paused) Perf.Add(Time.unscaledDeltaTime * 1000, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
             overlays.DrawRings(Battle, Phase == Phase.Setup);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
             Sound?.Update(Battle, Cam.transform.position, Conv.U(Rig.Target), SlowMo, Paused || Phase == Phase.Setup, Phase == Phase.Fight);
+            if (!Paused)
+                foreach (var e in Battle.Fx) // тряска камеры от самого увесистого
+                    switch (e.Kind)
+                    {
+                        case FxKind.Explosion: Rig.Shake(0.45f, e.Pos); break;
+                        case FxKind.Hero: Rig.Shake(0.5f, e.Pos); break;
+                        case FxKind.Roar: Rig.Shake(0.35f, e.Pos); break;
+                        case FxKind.Charge: Rig.Shake(0.06f, e.Pos); break;
+                    }
             if (fx != null)
             {
                 fx.Spawn(Battle.Fx);

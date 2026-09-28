@@ -104,6 +104,17 @@ namespace BattleSim
             Took();
         }
 
+        /// <summary>Тряска камеры (0–1, гаснет сама): взрывы, натиск, рёв. Смещение — квадрат силы, чтобы слабое почти не мешало.</summary>
+        public float Trauma;
+
+        /// <summary>Толчок силы amount из точки at (ядро): чем дальше от камеры, тем слабее.</summary>
+        public void Shake(float amount, V3 at)
+        {
+            var cp = transform.position;
+            float d = Vector3.Distance(cp, Conv.U(at));
+            Trauma = Mathf.Min(1, Trauma + amount * Mathf.Clamp01(1.2f - d / 70f));
+        }
+
         void LateUpdate()
         {
             if (World == null || cam == null) return;
@@ -239,7 +250,15 @@ namespace BattleSim
             float minY = World.GroundAt(pos.x, pos.z) + 1.5f;
             if (pos.y < minY) pos.y = minY;
             var pu = Conv.U(pos);
-            transform.SetPositionAndRotation(pu, Quaternion.LookRotation(Conv.U(look) - pu, Vector3.up));
+            var lu = Conv.U(look);
+            if (Trauma > 0.001f)
+            {
+                float k = Trauma * Trauma * (0.25f + Dist * 0.012f), tt = Time.unscaledTime * 22;
+                var sh = new Vector3(Mathf.PerlinNoise(tt, 1.3f) - 0.5f, Mathf.PerlinNoise(2.7f, tt) - 0.5f, Mathf.PerlinNoise(tt, 5.1f) - 0.5f) * 2 * k;
+                pu += sh; lu += sh * 0.4f;
+                Trauma = Mathf.Max(0, Trauma - dt * 1.6f);
+            }
+            transform.SetPositionAndRotation(pu, Quaternion.LookRotation(lu - pu, Vector3.up));
         }
     }
 }

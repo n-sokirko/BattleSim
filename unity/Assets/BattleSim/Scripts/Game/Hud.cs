@@ -153,6 +153,7 @@ namespace BattleSim
             safe = new Rect(sa.x, Screen.height - sa.yMax, sa.width, sa.height);
 
             if (Game.Phase == Phase.Loading) { DrawLoading(); return; }
+            DrawSquadBars();
             DrawLabels();
             DrawTally();
             if (Game.Phase == Phase.Setup) DrawSetup(); else DrawFight();
@@ -339,6 +340,35 @@ namespace BattleSim
             GUI.color = old;
         }
 
+        /// <summary>
+        /// Над отрядами на общем плане — две тонкие полоски: сколько осталось бойцов (цвет армии) и боевой дух
+        /// (золото → красный). Видно, кто тает и кто вот-вот побежит. Вблизи камеры не рисуются.
+        /// </summary>
+        void DrawSquadBars()
+        {
+            if (Game.Phase != Phase.Fight || Game.Cam == null) return;
+            var cp = Game.Cam.transform.position;
+            float w = 30 * s, h = 3.5f * s;
+            foreach (var sq in Game.Battle.Squads)
+            {
+                if (sq.Special || sq.T.Hero || sq.Alive == 0 || sq.Hidden || sq.Size < 2) continue;
+                var wp = Conv.U(sq.Center.x, sq.Center.y + (sq.T.Mount ? 5.2f : 4.4f), sq.Center.z);
+                float d = Vector3.Distance(cp, wp);
+                float a = Mathf.Clamp01((d - 25) / 15f);
+                if (a <= 0.02f) continue;
+                var sp = Game.Cam.WorldToScreenPoint(wp);
+                if (sp.z < 0 || sp.x < -40 || sp.x > Screen.width + 40 || sp.y < -20 || sp.y > Screen.height + 20) continue;
+                float x = sp.x - w / 2, y = Screen.height - sp.y;
+                float str = Mathf.Clamp01(sq.Alive / (float)sq.Size), mor = sq.T.Fearless ? 1 : Mathf.Clamp01(sq.Morale / 100f);
+                bool rout = sq.Order.Mode == Mode.Rout;
+                Fill(new Rect(x - 1, y - 1, w + 2, h * 2 + 3), new Color(0, 0, 0, 0.55f * a));
+                var tc = sq.Team == 0 ? Blue : Red;
+                Fill(new Rect(x, y, w * str, h), new Color(tc.r, tc.g, tc.b, a));
+                var mc = rout ? new Color(0.55f, 0.55f, 0.55f) : Color.Lerp(new Color(0.9f, 0.25f, 0.18f), new Color(0.96f, 0.82f, 0.4f), mor);
+                Fill(new Rect(x, y + h + 1, w * (rout ? 1 : mor), h), new Color(mc.r, mc.g, mc.b, a * 0.95f));
+            }
+        }
+
         /// <summary>Над отрядами — свежие приказы, над полководцами — имя.</summary>
         void DrawLabels()
         {
@@ -392,20 +422,75 @@ namespace BattleSim
             }
         }
 
+        string resultText;
+        float resultAt = -1;
+
+        /// <summary>Итоги боя (считаются один раз): выжившие по видам войск, богатыри, лучший отряд, главные моменты.</summary>
+        string ResultSummary()
+        {
+            var b = Game.Battle;
+            if (resultText != null && Mathf.Approximately(resultAt, b.Time)) return resultText;
+            resultAt = b.Time;
+            var sb = new System.Text.StringBuilder();
+            for (int t = 0; t < 2; t++)
+            {
+                string col = t == 0 ? "#8cb4f5" : "#f08a7d";
+                sb.Append($"<color={col}><b>{(t == 0 ? "Синие" : "Красные")} · {b.Races[t].Name}</b></color>\n");
+                var planned = new Dictionary<int, int>();
+                foreach (var p in b.Plan) if (p.Team == t) planned[p.Type] = planned.TryGetValue(p.Type, out int n) ? n + 1 : 1;
+                var parts = new List<string>();
+                foreach (var kv in planned)
+                {
+                    int alive = 0;
+                    foreach (var u in b.Units) if (u.Alive && u.Team == t && u.Type == kv.Key) alive++;
+                    parts.Add($"{Defs.All[kv.Key].Name.ToLowerInvariant()} {alive}/{kv.Value}");
+                }
+                sb.Append(string.Join(" · ", parts)).Append("\n");
+                var h = b.Heroes[t];
+                if (h != null) sb.Append($"{h.T.Name} {h.Squad.Title}: {(h.Alive ? "жив" : "пал")}, сразил {h.Kills}\n");
+                Squad best = null; int bk = 0;
+                foreach (var q in b.Squads)
+                {
+                    if (q.Team != t || q.Special || q.T.Hero) continue;
+                    int k = 0;
+                    foreach (var u in q.Units) k += u.Kills;
+                    if (k > bk) { bk = k; best = q; }
+                }
+                if (best != null) sb.Append($"Лучший отряд — {best.Name}: сразили {bk}\n");
+                sb.Append("\n");
+            }
+            // главные моменты из летописи
+            string[] keys = { "Поединок", "победил в поединке", " пал!", "ревёт", "Хитрость", "поднимают", "рассыпаются", "смыкают", "Засада", "дрогнули" };
+            var moments = new List<string>();
+            var seen = new HashSet<string>();
+            foreach (var key in keys)
+                foreach (var e in b.Log)
+                    if (e.Text.Contains(key) && seen.Add(key))
+                    {
+                        moments.Add($"<color=#cdbb8f>{(int)e.T / 60}:{(int)e.T % 60:00}</color> {e.Text}");
+                        break;
+                    }
+            moments.Sort((x, y) => string.CompareOrdinal(x, y));
+            if (moments.Count > 0) sb.Append("<b>Как это было</b>\n").Append(string.Join("\n", moments.GetRange(0, Mathf.Min(6, moments.Count))));
+            return resultText = sb.ToString();
+        }
+
         void DrawResult()
         {
-            float w = Mathf.Min(520 * s, safe.width - 2 * Pad), h = 210 * s;
+            float w = Mathf.Min(640 * s, safe.width - 2 * Pad), h = Mathf.Min(560 * s, safe.height - 2 * Pad);
             var r = new Rect(safe.center.x - w / 2, safe.center.y - h / 2, w, h);
-            Box(r, new Color(0.047f, 0.06f, 0.08f, 0.9f));
+            Box(r, new Color(0.047f, 0.06f, 0.08f, 0.92f));
             int win = Game.Winner;
             var b = Game.Battle;
             string t = win == 0 ? "Победа синих" : win == 1 ? "Победа красных" : "Ничья";
             var ts = new GUIStyle(title);
             ts.normal.textColor = win == 0 ? new Color(0.55f, 0.71f, 0.96f) : win == 1 ? new Color(0.94f, 0.54f, 0.49f) : Ink;
-            GUI.Label(new Rect(r.x, r.y + 16 * s, r.width, 56 * s), t, ts);
+            GUI.Label(new Rect(r.x, r.y + 12 * s, r.width, 50 * s), t, ts);
             string sub = win >= 0 ? $"Выжило {b.Alive[win]} из {b.PlanCount[win]} · бой длился {Mathf.RoundToInt(Game.BattleTime)} с" : "Никто не выжил";
-            GUI.Label(new Rect(r.x + 20 * s, r.y + 78 * s, r.width - 40 * s, 40 * s), sub, center);
-            float bw = (r.width - 40 * s - 16 * s) / 3, by = r.yMax - BtnH - 22 * s, bx = r.x + 20 * s;
+            GUI.Label(new Rect(r.x + 20 * s, r.y + 60 * s, r.width - 40 * s, 26 * s), sub, center);
+            var st = new GUIStyle(small) { wordWrap = true, richText = true, fontSize = Mathf.RoundToInt(13 * s), alignment = TextAnchor.UpperLeft };
+            GUI.Label(new Rect(r.x + 24 * s, r.y + 94 * s, r.width - 48 * s, h - 94 * s - BtnH - 34 * s), ResultSummary(), st);
+            float bw = (r.width - 40 * s - 16 * s) / 3, by = r.yMax - BtnH - 18 * s, bx = r.x + 20 * s;
             if (Button(new Rect(bx, by, bw, BtnH), "Реванш", false, null, Brass)) Game.StartBattle();
             if (Button(new Rect(bx + bw + 8 * s, by, bw, BtnH), "Изменить армии")) Game.StopBattle();
             if (Button(new Rect(bx + 2 * (bw + 8 * s), by, bw, BtnH), "Новая карта")) { Game.StopBattle(); Game.NewMap(); }
