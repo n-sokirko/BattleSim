@@ -228,6 +228,10 @@ namespace BattleSim.Core
         public Mat4 Root = Mat4.Identity;
         public float Height;
         public V3 Min, Max; // габариты в позе покоя (после масштаба)
+        /// <summary>Из каких узлов собран меш: имя, род (0 тело, 1 носимое — плащ, шлем, шапка; 2 в руках), первая вершина, число.</summary>
+        public List<(string Name, int Kind, int Start, int Count)> Parts = new List<(string, int, int, int)>();
+        /// <summary>Опорные вершины для поправки по земле: крайние точки каждой кости по родам частей (см. Bake).</summary>
+        public int[][] Probe;
     }
 
     /// <summary>Запечённые анимации: для каждого кадра — матрицы костей (строка = кадр).</summary>
@@ -290,6 +294,8 @@ namespace BattleSim.Core
             var refBind = W[refN.Index];
             var invRefBind = refBind.Inverse();
             var parts = new List<MeshData>();
+            var names = new List<string>();
+            var kinds = new List<int>();
             foreach (var part in skinned)
             {
                 var m = MeshOf(doc, part);
@@ -297,7 +303,7 @@ namespace BattleSim.Core
                 for (int i = 0; i < m.Joints.Length; i++)
                     m.Joints[i] = boneIndex.TryGetValue(ps.Joints[m.Joints[i]], out int bi) ? bi : 0;
                 m.Transform(invRefBind * W[part.Index]);
-                parts.Add(m);
+                parts.Add(m); names.Add(part.Name); kinds.Add(Defs.AllAttachments.Contains(part.Name) ? 1 : 0);
             }
             foreach (var mesh in rigid)
             {
@@ -311,11 +317,14 @@ namespace BattleSim.Core
                 for (int v = 0; v < n; v++) { m.Joints[v * 4] = bi; m.Weights[v * 4] = 1; }
                 var L = W[bone.Index].Inverse() * W[mesh.Index];
                 m.Transform(invRefBind * boneInv[bi].Inverse() * L);
-                parts.Add(m);
+                parts.Add(m); names.Add(mesh.Name);
+                kinds.Add(bone.Name != null && (bone.Name.StartsWith("hand") || bone.Name.StartsWith("wrist")) ? 2 : Defs.AllAttachments.Contains(mesh.Name) ? 1 : 0);
             }
             var merged = MeshData.Merge(parts);
             merged.Image = parts[0].Image;
             var model = new SkinnedModel { Doc = doc, Mesh = merged, BoneNodes = skin.Joints, BoneInv = boneInv, Bind = refBind, Height = targetHeight };
+            for (int i = 0, v = 0; i < parts.Count; v += parts[i].VertexCount, i++) model.Parts.Add((names[i], kinds[i], v, parts[i].VertexCount));
+            model.Probe = GroundProbe(merged, model.Parts);
             // Масштаб: заданный рост, ступни на нуле — по позе покоя с поправкой пропорций
             Skin(model, pose).Bounds(out var mn, out var mx);
             float k = targetHeight / (mx.y - mn.y);
@@ -342,6 +351,8 @@ namespace BattleSim.Core
             model.Root = Mat4.Translation(0, -mn.y * k, 0) * Mat4.Scale(k);
             model.Min = new V3(mn.x * k, 0, mn.z * k); model.Max = new V3(mx.x * k, (mx.y - mn.y) * k, mx.z * k);
             model.Height = (mx.y - mn.y) * k;
+            model.Parts.Add(("body", 0, 0, mesh.VertexCount));
+            model.Probe = GroundProbe(mesh, model.Parts);
             return model;
         }
 
@@ -365,6 +376,77 @@ namespace BattleSim.Core
                 o.Pos[v * 3] = x; o.Pos[v * 3 + 1] = y; o.Pos[v * 3 + 2] = z;
             }
             return o;
+        }
+
+        static readonly float[][] ProbeDirs = BuildProbeDirs();
+        static float[][] BuildProbeDirs()
+        {
+            // 26 направлений: к граням, рёбрам и углам куба
+            var l = new List<float[]>();
+            for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++)
+                {
+                    if (x == 0 && y == 0 && z == 0) continue;
+                    float n = MathF.Sqrt(x * x + y * y + z * z);
+                    l.Add(new[] { x / n, y / n, z / n });
+                }
+            return l.ToArray();
+        }
+
+        /// <summary>Для каждого рода частей — крайние вершины каждой кости по 26 направлениям: несколько сотен точек вместо тысяч вершин.</summary>
+        static int[][] GroundProbe(MeshData m, List<(string Name, int Kind, int Start, int Count)> parts)
+        {
+            var res = new int[3][];
+            for (int kind = 0; kind < 3; kind++)
+            {
+                var best = new Dictionary<(int, int), (float, int)>();
+                foreach (var p in parts)
+                {
+                    if (p.Kind != kind) continue;
+                    for (int v = p.Start; v < p.Start + p.Count; v++)
+                    {
+                        int bone = 0; float bw = -1;
+                        for (int k = 0; k < 4; k++) if (m.Weights[v * 4 + k] > bw) { bw = m.Weights[v * 4 + k]; bone = m.Joints[v * 4 + k]; }
+                        for (int d = 0; d < ProbeDirs.Length; d++)
+                        {
+                            var dir = ProbeDirs[d];
+                            float s = m.Pos[v * 3] * dir[0] + m.Pos[v * 3 + 1] * dir[1] + m.Pos[v * 3 + 2] * dir[2];
+                            if (!best.TryGetValue((bone, d), out var b) || s > b.Item1) best[(bone, d)] = (s, v);
+                        }
+                    }
+                }
+                res[kind] = best.Values.Select(b => b.Item2).Distinct().ToArray();
+            }
+            return res;
+        }
+
+        /// <summary>
+        /// Сколько кадр должен подняться, чтобы не уходить в землю (и в настил моста): тело — не ниже земли, носимое
+        /// (плащ, шлем) — не глубже 12 см, оружие в руках — не глубже 16 см (толщина доски настила).
+        /// </summary>
+        static float GroundLift(SkinnedModel m, float[] row)
+        {
+            if (m.Probe == null) return 0;
+            float lift = 0;
+            float[] tol = { 0f, 0.12f, 0.16f };
+            var mesh = m.Mesh;
+            for (int kind = 0; kind < 3; kind++)
+            {
+                float min = float.PositiveInfinity;
+                foreach (int v in m.Probe[kind])
+                {
+                    float x = mesh.Pos[v * 3], y = mesh.Pos[v * 3 + 1], z = mesh.Pos[v * 3 + 2], yy = 0;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float w = mesh.Weights[v * 4 + k];
+                        if (w == 0) continue;
+                        int o = mesh.Joints[v * 4 + k] * 16;
+                        yy += w * (row[o + 1] * x + row[o + 5] * y + row[o + 9] * z + row[o + 13]);
+                    }
+                    if (yy < min) min = yy;
+                }
+                if (-min - tol[kind] > lift) lift = -min - tol[kind];
+            }
+            return lift;
         }
 
         /// <summary>Запекаем позы: для каждого кадра — матрицы, переводящие вершину меша в пространство юнита.</summary>
@@ -397,6 +479,9 @@ namespace BattleSim.Core
                         var mm = pose.SkinMat(m.BoneNodes[b]) * m.BoneInv[b] * m.Bind;
                         Array.Copy(mm.E, 0, row, b * 16, 16);
                     }
+                    // лёжа, падая и вздрагивая тело не уходит в землю и сквозь настил моста: кадр целиком поднимается
+                    float lift = GroundLift(m, row);
+                    if (lift > 0) for (int b = 0; b < nb; b++) row[b * 16 + 13] += lift;
                     rows.Add(row);
                 }
             }
