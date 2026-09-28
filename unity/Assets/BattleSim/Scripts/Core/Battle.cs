@@ -80,6 +80,11 @@ namespace BattleSim.Core
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
             int id = ++squadSeq;
             var sq = new Squad(id.ToString(), type, team, yaw);
+            // бойца — только туда, откуда можно дойти до середины отряда (не на отрезанный уступ рядом с ней),
+            // и на её уровне: не на башню или боевой ход над ней (туда тоже можно дойти — но кругом, по лестнице)
+            var nav = World.Nav; int cls = t.Mount ? 1 : 0, ci = nav.Idx(cx, cz);
+            int region = ci >= 0 && nav.Speed[cls][ci] > 0 ? nav.Region[cls][ci] : -1;
+            float cy = World.GroundAt(cx, cz);
             for (int r = 0; r < t.Rows; r++)
                 for (int c = 0; c < t.Cols; c++)
                 {
@@ -88,6 +93,9 @@ namespace BattleSim.Core
                     float jx = ox + (Rng.Rand() - 0.5f) * 0.2f, jz = oz + (Rng.Rand() - 0.5f) * 0.2f;
                     float x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
                     if (!World.InField(x, z, 1) || !World.Walkable(x, z, t.Radius) || Occupied(x, z, t.Radius)) continue;
+                    int ui = nav.Idx(x, z);
+                    if (region >= 0 && ui >= 0 && nav.Region[cls][ui] != region) continue;
+                    if (MathF.Abs(World.GroundAt(x, z) - cy) > 1.5f) continue;
                     var plan = new UnitPlan { Type = type, Team = team, X = x, Z = z, Yaw = yaw, Variant = (int)(Rng.Rand() * 2), Squad = id, Ox = ox, Oz = oz };
                     Plan.Add(plan);
                     var u = new Unit(plan, World) { Squad = sq };
@@ -460,7 +468,7 @@ namespace BattleSim.Core
         {
             var c = cmd.Unit.Pos;
             float side = Rng.Rand() < 0.5f ? -1.5f : 1.5f;
-            var at = World.WalkableNear(M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), c.z);
+            var at = World.WalkableNear(M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), c.z, 0.5f, c.y); // рядом и на том же уровне
             var plan = new UnitPlan { Type = Races[cmd.Team].Msg.Id, Team = cmd.Team, X = at.x, Z = at.z, Yaw = cmd.Unit.Yaw, Variant = 0 };
             var u = new Unit(plan, World);
             var carry = extra ?? new Carry();
@@ -571,9 +579,13 @@ namespace BattleSim.Core
                     {
                         u.Fly.y -= 20 * dt;
                         float fx = M.Clamp(u.Pos.x + u.Fly.x * dt, -World.Field + 1, World.Field - 1), fz = M.Clamp(u.Pos.z + u.Fly.z * dt, -World.Field + 1, World.Field - 1);
-                        if (World.Obs.Hit(fx, fz, 0.2f) == null) { u.Pos.x = fx; u.Pos.z = fz; } else { u.Fly.x = 0; u.Fly.z = 0; }
+                        // в дом, ствол, кладку стены или склон выше себя тело не влетает — падает у преграды
+                        float fg = World.HeightAt(fx, fz);
+                        if (World.Obs.Hit(fx, fz, 0.2f) == null && fg < u.Pos.y + 0.3f && World.Decks.SolidTop(fx, fz, fg, false) < u.Pos.y + 0.1f) { u.Pos.x = fx; u.Pos.z = fz; }
+                        else { u.Fly.x = 0; u.Fly.z = 0; }
                         u.Pos.y += u.Fly.y * dt;
-                        float g = World.GroundAt(u.Pos.x, u.Pos.z);
+                        // приземляется на то, что под ним, а не на настил над головой
+                        float g = World.GroundBelow(u.Pos.x, u.Pos.z, u.Pos.y - u.Fly.y * dt + 0.3f);
                         if (u.Pos.y <= g)
                         {
                             u.Pos.y = g; u.Flying = false;
@@ -862,13 +874,14 @@ namespace BattleSim.Core
             {
                 u.NavT = Time + 0.7f + Rng.Rand() * 0.4f;
                 u.NavGX = gx; u.NavGZ = gz;
-                if (nav.LineClear(u.Pos.x, u.Pos.z, gx, gz, cls)) u.Path = null;
+                if (nav.LineClear(u.Pos.x, u.Pos.z, gx, gz, cls, NavGrid.Gentle)) u.Path = null;
                 else
                 {
                     var sq = u.Squad;
                     var pc = sq.PathCache;
                     List<V2> path;
-                    if (pc != null && pc.Cls == cls && M.Hypot(pc.Gx - gx, pc.Gz - gz) < 6 && Time - pc.T < 3 && D2d(sq.Center, u.Pos) < 12) path = pc.Path;
+                    if (pc != null && pc.Cls == cls && M.Hypot(pc.Gx - gx, pc.Gz - gz) < 6 && Time - pc.T < 3 && D2d(sq.Center, u.Pos) < 12
+                        && nav.LineClear(u.Pos.x, u.Pos.z, sq.Center.x, sq.Center.z, cls)) path = pc.Path;
                     else if (PathBudget <= 0 || PathWork <= 0)
                     {
                         u.NavT = Time + 0.2f;
@@ -878,7 +891,9 @@ namespace BattleSim.Core
                     {
                         // не больше нескольких поисков пути за шаг — иначе рывки при сотнях отрядов
                         PathBudget--;
-                        bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0;
+                        // общий путь от середины строя — только если до неё прямая свободна: не с другого витка серпантина
+                        bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0
+                            && nav.LineClear(u.Pos.x, u.Pos.z, sq.Center.x, sq.Center.z, cls);
                         float fx = fromCenter ? sq.Center.x : u.Pos.x, fz = fromCenter ? sq.Center.z : u.Pos.z;
                         path = nav.FindPath(fx, fz, gx, gz, cls, 0, 0, 0, 0, 8000, 1.35f, fromCenter ? sq.Center.y : u.Pos.y);
                         PathWork -= nav.LastExpanded;
@@ -887,13 +902,17 @@ namespace BattleSim.Core
                     u.Path = path;
                     u.PathI = 1;
                     if (path != null)
-                    { // начинаем с ближайшей точки пути
+                    { // начинаем с ближайшей точки пути, до которой прямая свободна: ближняя может быть над обрывом, на следующем витке.
+                      // Начало пути — тоже кандидат: поиск начинается с клетки на уровне бойца, а она бывает соседней
                         float best = float.PositiveInfinity;
-                        for (int i = 1; i < path.Count; i++)
+                        int pick = -1;
+                        for (int i = 0; i < path.Count; i++)
                         {
                             float d = M.Hypot(path[i].x - u.Pos.x, path[i].z - u.Pos.z);
-                            if (d < best) { best = d; u.PathI = i; }
+                            if (i == 0 && d < 1f) continue;
+                            if (d < best && nav.LineClear(u.Pos.x, u.Pos.z, path[i].x, path[i].z, cls)) { best = d; pick = i; }
                         }
+                        u.PathI = pick >= 0 ? pick : M.Hypot(path[0].x - u.Pos.x, path[0].z - u.Pos.z) >= 1f ? 0 : 1;
                     }
                 }
             }
@@ -1310,9 +1329,8 @@ namespace BattleSim.Core
             float f = 1;
             if (sp > 0.05f)
             {
-                // в гору тяжело, под гору легче
-                float g = World.GroundAt(u.Pos.x + vx / sp, u.Pos.z + vz / sp) - u.Pos.y;
-                f = g > 0 ? MathF.Max(0.35f, 1 - g * 1.4f) : MathF.Min(1.2f, 1 - g * 0.5f);
+                // в гору тяжело, под пологую горку легче, по крутому спуску — осторожно
+                f = World.SlopeSpeed(World.GroundAt(u.Pos.x + vx / sp, u.Pos.z + vz / sp) - u.Pos.y);
             }
             f *= MathF.Max(0.2f, nav.SpeedAt(u.Pos.x, u.Pos.z, cls)); // топь, брод, чаща
             if (World.InWall(u.Pos.x, u.Pos.z)) f *= 0.35f; // перелезаем ограду
@@ -1320,21 +1338,50 @@ namespace BattleSim.Core
             u.Pace += (u.CurSpeed - u.Pace) * (1 - MathF.Exp(-dt / 0.4f));
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y, lim = World.Field - 0.5f;
             float nx = M.Clamp(ox + (vx * f + u.Knock.x) * dt, -lim, lim), nz = M.Clamp(oz + (vz * f + u.Knock.z) * dt, -lim, lim);
-            // Не заходим в непроходимое и не прыгаем с обрыва или со стены — скользим вдоль
-            if (!CanMove(ox, oz, oy, nx, nz, cls))
-            {
-                if (CanMove(ox, oz, oy, nx, oz, cls)) nz = oz;
-                else if (CanMove(ox, oz, oy, ox, nz, cls)) nx = ox;
-                else { nx = ox; nz = oz; }
-            }
-            u.Pos.x = nx; u.Pos.z = nz;
-            World.Obs.PushOut(ref u.Pos.x, ref u.Pos.z, u.T.Radius * 0.8f);
-            if (!CanMove(ox, oz, oy, u.Pos.x, u.Pos.z, cls)) { u.Pos.x = nx; u.Pos.z = nz; }
-            if (!CanMove(ox, oz, oy, u.Pos.x, u.Pos.z, cls)) { u.Pos.x = ox; u.Pos.z = oz; }
-            u.Pos.y = World.GroundAt(u.Pos.x, u.Pos.z);
+            // Не заходим в непроходимое, в ствол и в камень, не прыгаем с обрыва или со стены — скользим вдоль
+            if (!Place(u, nx, nz, cls) && !Place(u, nx, oz, cls) && !Place(u, ox, nz, cls) && !Veer(u, nx - ox, nz - oz, cls)) u.Pos.y = World.GroundAt(ox, oz);
             float k = MathF.Exp(-7 * dt);
             u.Knock.x *= k; u.Knock.z *= k;
             u.Phase += dt * u.CurSpeed * (u.T.Mount ? 1.4f : 3.3f);
+        }
+
+        /// <summary>
+        /// Упёрся и вдоль осей не скользит (крутой склон, куда вниз можно только наискось; угол настила) — шагаем,
+        /// отклонившись на 30–90° в ту или другую сторону: на склоне так и спускаются, «змейкой».
+        /// </summary>
+        bool Veer(Unit u, float dx, float dz, int cls)
+        {
+            float l = M.Hypot(dx, dz);
+            if (l < 1e-4f) return false;
+            for (int k = 1; k <= 3; k++)
+                foreach (float sg in new[] { 1f, -1f })
+                {
+                    float a = sg * k * M.PI / 6, c = MathF.Cos(a), s = MathF.Sin(a), f = MathF.Max(0.5f, c);
+                    if (Place(u, u.Pos.x + (dx * c - dz * s) * f, u.Pos.z + (dx * s + dz * c) * f, cls)) return true;
+                }
+            return false;
+        }
+
+        /// <summary>
+        /// Переставить бойца в (x, z), если туда можно шагнуть; из ствола, камня, угла дома его выталкивает вдоль края.
+        /// Вытолкнуло туда, куда шагнуть нельзя (обрыв, край стены), — остаётся на месте, а не внутри препятствия.
+        /// </summary>
+        bool Place(Unit u, float x, float z, int cls)
+        {
+            float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y;
+            if (!CanMove(ox, oz, oy, x, z, cls)) return false;
+            float r = u.T.Radius * 0.8f, ix = x, iz = z;
+            World.Obs.PushOut(ref x, ref z, r, oy);
+            // препятствие отклоняет шаг, а не переносит бойца: выталкивание не длиннее самого шага (иначе конь в тесной
+            // роще или богатырь у ограды прыгали на полметра из стороны в сторону)
+            float px = x - ix, pz = z - iz, pl = M.Hypot(px, pz), cap = MathF.Max(0.12f, M.Hypot(ix - ox, iz - oz) * 1.5f);
+            if (pl > cap) { x = ix + px / pl * cap; z = iz + pz / pl * cap; }
+            // туда, откуда не вытолкнуть, не шагаем (если только уже не стоим внутри — тогда выбираемся понемногу)
+            if (World.Obs.Hit(x, z, r - 0.05f, oy) != null && World.Obs.Hit(ox, oz, r - 0.05f, oy) == null) return false;
+            if ((x != ox || z != oz) && !CanMove(ox, oz, oy, x, z, cls)) return false;
+            u.Pos.x = x; u.Pos.z = z;
+            u.Pos.y = World.GroundAt(x, z);
+            return true;
         }
 
         /// <summary>Можно ли шагнуть из (ox, oz) на высоте oy в (nx, nz): не в дом, не в воду, не с обрыва.</summary>
@@ -1350,14 +1397,17 @@ namespace BattleSim.Core
               // а боец стоит у края на земле — не на её уровне. Такого выпускаем в соседнюю клетку его уровня, иначе он заперт.
                 if (MathF.Abs(oy - nav.Surf[a]) < 1f || MathF.Abs(g - nav.Surf[b]) > 0.6f) return false;
             }
+            // через перила моста не шагаем — ни с моста, ни на мост
+            if (World.Decks.RailCross(ox, oz, nx, nz)) return false;
             // в омут не шагаем, даже если клетка в целом проходима (край моста, крутая набережная); выбираться — можно
             if (World.Water - g > World.WadeMax && g < oy) return false;
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
             float dy = MathF.Abs(g - oy), d = M.Hypot(nx - ox, nz - oz);
             if (dy <= d * 1.3f + 0.005f) return true;
-            // ступенька круче уклона — только на краю настила (въезд на мост, начало лестницы). На склоне такой поблажки нет:
-            // толкотня дёргает бойца по 1–2 см несколько раз за шаг, и по 6 см за раз он сползал по отвесу ущелья
-            return dy <= d * 1.3f + 0.06f && World.OnDeck(ox, oz) != World.OnDeck(nx, nz);
+            // ступенька круче уклона — только на настиле или на его край (въезд на мост, с лестницы на боевой ход), не выше
+            // DeckStep, как и в сетке путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз
+            // за шаг, и с поблажкой он сползал по отвесу ущелья
+            return dy <= World.DeckStep + d * 1.3f && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz));
         }
 
         // ---------------------------------------------------------------- соседи
@@ -1460,14 +1510,8 @@ namespace BattleSim.Core
                     if (!u.Alive || (px == 0 && pz == 0)) continue;
                     float l = M.Hypot(px, pz);
                     if (l > 0.12f) { px *= 0.12f / l; pz *= 0.12f / l; }
-                    float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y;
-                    int cls = u.T.Mount ? 1 : 0;
-                    float nx = M.Clamp(u.Pos.x + px, -lim, lim), nz = M.Clamp(u.Pos.z + pz, -lim, lim);
-                    if (!CanMove(ox, oz, oy, nx, nz, cls)) continue; // толкотня не сбрасывает со стены и в воду
-                    u.Pos.x = nx; u.Pos.z = nz;
-                    World.Obs.PushOut(ref u.Pos.x, ref u.Pos.z, u.T.Radius * 0.8f);
-                    if (!CanMove(ox, oz, oy, u.Pos.x, u.Pos.z, cls)) { u.Pos.x = nx; u.Pos.z = nz; }
-                    u.Pos.y = World.GroundAt(u.Pos.x, u.Pos.z);
+                    // толкотня не сбрасывает со стены и в воду и не вдавливает в ствол
+                    Place(u, M.Clamp(u.Pos.x + px, -lim, lim), M.Clamp(u.Pos.z + pz, -lim, lim), u.T.Mount ? 1 : 0);
                 }
             }
             // упёрся — перестаём давить: гасим составляющую скорости против поправки; в сцепке — «трение»
@@ -1566,14 +1610,7 @@ namespace BattleSim.Core
                 if (!u.Alive || (px == 0 && pz == 0)) continue;
                 float l = M.Hypot(px, pz);
                 if (l > 0.4f) { px *= 0.4f / l; pz *= 0.4f / l; }
-                float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y;
-                int cls = u.T.Mount ? 1 : 0;
-                float nx = M.Clamp(u.Pos.x + px, -lim, lim), nz = M.Clamp(u.Pos.z + pz, -lim, lim);
-                if (!CanMove(ox, oz, oy, nx, nz, cls)) continue; // толкотня не сбрасывает со стены и в воду
-                u.Pos.x = nx; u.Pos.z = nz;
-                World.Obs.PushOut(ref u.Pos.x, ref u.Pos.z, u.T.Radius * 0.8f);
-                if (!CanMove(ox, oz, oy, u.Pos.x, u.Pos.z, cls)) { u.Pos.x = ox; u.Pos.z = oz; }
-                u.Pos.y = World.GroundAt(u.Pos.x, u.Pos.z);
+                Place(u, M.Clamp(u.Pos.x + px, -lim, lim), M.Clamp(u.Pos.z + pz, -lim, lim), u.T.Mount ? 1 : 0);
             }
         }
 

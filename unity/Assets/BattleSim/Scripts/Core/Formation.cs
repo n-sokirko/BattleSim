@@ -115,7 +115,7 @@ namespace BattleSim.Core
                         {
                             // в гору, по броду и чаще точка отряда идёт так же медленно, как солдаты
                             float gy = World.GroundAt(sq.Anchor.x + wx / wl, sq.Anchor.z + wz / wl) - World.GroundAt(sq.Anchor.x, sq.Anchor.z);
-                            float tf = (gy > 0 ? MathF.Max(0.35f, 1 - gy * 1.4f) : MathF.Min(1f, 1 - gy * 0.5f)) * MathF.Max(0.2f, nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls));
+                            float tf = MathF.Min(1f, World.SlopeSpeed(gy)) * MathF.Max(0.2f, nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls));
                             lagK *= tf;
                             float step = MathF.Min(speed * lagK * dt, MathF.Min(wl, dist - stop));
                             bool queued = sq.Choke != null && !sq.ChokeGo;
@@ -493,7 +493,7 @@ namespace BattleSim.Core
             if (need && !sq.APathQueued)
             {
                 bool avoid = Time < sq.AvoidUntil;
-                if (!avoid && nav.LineClear(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls)) { sq.APath = null; sq.APathT = Time; sq.APathGoal = g; return g; }
+                if (!avoid && nav.LineClear(sq.Anchor.x, sq.Anchor.z, g.x, g.z, cls, NavGrid.Gentle)) { sq.APath = null; sq.APathT = Time; sq.APathGoal = g; return g; }
                 sq.APathQueued = true; sq.APathWant = g;
                 pathQueue.Enqueue(sq);
             }
@@ -825,7 +825,9 @@ namespace BattleSim.Core
                 u.Settled = false;
             }
             else if (sd < 0.2f && still) { u.Settled = true; return; }
-            if (sd > 4.5f)
+            // до места рукой подать, но между ним и нами стенка, ограда, край обрыва — тоже идём по пути, а не упираемся
+            bool blocked = sd > 0.6f && World.Nav.Barriers > 0 && !World.Nav.LineClear(u.Pos.x, u.Pos.z, slot.x, slot.z, t.Mount ? 1 : 0);
+            if (sd > 4.5f || blocked)
             { // отстал или отбился — догоняем по пути
                 if (sq.FormMarch)
                 {
@@ -880,8 +882,12 @@ namespace BattleSim.Core
                         if (kk < k) { k = kk; blk = o; bov = ov; }
                     }
             // упёрлись в стоящего из чужого отряда — не ждём вечно, а обходим его сбоку
-            // (в своём строю ждём: там впереди своя шеренга, её не обгоняют)
-            if (sidestep && blk != null && k < 0.4f && blk.Squad != u.Squad && bov < 0.3f * l)
+            // (в своём строю ждём: там впереди своя шеренга, её не обгоняют — но не дольше пары секунд: двое, уступающие
+            // друг другу на узкой тропе, иначе стоят вечно)
+            bool jam = blk != null && k < 0.4f && bov < 0.3f * l;
+            if (!jam) u.JamT = -1;
+            else if (u.JamT < 0) u.JamT = Time;
+            if (sidestep && jam && (blk.Squad != u.Squad || Time - u.JamT > 2f))
             {
                 float ox = blk.Pos.x - u.Pos.x, oz = blk.Pos.z - u.Pos.z;
                 float lat = ox * fz - oz * fx;

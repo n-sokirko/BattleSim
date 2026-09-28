@@ -157,6 +157,8 @@ namespace BattleSim.Core
         public float RetargetT, Cooldown, AtkT = -1, AtkDur = 0.6f, ChargeT, DeadT, Phase, CurSpeed, LosT = -9, Scale;
         /// <summary>Сглаженная скорость (~0,4 с): по ней выбирается походка, чтобы шаг и бег не мельтешили от толкотни.</summary>
         public float Pace;
+        /// <summary>С какого времени боец ждёт стоящего впереди своего (−1 — не ждёт): долгое ожидание — обходим.</summary>
+        public float JamT = -1;
         public bool Shot, HitDone, Aiming, AtkNew, Engaged, DeathShown, LosOk, Gone;
         /// <summary>Реакция на удар для анимации: 1 — вздрогнул, 2 — принял удар на щит (показывается один раз).</summary>
         public int HitReact;

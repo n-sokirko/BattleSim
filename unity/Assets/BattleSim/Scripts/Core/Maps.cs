@@ -31,13 +31,14 @@ namespace BattleSim.Core
         }
 
         /// <summary>Точка внутри препятствия (с запасом pad)? Возвращает препятствие или null.</summary>
-        public Obstacle Hit(float x, float z, float pad = 0f)
+        public Obstacle Hit(float x, float z, float pad = 0f, float y = float.NaN)
         {
             var L = Grid.Near(x, z);
             if (L == null) return null;
             for (int i = 0; i < L.Count; i++)
             {
                 var o = L[i];
+                if (!float.IsNaN(y) && y > o.Ground + o.Top - 0.2f) continue;
                 float dx = x - o.X, dz = z - o.Z;
                 if (o.Rect)
                 {
@@ -50,13 +51,23 @@ namespace BattleSim.Core
         }
 
         /// <summary>Выталкивает круг радиуса r из препятствий (солдат скользит вдоль стены).</summary>
-        public void PushOut(ref float px, ref float pz, float r)
+        public void PushOut(ref float px, ref float pz, float r, float y = float.NaN)
         {
             var L = Grid.Near(px, pz);
             if (L == null || L.Count == 0) return;
+            // несколько проходов: вытолкнуло из одного ствола в соседний — выталкиваем и оттуда
+            for (int pass = 0; pass < 3; pass++)
+                if (!PushOnce(L, ref px, ref pz, r, y)) return;
+        }
+
+        bool PushOnce(List<Obstacle> L, ref float px, ref float pz, float r, float y)
+        {
+            bool moved = false;
             for (int i = 0; i < L.Count; i++)
             {
                 var o = L[i];
+                // над препятствием (на мосту, на стене, на уступе над камнем) — оно не мешает; плоские и ушедшие в землю — тоже
+                if (!float.IsNaN(y) && y > o.Ground + o.Top - 0.2f) continue;
                 float dx = px - o.X, dz = pz - o.Z;
                 if (o.Rect)
                 {
@@ -67,6 +78,7 @@ namespace BattleSim.Core
                     else lz = (lz != 0 ? M.Sign(lz) : 1f) * ez;
                     px = o.X + lx * o.C - lz * o.S;
                     pz = o.Z + lx * o.S + lz * o.C;
+                    moved = true;
                 }
                 else
                 {
@@ -75,8 +87,10 @@ namespace BattleSim.Core
                     float k = d > 1e-4f ? m / d : 0f;
                     px = o.X + (d > 1e-4f ? dx * k : m);
                     pz = o.Z + dz * k;
+                    moved = true;
                 }
             }
+            return moved;
         }
 
         /// <summary>Перекрывает ли препятствие точку на высоте y (для прямой видимости и болтов).</summary>
@@ -105,6 +119,10 @@ namespace BattleSim.Core
         /// <summary>Каменный мост (для отрисовки; деревянные — в горах).</summary>
         public bool Stone;
         public float Len, Ux, Uz, X, Z;
+        /// <summary>Профиль верха (абсолютные высоты, равномерно от A к B) — вместо линейного HA→HB: боевой ход стены.</summary>
+        public float[] Prof;
+        /// <summary>Перила (парапет) по бокам: сойти с настила и взойти на него можно только с концов.</summary>
+        public bool Rails;
     }
 
     public sealed class Decks
@@ -138,6 +156,7 @@ namespace BattleSim.Core
 
         public static float HeightOf(Deck d, float t, float ground)
         {
+            if (d.Prof != null) return M.Sample(d.Prof, t);
             float h = d.HA + (d.HB - d.HA) * t;
             return d.Rel ? ground + h : h;
         }
@@ -154,6 +173,22 @@ namespace BattleSim.Core
                     if (!d.Walk || !Locate(d, x, z, out float t, out _)) continue;
                     float h = HeightOf(d, t, ground);
                     if (h > best) best = h;
+                }
+            return best;
+        }
+
+        /// <summary>Самый высокий настил в точке не выше top (или -∞): куда падает тело, пролетая под мостом.</summary>
+        public float SurfaceBelow(float x, float z, float ground, float top)
+        {
+            var L = Grid.Near(x, z);
+            float best = float.NegativeInfinity;
+            if (L != null)
+                for (int i = 0; i < L.Count; i++)
+                {
+                    var d = L[i];
+                    if (!d.Walk || !Locate(d, x, z, out float t, out _)) continue;
+                    float h = HeightOf(d, t, ground);
+                    if (h <= top && h > best) best = h;
                 }
             return best;
         }
@@ -183,6 +218,23 @@ namespace BattleSim.Core
                 foreach (var d in L)
                     if (d.Kind == DeckKind.Wall && Locate(d, x, z, out _, out _)) return d;
             return null;
+        }
+
+        /// <summary>Шаг из (ax, az) в (bx, bz) — через перила моста (сбоку, а не с конца настила)?</summary>
+        public bool RailCross(float ax, float az, float bx, float bz)
+        {
+            var L = Grid.Near((ax + bx) / 2, (az + bz) / 2);
+            if (L == null) return false;
+            for (int i = 0; i < L.Count; i++)
+            {
+                var d = L[i];
+                if (!d.Rails) continue;
+                bool ia = Locate(d, ax, az, out _, out _), ib = Locate(d, bx, bz, out _, out _);
+                if (ia == ib) continue;
+                float ox = ia ? bx : ax, oz = ia ? bz : az, along = (ox - d.Ax) * d.Ux + (oz - d.Az) * d.Uz;
+                if (along > 1.5f && along < d.Len - 1.5f) return true;
+            }
+            return false;
         }
 
         /// <summary>Тонкий настил моста перекрывает точку на высоте y?</summary>
@@ -270,6 +322,11 @@ namespace BattleSim.Core
         /// и путь через него класть нельзя, иначе бойцы упираются в уступ, куда их ведёт поиск.
         /// </summary>
         readonly byte[] Sheer;
+        /// <summary>
+        /// Добавка к цене пути за крутизну склона в клетке: по крутому идти дольше и тяжелее, поэтому поиск выбирает
+        /// дорогу — серпантин, подъём-улицу, — а не прямую через щель в уступе, где отряд застревает давкой.
+        /// </summary>
+        readonly float[] SlopeCost;
 
         readonly Search main;
 
@@ -284,6 +341,7 @@ namespace BattleSim.Core
             Crowd = new float[n];
             Canopy = new byte[n];
             Sheer = new byte[n];
+            SlopeCost = new float[n];
             Build(w);
             main = new Search(n);
             Region = new[] { Label(0), Label(1) };
@@ -320,6 +378,18 @@ namespace BattleSim.Core
                     Speed[0][i] = si; Speed[1][i] = sc;
                     Conceal[i] = hide; Canopy[i] = canopy;
                 }
+            // крутизна склона в клетке (по земле; настил ровный) — к цене пути
+            for (int iz = 0; iz < D; iz++)
+                for (int ix = 0; ix < D; ix++)
+                {
+                    int i = iz * D + ix;
+                    if (Speed[0][i] == 0 && Speed[1][i] == 0) continue;
+                    var p = Center(i);
+                    if (w.OnDeck(p.x, p.z)) continue;
+                    float h = c * 0.5f;
+                    float gx = (w.HeightAt(p.x + h, p.z) - w.HeightAt(p.x - h, p.z)) / c, gz = (w.HeightAt(p.x, p.z + h) - w.HeightAt(p.x, p.z - h)) / c;
+                    SlopeCost[i] = MathF.Max(0, M.Hypot(gx, gz) - 0.35f) * 2.5f;
+                }
             // отвесы между центрами соседних клеток: профиль рельефа (с настилами) с шагом ~0,3 м, как правило шага бойца
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
@@ -332,6 +402,33 @@ namespace BattleSim.Core
                     if (ix + 1 < D && iz + 1 < D && SheerLine(w, p.x, p.z, p.x + c, p.z + c)) Sheer[i] |= 4;
                     if (ix > 0 && iz + 1 < D && SheerLine(w, p.x, p.z, p.x - c, p.z + c)) Sheer[i] |= 8;
                 }
+            // сплошные ограды (баррикада за воротами, стенки у мостов): тонкие, клетку целиком не закрывают — но шагнуть
+            // через них нельзя, только в проём; без этого путь шёл прямо сквозь ограду, и бойцы упирались в неё
+            void Fence(float fax, float faz, float fbx, float fbz, float pad)
+            {
+                int ix0 = Math.Max(0, M.Floor((MathF.Min(fax, fbx) - pad - c + Half) / c) - 1), ix1 = Math.Min(D - 1, M.Floor((MathF.Max(fax, fbx) + pad + c + Half) / c) + 1);
+                int iz0 = Math.Max(0, M.Floor((MathF.Min(faz, fbz) - pad - c + Half) / c) - 1), iz1 = Math.Min(D - 1, M.Floor((MathF.Max(faz, fbz) + pad + c + Half) / c) + 1);
+                for (int iz = iz0; iz <= iz1; iz++)
+                    for (int ix = ix0; ix <= ix1; ix++)
+                    {
+                        int i = iz * D + ix;
+                        var p = Center(i);
+                        if (ix + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z, fax, faz, fbx, fbz) < pad) Sheer[i] |= 1;
+                        if (iz + 1 < D && SegSeg(p.x, p.z, p.x, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 2;
+                        if (ix + 1 < D && iz + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 4;
+                        if (ix > 0 && iz + 1 < D && SegSeg(p.x, p.z, p.x - c, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 8;
+                    }
+            }
+            foreach (var fw in w.Features.Walls)
+                if (fw.Solid) Fence(fw.Ax, fw.Az, fw.Bx, fw.Bz, fw.T / 2 + 0.2f);
+            // перила мостов: сойти можно только с концов настила
+            foreach (var d in w.Decks.List)
+                if (d.Rails && d.Len > 3.5f)
+                    foreach (float sd in new[] { -1f, 1f })
+                    {
+                        float nx = -d.Uz * sd * d.W / 2, nz = d.Ux * sd * d.W / 2;
+                        Fence(d.Ax + d.Ux * 1.5f + nx, d.Az + d.Uz * 1.5f + nz, d.Bx - d.Ux * 1.5f + nx, d.Bz - d.Uz * 1.5f + nz, 0.1f);
+                    }
             int b = 0;
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
@@ -441,6 +538,17 @@ namespace BattleSim.Core
         }
 
         /// <summary>Есть ли на прямой уступ круче, чем пускает шаг бойца (кроме края настила — въезда на мост, лестницу).</summary>
+        /// <summary>Расстояние между отрезком (a, b) и осью ограды (0 — пересекаются).</summary>
+        static float SegSeg(float ax, float az, float bx, float bz, float fax, float faz, float fbx, float fbz)
+        {
+            static float Cross(float ox, float oz, float px, float pz, float qx, float qz) => (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
+            float d1 = Cross(ax, az, bx, bz, fax, faz), d2 = Cross(ax, az, bx, bz, fbx, fbz);
+            float d3 = Cross(fax, faz, fbx, fbz, ax, az), d4 = Cross(fax, faz, fbx, fbz, bx, bz);
+            if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
+            return MathF.Min(MathF.Min(M.SegDist(fax, faz, ax, az, bx, bz), M.SegDist(fbx, fbz, ax, az, bx, bz)),
+                             MathF.Min(M.SegDist(ax, az, fax, faz, fbx, fbz), M.SegDist(bx, bz, fax, faz, fbx, fbz)));
+        }
+
         static bool SheerLine(World w, float ax, float az, float bx, float bz)
         {
             float d = M.Hypot(bx - ax, bz - az);
@@ -451,7 +559,18 @@ namespace BattleSim.Core
             {
                 float x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, h = w.GroundAt(x, z);
                 bool deck = w.OnDeck(x, z);
-                if (MathF.Abs(h - prev) > step * 1.3f + (deck != prevDeck ? 0.2f : 0.02f)) return true;
+                if (MathF.Abs(h - prev) > step * 1.3f + 0.02f)
+                {
+                    if (!deck && !prevDeck) return true;
+                    // у края настила: находим сам уступ и меряем его — шагом берётся не выше DeckStep (как в Battle.CanMove)
+                    float lo = (k - 1f) / n, hi = (float)k / n, hl = prev, hh = h;
+                    for (int it = 0; it < 7; it++)
+                    {
+                        float mid = (lo + hi) / 2, hm = w.GroundAt(ax + (bx - ax) * mid, az + (bz - az) * mid);
+                        if (MathF.Abs(hm - hl) > MathF.Abs(hh - hm)) { hi = mid; hh = hm; } else { lo = mid; hl = hm; }
+                    }
+                    if (MathF.Abs(hh - hl) > World.DeckStep + (hi - lo) * d * 1.3f) return true;
+                }
                 prev = h; prevDeck = deck;
             }
             return false;
@@ -468,12 +587,15 @@ namespace BattleSim.Core
         public bool ConcealAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Conceal[i] == 1; }
         public bool CanopyAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Canopy[i] == 1; }
 
+        /// <summary>Прямая не только свободна, но и полога: напрямую по ней идти не хуже, чем по найденной дороге.</summary>
+        public const float Gentle = 0.75f;
+
         /// <summary>
-        /// Свободна ли прямая: обход всех клеток, через которые она проходит (DDA), переходы — только через стороны клеток.
+        /// Свободна ли прямая (maxSlope — и не круче этого по цене склона): обход всех клеток, через которые она проходит (DDA), переходы — только через стороны клеток.
         /// Раньше проверялись точки через полклетки, и прямая, чиркнувшая угол ограды, считалась свободной — по такому
         /// спрямлённому пути точка отряда упиралась в ограду навсегда.
         /// </summary>
-        public bool LineClear(float ax, float az, float bx, float bz, int cls)
+        public bool LineClear(float ax, float az, float bx, float bz, int cls, float maxSlope = float.PositiveInfinity)
         {
             var sp = Speed[cls];
             float fx = (ax + Half) / CellSize, fz = (az + Half) / CellSize, tx = (bx + Half) / CellSize, tz = (bz + Half) / CellSize;
@@ -499,7 +621,7 @@ namespace BattleSim.Core
                 }
                 if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
                 int i = z * Dim + x;
-                if (sp[i] == 0 || !Step(prev, i, false)) return false;
+                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope) return false;
                 prev = i;
             }
             return true;
@@ -641,7 +763,7 @@ namespace BattleSim.Core
                             int a = cz * D + nx, b2 = nz * D + cx;
                             if (sp[a] == 0 || sp[b2] == 0 || !Step(c, a, false) || !Step(c, b2, false)) continue;
                         }
-                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost) + MathF.Abs(S[ni] - S[c]) * 0.4f;
+                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni]) + MathF.Abs(S[ni] - S[c]) * 0.4f;
                         if (avoidR > 0)
                         {
                             float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;
@@ -668,7 +790,16 @@ namespace BattleSim.Core
             for (int i = 0; i < pts.Count - 1;)
             {
                 int j = Math.Min(pts.Count - 1, i + 24);
-                while (j > i + 1 && !LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, q.cls)) j--;
+                // спрямляем, не срезая по крутому то, что поиск обошёл по дороге (серпантин не превращается в прямую по склону)
+                float steep = 0;
+                for (int k = i; k <= j; k++) steep = MathF.Max(steep, SlopeCost[cells[k]]);
+                while (j > i + 1)
+                {
+                    if (LineClear(pts[i].x, pts[i].z, pts[j].x, pts[j].z, q.cls, MathF.Max(Gentle, steep))) break;
+                    j--;
+                    steep = 0;
+                    for (int k = i; k <= j; k++) steep = MathF.Max(steep, SlopeCost[cells[k]]);
+                }
                 output.Add(pts[j]);
                 i = j;
             }
