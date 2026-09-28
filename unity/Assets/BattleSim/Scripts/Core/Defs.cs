@@ -68,6 +68,8 @@ namespace BattleSim.Core
         public UnitDef Cmd, Msg, Cap;
         /// <summary>Кожа и сталь: оттенок (0..360, &lt;0 — не менять) и насыщенность; конь — множитель цвета.</summary>
         public float SkinHue = -1, SkinSat, MetalHue = -1, MetalSat;
+        /// <summary>Светлота кожи (×): у KayKit кожа очень светлая — зелёная без затемнения выходит бледно-мятной.</summary>
+        public float SkinLit = 1;
         public float HorseTint = 1;
         /// <summary>Ярость орды: копится в бою, на пике армия ревёт (быстрее, сильнее, не бежит).</summary>
         public bool Rage;
@@ -203,12 +205,12 @@ namespace BattleSim.Core
             Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" } } };
         static readonly UnitDef StArcher = new UnitDef { Key = "archer", Name = "Лучники", SquadName = "лучники", Model = "Rogue_Hooded", Hp = 58, Armor = 0.05f, Speed = 3.7f, Accel = 12, Radius = 0.5f, Mass = 0.85f,
             Reach = 0.5f, Dmg = 18, Cd = 1.6f, AtkTime = 0.6f, Ranged = true, Range = 34, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 5, Rows = 2, Spacing = 1.45f,
-            Note = "Стреляют часто", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
-            Anim = new AnimSet { Idle = "2H_Ranged_Aiming", Run = "Running_A", Attack = new[] { "2H_Ranged_Shoot" }, Aim = "2H_Ranged_Aiming", Reload = "2H_Ranged_Reload", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
+            Note = "Стреляют часто", Keep = new[] { "1H_Crossbow", "Rogue_Cape" },
+            Anim = new AnimSet { Idle = "Bow_Aim", Run = "Running_A", Attack = new[] { "Bow_Shoot" }, Aim = "Bow_Aim", Reload = "Bow_Aim", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
         static readonly UnitDef StHorseArcher = new UnitDef { Key = "horsearcher", Name = "Конные лучники", SquadName = "конные лучники", Model = "Rogue_Hooded", Mount = true, Ranged = true, Skirmish = true,
             Hp = 160, Armor = 0.1f, Speed = 8.2f, Accel = 6, Radius = 1.1f, Mass = 3.2f, Reach = 0.6f, Dmg = 17, Cd = 1.6f, AtkTime = 0.6f, Range = 32, ArrowBlock = 0.1f, VsCav = 1, Charge = 1,
-            Cols = 4, Rows = 2, Spacing = 2.8f, Note = "Стреляют на скаку, не даются в руки", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
-            Anim = new AnimSet { Attack = new[] { "2H_Ranged_Shoot" } } };
+            Cols = 4, Rows = 2, Spacing = 2.8f, Note = "Стреляют на скаку, не даются в руки", Keep = new[] { "1H_Crossbow", "Rogue_Cape" },
+            Anim = new AnimSet { Attack = new[] { "Bow_Shoot" } } };
         static readonly UnitDef StKhan = new UnitDef { Key = "khan", Name = "Хан", Model = "Barbarian", Mount = true, Special = Special.Commander, Hp = 320, Armor = 0.4f,
             Speed = 7.0f, Accel = 6, Radius = 1.1f, Mass = 3.5f, Reach = 1.0f, Dmg = 24, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.08f, ScaleJit = 0,
             Keep = new[] { "2H_Axe", "Barbarian_Hat", "Barbarian_Cape" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
@@ -247,21 +249,21 @@ namespace BattleSim.Core
         public static readonly RaceDef Orcs = new RaceDef
         {
             Key = "orcs", Name = "Орда", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
-            Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 95, SkinSat = 0.45f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
+            Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 100, SkinSat = 0.55f, SkinLit = 0.62f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
             Names = new[] { "Грызь", "Хряк", "Шмяк", "Гнилозуб", "Рвач", "Бугай", "Кривоклык", "Жрун" },
             Hero = OrcHero, HeroNames = new[] { "Гнилобрюх", "Камнелоб", "Кровохлёб", "Жмыхарь", "Костолом" },
         };
         public static readonly RaceDef Nav = new RaceDef
         {
             Key = "nav", Name = "Навь", Cry = "Навь идёт!", Units = { [0] = NavDead, [1] = NavGhoul, [2] = NavNecro, [3] = NavRider },
-            Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 60, SkinSat = 0.1f, MetalHue = 25, MetalSat = 0.3f, HorseTint = 0.45f, Undead = true,
+            Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 80, SkinSat = 0.07f, SkinLit = 0.82f, MetalHue = 25, MetalSat = 0.3f, HorseTint = 0.45f, Undead = true,
             Names = new[] { "Кощей", "Мара", "Морок", "Карачун", "Вий", "Лихо", "Мор", "Чернава" },
             Hero = NavHero, HeroNames = new[] { "Вурдалак", "Могильщик", "Упырь-исполин", "Костяной Змей" },
         };
         public static readonly RaceDef Steppe = new RaceDef
         {
             Key = "steppe", Name = "Степь", Cry = "Урагх!", Units = { [0] = StNuker, [1] = StBatyr, [2] = StArcher, [3] = StHorseArcher },
-            Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.42f, MetalHue = 38, MetalSat = 0.45f, Feign = true,
+            Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.45f, SkinLit = 0.85f, MetalHue = 38, MetalSat = 0.45f, Feign = true,
             Names = new[] { "Кончак", "Боняк", "Тугоркан", "Шарукан", "Итларь", "Котян", "Кобяк", "Гзак" },
             Hero = StHero, HeroNames = new[] { "Челубей", "Тугарин Змеевич", "Идолище", "Калин" },
         };

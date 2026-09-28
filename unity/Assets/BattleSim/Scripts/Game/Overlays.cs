@@ -66,12 +66,18 @@ namespace BattleSim
             boltBase = Quaternion.identity;
             // бомба орды — тёмный шар с запалом
             var bombMat = ModelLibrary.NewLit(null, new Color(0.16f, 0.15f, 0.14f), "bomb");
-            bombs = new InstancedSet(Conv.ToMesh(WorldMeshes.Flower(0.22f), "bomb"), bombMat, true);
+            bombs = new InstancedSet(Conv.ToMesh(WorldMeshes.Flower(0.14f), "bomb"), bombMat, true);
         }
 
-        public void DrawRings(Battle b)
+        /// <summary>
+        /// Кольца под солдатами. В бою вблизи камеры они почти не видны (на крупном плане цвет армии и так
+        /// ясен, а кольца только мусорят), вдали — видны, чтобы армии различались на общем плане.
+        /// </summary>
+        public void DrawRings(Battle b, bool setup = false)
         {
             int n = 0;
+            var cam = Camera.main;
+            Vector3 cp = cam != null ? cam.transform.position : Vector3.zero;
             foreach (var u in b.Units)
             {
                 if (!u.Alive) continue;
@@ -79,7 +85,13 @@ namespace BattleSim
                 var rp = u.RenderPos(GameMain.Alpha);
                 rm[n] = Matrix4x4.TRS(Conv.U(rp.x, rp.y + 0.07f, rp.z), Quaternion.identity, new Vector3(k, 1, k));
                 var sq = u.Squad;
-                rc[n] = sq != null && sq.Hidden ? hiddenCol[u.Team] : sq != null && sq.Order.Mode == Mode.Rout ? routCol : teamCol[u.Team];
+                Vector4 c = sq != null && sq.Hidden ? hiddenCol[u.Team] : sq != null && sq.Order.Mode == Mode.Rout ? routCol : teamCol[u.Team];
+                if (!setup && cam != null)
+                {
+                    float d = Vector3.Distance(cp, Conv.U(rp));
+                    c.w *= Mathf.Clamp((d - 15) / 45f, 0.12f, 1f);
+                }
+                rc[n] = c;
                 if (++n == CrowdModel.Batch) { Flush(n); n = 0; }
             }
             if (n > 0) Flush(n);

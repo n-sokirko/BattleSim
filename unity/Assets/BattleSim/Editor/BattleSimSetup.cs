@@ -18,7 +18,7 @@ namespace BattleSim.EditorTools
         const string Root = "Assets/BattleSim";
         const string SettingsDir = Root + "/Settings";
         const string ScenePath = Root + "/BattleSim.unity";
-        static readonly string[] Shaders = { "BattleSim/Lit", "BattleSim/Water", "BattleSim/Unlit", "Skybox/Procedural" };
+        static readonly string[] Shaders = { "BattleSim/Lit", "BattleSim/Water", "BattleSim/Unlit", "BattleSim/Puff", "Skybox/Procedural" };
 
         static BattleSimSetup()
         {
@@ -114,7 +114,15 @@ namespace BattleSim.EditorTools
             PlayerSettings.allowedAutorotateToLandscapeRight = true;
             PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Android, "com.sokirko.secha");
 
-            // Наши шейдеры ищутся по имени — включаем их в сборку
+            IncludeShaders();
+        }
+
+        /// <summary>
+        /// Наши шейдеры ищутся по имени (материалы создаются в коде) — включаем их в сборку и оставляем варианты
+        /// инстансинга и тумана. Вызывается и перед каждой сборкой: новый шейдер не потеряется.
+        /// </summary>
+        public static void IncludeShaders()
+        {
             var gs = AssetDatabase.LoadAssetAtPath<Object>("ProjectSettings/GraphicsSettings.asset");
             var so = new SerializedObject(gs);
             var arr = so.FindProperty("m_AlwaysIncludedShaders");

@@ -419,7 +419,7 @@ namespace BattleSim
             RenderCrowd(animDt);
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (Phase == Phase.Fight && !Paused) Perf.Add(Time.unscaledDeltaTime * 1000, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            overlays.DrawRings(Battle);
+            overlays.DrawRings(Battle, Phase == Phase.Setup);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
             if (fx != null)
