@@ -15,19 +15,26 @@ import bpy
 from mathutils import Vector
 import rigio, preview, posekit as pk
 
-MODEL = os.path.join(here, '..', '..', 'unity', 'Assets', 'BattleSim', 'Resources', 'Models', 'Knight.bytes')
-SRC = os.path.abspath(os.environ.get('GLB', MODEL))
-OUT = os.path.abspath(os.environ.get('OUT', SRC))
+MODELS_DIR = os.path.join(here, '..', '..', 'unity', 'Assets', 'BattleSim', 'Resources', 'Models')
 RENDER = os.environ.get('RENDER', '0') == '1'
 out = os.path.join(here, 'out'); os.makedirs(out, exist_ok=True)
-if not SRC.endswith('.glb'):  # импортёр Blender узнаёт формат по расширению
+rig = ik = arms = None
+
+
+def load(model):
+    """Модель игры -> Blender (импортёр узнаёт формат по расширению, поэтому копия в out/*.glb)."""
+    global rig, ik, arms
     import shutil
-    tmp = os.path.join(out, 'Knight.glb'); shutil.copyfile(SRC, tmp); SRC_LOAD = tmp
-else:
-    SRC_LOAD = SRC
-rig = rigio.Rig(SRC_LOAD)
-ik = pk.LegIK(rig)
+    src = os.path.join(MODELS_DIR, model + '.bytes')
+    tmp = os.path.join(out, model + '.glb'); shutil.copyfile(src, tmp)
+    rig = rigio.Rig(tmp)
+    ik = pk.LegIK(rig)
+    arms = pk.ArmIK(rig)
+    return src
+
+
 X = Vector((1, 0, 0))
+Z = Vector((0, 0, 1))
 UPPER = ('upperarm', 'lowerarm', 'wrist', 'hand', 'handslot', 'chest', 'head')
 
 
@@ -100,32 +107,94 @@ def rise_undead(t):
     pk.rotate(rig, 'spine', FWD, 6 * math.sin(t * 23) * hold)  # дрожь в замираниях
 
 
-CLIPS = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE)]
-only = os.environ.get('ONLY')
-for name, fn, dur in CLIPS:
-    if only and name not in only.split(','): continue
-    rig.record(name, fn, dur)
-    print('recorded', name, dur)
-rig.g.save(OUT)
-print('saved', OUT)
+BOW = 1.0
+# стойка лучника (пространство арматуры: +X — левая рука, -Y — вперёд, Z — вверх)
+BOW_HAND = (0.13, -0.58, 1.12)        # левая рука с луком вытянута к цели
+NOCK = (0.06, -0.44, 1.10)            # правая у лука — стрела на тетиве
+ANCHOR = (-0.19, 0.04, 1.13)          # тетива натянута к плечу (у кукольной головы щеки нет — к скуле не дотянуться)
+RELEASE = (-0.27, 0.12, 1.15)         # отпустил — рука по инерции уходит назад
+QUIVER = (-0.16, 0.24, 1.26)          # за стрелой в колчан за правым плечом
+POLE_L = (0.75, -0.25, 0.75)          # локоть лучной руки — вниз-наружу
+POLE_R = (-0.7, 0.45, 1.45)           # локоть тетивы — высоко и назад
+TWIST = -35                           # левое плечо к цели
 
-if RENDER:
-    tex = os.path.join(os.path.dirname(MODEL), 'Knight_tex0.png.bytes')
-    cam = preview.setup(preview.KEEP_RUS, tex, res=(260, 300))
-    for name, fn, dur in CLIPS:
-        if only and name not in only.split(','): continue
-        preview.show(preview.KEEP_DEAD if name == 'Rise_Undead' else preview.KEEP_RUS)
+
+def bow_base(t):
+    """Ноги и таз — из покоя, грудь развёрнута левым плечом к цели, голова смотрит на цель."""
+    ik.enable(False); arms.enable(False)
+    base = pk.capture(rig, 'Idle', t % 1.0667)
+    pk.detach(rig); pk.apply_basis(rig, base)
+    pk.rotate(rig, 'chest', Z, TWIST)
+
+
+def bow_head(tilt=0.0):
+    pk.rotate(rig, 'head', Z, -TWIST * 0.85)
+    if tilt: pk.rotate(rig, 'head', FWD, tilt)
+
+
+def bow_shoot(t):
+    """Выстрел из лука (~1 с): натянуть, прицелиться, отпустить, достать новую стрелу."""
+    bow_base(t)
+    raise_ = pk.smooth(t / 0.3)
+    bow = pk.lerp3((0.16, -0.5, 1.0), BOW_HAND, raise_)
+    if 0.55 <= t < 0.7:  # отдача лука
+        k = math.sin(math.pi * (t - 0.55) / 0.15)
+        bow = pk.lerp3(bow, (bow[0], bow[1] - 0.03, bow[2] - 0.03), k)
+    if t < 0.08: hand = NOCK
+    elif t < 0.42: hand = pk.lerp3(NOCK, ANCHOR, pk.smooth((t - 0.08) / 0.34))
+    elif t < 0.55: hand = pk.lerp3(ANCHOR, (ANCHOR[0], ANCHOR[1] + 0.01, ANCHOR[2]), math.sin(t * 60) * 0.5 + 0.5)
+    elif t < 0.6: hand = pk.lerp3(ANCHOR, RELEASE, 1 - (1 - (t - 0.55) / 0.05) ** 2)
+    elif t < 0.78: hand = pk.lerp3(RELEASE, QUIVER, pk.smooth((t - 0.6) / 0.18))
+    else: hand = pk.lerp3(QUIVER, NOCK, pk.smooth((t - 0.78) / 0.22))
+    arms.set('l', bow, POLE_L)
+    arms.set('r', hand, POLE_R)
+    bow_head(6 * pk.smooth((t - 0.1) / 0.3) * (1 - pk.smooth((t - 0.6) / 0.2)))
+
+
+def bow_aim(t):
+    """Тетива натянута, ждёт цель: дыхание и лёгкая дрожь."""
+    bow_base(t)
+    b = math.sin(2 * math.pi * t / 1.0667)
+    arms.set('l', (BOW_HAND[0], BOW_HAND[1], BOW_HAND[2] + 0.01 * b), POLE_L)
+    arms.set('r', (ANCHOR[0], ANCHOR[1] + 0.006 * math.sin(t * 40), ANCHOR[2] + 0.01 * b), POLE_R)
+    bow_head(6)
+
+
+KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE)]
+BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
+# всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
+MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS}
+KEEP = {'Rise_Undead': preview.KEEP_DEAD}
+only = os.environ.get('ONLY')
+pick = lambda name: not only or name in only.split(',')
+
+for model, clips in MODELS.items():
+    if os.environ.get('MODEL') and model != os.environ['MODEL']: continue
+    todo = [c for c in clips if pick(c[0])]
+    if not todo: continue
+    src = load(model)
+    for name, fn, dur in todo:
+        rig.record(name, fn, dur)
+        print('recorded', model, name, dur)
+    rig.g.save(src)
+    print('saved', src)
+    if not RENDER: continue
+    cam = preview.setup(preview.KEEP.get(model, set()), os.path.join(MODELS_DIR, model + '_tex0.png.bytes'), res=(260, 300))
+    for name, fn, dur in todo:
+        preview.show(KEEP.get(name, preview.KEEP.get(model, set())))
         rows = []
-        for view, yaw in (('front', 25), ('side', 90)):
+        views = (('front', 25, 1.25), ('side', 90, 1.25))
+        if name.startswith('Bow'): views = (('right', -90, 1.3), ('back', -140, 1.6), ('top', -60, 4.2))
+        for view, yaw, hgt in views:
             paths, labels = [], []
-            n = 8 if name == 'Rise_Undead' else 6
+            n = 8 if dur > 2.5 else 6
             for k in range(n):
-                t = dur * k / (n - 1) if name == 'Rise_Undead' else dur * k / n
+                t = dur * k / (n - 1) if dur > 2.5 else dur * k / n
                 fn(t)
-                preview.aim(cam, (0, 0, 0.72), yaw_deg=yaw, dist=4.6, height=1.25)
-                p = os.path.join(out, f'{name}_{view}{k}.png'); rig.scene.render.filepath = p
+                preview.aim(cam, (0, 0, 0.72), yaw_deg=yaw, dist=4.6, height=hgt)
+                p = os.path.join(out, f'{model}_{name}_{view}{k}.png'); rig.scene.render.filepath = p
                 bpy.ops.render.render(write_still=True)
                 paths.append(p); labels.append(f'{name} {t:.2f}s')
-            preview.strip(paths, labels, os.path.join(out, f'strip_{name}_{view}.png'))
-            rows.append(os.path.join(out, f'strip_{name}_{view}.png'))
-        preview.stack(rows, os.path.join(out, f'sheet_{name}.png'))
+            preview.strip(paths, labels, os.path.join(out, f'strip_{model}_{name}_{view}.png'))
+            rows.append(os.path.join(out, f'strip_{model}_{name}_{view}.png'))
+        preview.stack(rows, os.path.join(out, f'sheet_{model}_{name}.png'))

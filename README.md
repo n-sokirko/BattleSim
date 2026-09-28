@@ -59,7 +59,7 @@ python -m http.server 8766
 
 ## Свои анимации (Blender)
 
-Клипов, которых нет в KayKit, в `tools/blender/` собирается три: стена щитов мечников Руси (`Shield_Wall_Idle`, `Shield_Wall_Walk`) и восстание мертвецов Нави (`Rise_Undead`). Поза строится в Blender из клипов KayKit с правками поверх и IK ног, снимается в локальные повороты костей и дописывается в `Resources/Models/Knight.bytes`. Меши, скелет и остальные клипы остаются байт в байт.
+Клипы, которых нет в KayKit, собираются в `tools/blender/`: стена щитов мечников Руси (`Shield_Wall_Idle`, `Shield_Wall_Walk`), восстание мертвецов Нави (`Rise_Undead`), выстрел из лука и прицел (`Bow_Shoot`, `Bow_Aim`). Поза строится в Blender из клипов KayKit с правками поверх и IK рук и ног, снимается в локальные повороты костей и дописывается в `Resources/Models/*.bytes` (Knight; лук ещё и в Rogue_Hooded — всадники берут верх тела для атак из Knight). Меши, скелет и остальные клипы остаются байт в байт.
 
 ```bash
 pip install bpy pillow                        # Blender как модуль Python (нужен Python 3.11)
