@@ -94,6 +94,8 @@ namespace BattleSim.Core
         /// <summary>Ложное отступление: бегут понарошку до FeignUntil, FeignT — когда затевали последний раз.</summary>
         public bool Feigning;
         public float FeignUntil, FeignT = -99;
+        /// <summary>Имя отряда вместо «мечники II» (богатырь — по имени).</summary>
+        public string Title;
 
         public Squad(string id, int type, int team, float yaw)
         {
@@ -105,6 +107,7 @@ namespace BattleSim.Core
         {
             get
             {
+                if (Title != null) return Title;
                 string b = T.SquadName ?? T.Name.ToLowerInvariant();
                 return Num > 0 ? b + " " + Defs.Roman(Num) : b;
             }
@@ -174,6 +177,9 @@ namespace BattleSim.Core
         public float FlashT = -99;
         /// <summary>Поднят колдуном из павших (рассыпается, если колдуны гибнут); CastNew — колдун начинает поднимать мёртвых (анимация).</summary>
         public bool Risen, CastNew;
+        /// <summary>Богатырь в поединке: с кем бьётся один на один (остальные расступаются и не лезут).</summary>
+        public Unit Duel;
+        public int Kills;
         public Unit LosTarget;
         public Carry Carry;
         public Squad Squad;
@@ -245,7 +251,7 @@ namespace BattleSim.Core
     }
 
     /// <summary>Что случилось в бою — для эффектов на экране (пыль, искры, брызги).</summary>
-    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar, Raise, Curse, Wall }
+    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar, Raise, Curse, Wall, Duel, Hero }
 
     public struct FxEvent
     {

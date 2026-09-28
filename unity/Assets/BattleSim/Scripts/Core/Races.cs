@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace BattleSim.Core
 {
@@ -25,6 +26,12 @@ namespace BattleSim.Core
                 if (Races[sq.Team].Feign && sq.T.Mount && !sq.T.Ranged) TryFeign(sq);
                 if (terror && Races[sq.Team].Undead && sq.Order.Mode != Mode.Rout) Terror(sq);
             }
+            DuelRing();
+            if (terror)
+                foreach (var h in Heroes) // рядом с богатырём и дух крепче
+                    if (h != null && h.Alive)
+                        foreach (var q in Squads)
+                            if (q.Team == h.Team && !q.Special && q.Alive > 0 && q.Order.Mode != Mode.Rout && D2d(q.Center, h.Pos) < 14) q.Morale = MathF.Min(100, q.Morale + 0.6f);
         }
 
         // ---------------------------------------------------------------- Русь: стена щитов
@@ -214,6 +221,100 @@ namespace BattleSim.Core
             }
             if (d <= range && CanSee(u, tg) && u.Cooldown <= 0 && u.AtkT < 0) StartAttack(u, true);
             return true;
+        }
+
+        // ---------------------------------------------------------------- богатыри и поединки
+
+        public readonly Unit[] Heroes = new Unit[2];
+
+        /// <summary>Богатырь выходит перед строем своей армии (в начале боя, как и полководец).</summary>
+        void SpawnHero(int team)
+        {
+            var hd = Races[team].Hero;
+            var mine = Squads.Where(s => s.Team == team && !s.Special && s.Alive > 0).ToList();
+            if (hd == null || mine.Count < 3) return;
+            var c = Commander.Center(mine).Value;
+            float fwd = team == 0 ? 1 : -1, yaw = team == 0 ? 0 : M.PI;
+            // перед центром, на свободном месте
+            V2 p = c;
+            for (int k = 0; k < 24; k++)
+            {
+                float a = k * 2.4f, r = 2 + k * 0.8f;
+                var q = World.ClampField(c.x + MathF.Cos(a) * r, c.z + fwd * 8 + MathF.Sin(a) * r * 0.5f, 4);
+                if (World.Walkable(q.x, q.z, hd.Radius) && !Occupied(q.x, q.z, hd.Radius)) { p = q; break; }
+            }
+            var u = new Unit(new UnitPlan { Type = hd.Id, Team = team, X = p.x, Z = p.z, Yaw = yaw, Squad = -1 }, World);
+            u.PrevPos = u.Pos; u.PrevYaw = u.Yaw;
+            var names = Races[team].HeroNames;
+            var sq = new Squad("hero" + team, hd.Id, team, yaw) { Title = names[(int)(Rng.Rand() * names.Length)] };
+            sq.Units.Add(u); u.Squad = sq; sq.Size = 1;
+            Units.Add(u); Squads.Add(sq);
+            Heroes[team] = u;
+            AddLog(team, $"{hd.Name} {sq.Title} выходит перед строем {(team == 0 ? "синих" : "красных")}");
+        }
+
+        /// <summary>Богатырь высматривает вражеского богатыря: сошлись вплотную — поединок.</summary>
+        Unit HeroTarget(Unit u)
+        {
+            if (u.Duel != null) return u.Duel.Alive ? u.Duel : null;
+            var e = Heroes[1 - u.Team];
+            if (e == null || !e.Alive || e.Duel != null || e.Squad.Order.Mode == Mode.Rout) return null;
+            float d = D2d(u.Pos, e.Pos);
+            if (d > 28 || MathF.Abs(e.Pos.y - u.Pos.y) > 3) return null;
+            if (d < 5.5f)
+            {
+                u.Duel = e; e.Duel = u;
+                var mid = new V3((u.Pos.x + e.Pos.x) / 2, (u.Pos.y + e.Pos.y) / 2, (u.Pos.z + e.Pos.z) / 2);
+                Emit(FxKind.Duel, mid, e.Pos.x - u.Pos.x, e.Pos.z - u.Pos.z, u.Team);
+                AddLog(u.Team, $"Поединок! {u.Squad.Title} и {e.Squad.Title} сошлись один на один — войска расступаются");
+            }
+            return e;
+        }
+
+        /// <summary>Вокруг поединка — круг: чужие и свои отходят, не мешают.</summary>
+        void DuelRing()
+        {
+            var a = Heroes[0];
+            if (a == null || !a.Alive || a.Duel == null || !a.Duel.Alive) return;
+            var b = a.Duel;
+            float mx = (a.Pos.x + b.Pos.x) / 2, mz = (a.Pos.z + b.Pos.z) / 2, R = 5.5f;
+            CellOf(mx, mz, out int cx, out int cz);
+            int rr = (int)MathF.Ceiling(R / GRID);
+            for (int z = Math.Max(cz - rr, 0); z <= Math.Min(cz + rr, gridDim - 1); z++)
+                for (int x = Math.Max(cx - rr, 0); x <= Math.Min(cx + rr, gridDim - 1); x++)
+                    for (int j = head[z * gridDim + x]; j >= 0; j = next[j])
+                    {
+                        if (j >= Units.Count) continue;
+                        var e = Units[j];
+                        if (!e.Alive || e == a || e == b || e.T.Mount) continue;
+                        float ex = e.Pos.x - mx, ez = e.Pos.z - mz, d = M.Hypot(ex, ez);
+                        if (d > R || d < 1e-3f) continue;
+                        float k = (R - d) / R * 0.35f;
+                        e.Knock.x += ex / d * k; e.Knock.z += ez / d * k;
+                        if (e.Target == a || e.Target == b) { e.Target = null; e.RetargetT = 0; }
+                    }
+        }
+
+        /// <summary>Богатырь пал: свои в смятении, чужие воспряли; победитель поединка — герой дня.</summary>
+        void HeroFell(Unit u)
+        {
+            Emit(FxKind.Hero, u.Pos, 0, 0, u.Team);
+            var w = u.Duel;
+            if (w != null) { w.Duel = null; u.Duel = null; }
+            foreach (var q in Squads)
+            {
+                if (q.Special || q.Alive == 0 || q.T.Fearless) continue;
+                if (D2d(q.Center, u.Pos) > 45) continue;
+                if (q.Team == u.Team) q.Morale -= 14; else q.Morale = MathF.Min(100, q.Morale + 10);
+            }
+            if (w != null && w.Alive)
+            {
+                w.Hp = MathF.Min(w.T.Hp, w.Hp + w.T.Hp * 0.25f);
+                AddLog(w.Team, $"{w.Squad.Title} победил в поединке — {u.Squad.Title} повержен! {(w.Team == 0 ? "Синие" : "Красные")} ликуют");
+                foreach (var q in Squads)
+                    if (q.Team == w.Team && !q.Special && q.Alive > 0 && D2d(q.Center, w.Pos) < 30 && q.Order.Mode != Mode.Rout) q.CryUntil = Time + 0.8f;
+            }
+            else AddLog(u.Team, $"{u.T.Name} {u.Squad.Title} пал!");
         }
 
         /// <summary>Тип для гарнизона на месте slot: конным на стенах и подъёмах не место — ставим пеших.</summary>

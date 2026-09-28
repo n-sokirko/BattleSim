@@ -180,6 +180,8 @@ namespace BattleSim
                     case FxKind.Block: AddHeat(e.Pos.x, e.Pos.z, 0.4f); break;
                     case FxKind.Kill: AddHeat(e.Pos.x, e.Pos.z, 3f); break;
                     case FxKind.Charge: OnTrample(e); break;
+                    case FxKind.Duel: OnHero(e, true); break;
+                    case FxKind.Hero: OnHero(e, false); break;
                 }
             }
             foreach (var sq in B.Squads)
@@ -299,6 +301,23 @@ namespace BattleSim
             ev.Dir = foe != null ? Norm(foe.C.x - sq.C.x, foe.C.z - sq.C.z, axis) : axis;
             if (ambush) ev.Caption = FindLog("Засада", Defs.Cap(sq.Name), 5) ?? $"Засада! {Defs.Cap(sq.Name)} бьют из укрытия";
             else if (fresh) ev.Caption = $"{Defs.Cap(TeamAdj(sq.Team))} {sq.Name} и {TeamAdj(foe.Team)} {foe.Name} сошлись врукопашную";
+        }
+
+        /// <summary>Богатыри сошлись в поединке (или богатырь пал) — облёт с замедлением.</summary>
+        void OnHero(FxEvent e, bool duel)
+        {
+            Unit h = null;
+            float bd = 8;
+            foreach (var u in B.Heroes)
+            {
+                if (u == null) continue;
+                float d = M.Hypot(u.Pos.x - e.Pos.x, u.Pos.z - e.Pos.z);
+                if (d < bd) { bd = d; h = u; }
+            }
+            if (h == null) return;
+            var ev = Spawn(Kind.Leader, h.P, duel ? 6f : 4.5f, 30);
+            ev.U = h; ev.Team = h.Team;
+            ev.Caption = duel ? FindLog("Поединок", null, 3) ?? "Поединок богатырей!" : FindLog(h.Squad.Title, null, 3) ?? $"{h.Squad.Title} пал!";
         }
 
         void CheckLeader(Commander c)
@@ -834,6 +853,12 @@ namespace BattleSim
                     if (shot.U != null) p = shot.U.P;
                     y = baseYaw + orbitDir * 10 * M.DEG * (now - shotT0);
                     pitch = 22; dist = 14;
+                    if (shot.U != null && shot.U.T.Hero)
+                    { // поединок богатырей: сверху в круг расступившихся, чтобы толпа не заслоняла
+                        var d = shot.U.Duel;
+                        if (d != null && d.Alive) p = Mid(shot.U.P, d.P);
+                        pitch = 38; dist = 19;
+                    }
                     break;
             }
             pitch *= M.DEG;

@@ -121,6 +121,7 @@ namespace BattleSim
                 var t = rc.Units[i];
                 steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => Inf[t.Id] = MakeInfantry(t)));
             }
+            if (rc.Hero != null) steps.Add((rc.Name + ": " + rc.Hero.Name.ToLowerInvariant(), () => Inf[rc.Hero.Id] = MakeInfantry(rc.Hero)));
             steps.Add((rc.Name + ": конница и вожди", () =>
             {
                 Rider[rc.Units[3].Id] = MakeRider(rc.Units[3], 1.75f);

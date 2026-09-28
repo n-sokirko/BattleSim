@@ -377,6 +377,8 @@ namespace BattleSim.Core
             Fighting = true;
             Time = 0; LastHitT = 0; LastKillT = 0; Log = new List<LogEntry>(); GlareLogged = new bool[2];
             foreach (var sq in Squads) { sq.Order = new Order(OrderKind.Advance, Mode.Advance); sq.Morale = 100; }
+            Heroes[0] = Heroes[1] = null;
+            for (int team = 0; team < 2; team++) SpawnHero(team);
             if (!UseCommanders) { AddLog(-1, "Полководцев нет — каждый отряд бьётся сам по себе"); return; }
             for (int team = 0; team < 2; team++) SpawnCommander(team);
         }
@@ -725,6 +727,7 @@ namespace BattleSim.Core
                 u.RetargetT = sq.FoeDist > 60 ? 1.2f + Rng.Rand() * 0.6f : 0.45f + Rng.Rand() * 0.45f;
                 u.Target = PickTarget(u);
             }
+            if (t.Hero) { var ht = HeroTarget(u); if (ht != null) u.Target = ht; } // богатырь ищет поединка
 #if PROF
             SubLap(0);
 #endif
@@ -739,6 +742,7 @@ namespace BattleSim.Core
                 engageR = t.Mount ? 14 : u.Row <= 0 ? 7 : u.Row == 1 ? 4.5f : sq.EngagedFor > 4 ? 5.5f : 3f;
             if (sq.Front != null && !u.IsLeader)
                 engageR = u.Row <= 0 ? t.Radius * 2 + t.Reach + 0.8f : 0; // строй держит линию: только выпад первой шеренги
+            if (t.Hero && tg != null && tg.T.Hero) engageR = 30; // к вражескому богатырю — через всё поле
             if (t.Skirmish && Skirmish(u, tg, dt, out dx, out dz)) { wantSlot = false; tg = null; }
             if (tg != null)
             {
@@ -904,6 +908,7 @@ namespace BattleSim.Core
         {
             var o = u.Squad.Order;
             if (u.IsLeader) return D2d(u.Pos, tg.Pos) < 7;
+            if (u.Duel == tg) return true;
             if (o.Mode == Mode.Advance || o.Mode == Mode.Charge) return true;
             if (o.Mode == Mode.Hold || o.Mode == Mode.Ambush) return D2d(tg.Pos, o.Pos) < (o.HasLeash ? o.Leash : u.T.Mount ? 16 : 10);
             return false;
@@ -912,6 +917,7 @@ namespace BattleSim.Core
         // Кого можно выбрать целью: зависит от приказа, скрытности и роли
         bool Allowed(Unit u, Unit e, float d2, Order o, bool ranged, float gx, float gz, float leash)
         {
+            if (e.Duel != null && e.Duel != u) return false; // в поединок не лезут
             if (e.Squad != null && e.Squad.Hidden && d2 > 196 && u.Pos.y - e.Pos.y < 4) return false; // в низине не видно (сверху — видно)
             if (e.T.Special == Special.Messenger && !ranged && d2 > 64) return false;
             if (u.IsLeader && d2 > 64) return false;
@@ -1154,6 +1160,7 @@ namespace BattleSim.Core
             if (rear) dmg *= 1.35f;
             if (Time - u.Squad.FirstStrikeT < 2.5f) dmg *= 1.6f;               // удар из засады
             if (Time < u.Squad.RushUntil) dmg *= 1.25f;                        // удар с разбега после клича
+            if (u.Duel == tg) dmg *= 2.5f;                                     // поединок богатырей — недолгий
             bool charge = u.T.Charge > 1 && u.ChargeT > 0.8f;
             if (charge) { dmg *= u.T.Charge; u.ChargeT = 0; Trample(u, tg); }
             float kb = (charge ? 5 : 1.3f) * u.T.KnockMul / tg.T.Mass;
@@ -1168,7 +1175,7 @@ namespace BattleSim.Core
                         {
                             if (j >= Units.Count) continue;
                             var e = Units[j];
-                            if (e == tg || !e.Alive || e.Team == u.Team || MathF.Abs(e.Pos.y - u.Pos.y) > 1.5f) continue;
+                            if (e == tg || !e.Alive || e.Team == u.Team || MathF.Abs(e.Pos.y - u.Pos.y) > 1.5f || u.Duel != null) continue;
                             float ex = e.Pos.x - u.Pos.x, ez = e.Pos.z - u.Pos.z, ed = M.Hypot(ex, ez);
                             if (ed > u.T.SpinR + e.T.Radius || ed < 1e-3f) continue;
                             float ek = kb * 0.8f * tg.T.Mass / e.T.Mass;
@@ -1224,6 +1231,7 @@ namespace BattleSim.Core
             if (t.Hp <= 0)
             {
                 if (src != null && Races[src.Team].Rage && Time >= RoarUntil[src.Team]) Rage[src.Team] += src.T.Slot == 0 ? 0.5f : 1f;
+                if (src != null) src.Kills++;
                 Kill(t);
                 return;
             }
@@ -1280,6 +1288,7 @@ namespace BattleSim.Core
                 AddLog(u.Team, $"{(cmd != null ? cmd.Name : "Полководец")} пал! {(caps > 0 ? "Воеводы бьются дальше своим умом" : "Армия осталась без приказов")}");
             }
             else if (sq != null) sq.Morale -= 6;
+            if (u.T.Hero) HeroFell(u);
             Animate(u, false);
         }
 

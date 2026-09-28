@@ -54,6 +54,8 @@ namespace BattleSim.Core
         public bool Skirmish;
         /// <summary>Наводит ужас: натиск и близость сильнее бьют по духу врага.</summary>
         public bool Terror;
+        /// <summary>Богатырь: один на армию, ищет вражеского богатыря для поединка.</summary>
+        public bool Hero;
     }
 
     /// <summary>
@@ -75,6 +77,9 @@ namespace BattleSim.Core
         public bool Feign;
         /// <summary>Имена вождей для летописи.</summary>
         public string[] Names;
+        /// <summary>Богатырь армии и его имена.</summary>
+        public UnitDef Hero;
+        public string[] HeroNames;
     }
 
     public sealed class TeamDef
@@ -162,7 +167,7 @@ namespace BattleSim.Core
 
         // ---------------------------------------------------------------- Навь: мертвецы, упыри, колдуны, костяные всадники
         static readonly UnitDef NavDead = new UnitDef { Key = "dead", Name = "Мертвецы", SquadName = "мертвецы", Model = "Knight", Hp = 75, Armor = 0.15f, Speed = 2.7f, Accel = 9, Radius = 0.56f, Mass = 1,
-            Reach = 0.7f, Dmg = 13, Cd = 1.2f, AtkTime = 0.8f, ArrowBlock = 0.45f, VsCav = 1, Charge = 1, Cols = 5, Rows = 3, Spacing = 1.45f, Fearless = true, ScaleJit = 0.06f,
+            Reach = 0.7f, Dmg = 13, Cd = 1.3f, AtkTime = 0.8f, ArrowBlock = 0.4f, VsCav = 1, Charge = 1, Cols = 5, Rows = 3, Spacing = 1.45f, Fearless = true, ScaleJit = 0.06f,
             Note = "Не бегут, встают снова", Keep = new[] { "1H_Sword", "Round_Shield" },
             Anim = new AnimSet { Idle = "Idle", Run = "Walking_A", Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" }, Cheer = "Cheer" } };
         static readonly UnitDef NavGhoul = new UnitDef { Key = "ghoul", Name = "Упыри", SquadName = "упыри", Model = "Barbarian", Hp = 95, Armor = 0.05f, Speed = 4.4f, Accel = 14, Radius = 0.6f, Mass = 1.1f,
@@ -189,10 +194,10 @@ namespace BattleSim.Core
 
         // ---------------------------------------------------------------- Степь: нукеры, батыры, лучники, конные лучники
         static readonly UnitDef StNuker = new UnitDef { Key = "nuker", Name = "Нукеры", SquadName = "нукеры", Model = "Barbarian", Hp = 110, Armor = 0.15f, Speed = 3.8f, Accel = 13, Radius = 0.58f, Mass = 1,
-            Reach = 0.7f, Dmg = 18, Cd = 1.0f, AtkTime = 0.7f, ArrowBlock = 0.35f, VsCav = 1, Charge = 1, Cols = 5, Rows = 3, Spacing = 1.45f,
+            Reach = 0.7f, Dmg = 19, Cd = 1.0f, AtkTime = 0.7f, ArrowBlock = 0.35f, VsCav = 1, Charge = 1, Cols = 5, Rows = 3, Spacing = 1.45f,
             Note = "Лёгкие и быстрые", Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Barbarian_Hat" },
             Anim = new AnimSet { Idle = "Idle", Run = "Running_A", Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" }, Cheer = "Cheer" } };
-        static readonly UnitDef StBatyr = new UnitDef { Key = "batyr", Name = "Батыры", SquadName = "батыры", Model = "Barbarian", Mount = true, Hp = 250, Armor = 0.3f, Speed = 7.8f, Accel = 5, Radius = 1.1f, Mass = 3.5f,
+        static readonly UnitDef StBatyr = new UnitDef { Key = "batyr", Name = "Батыры", SquadName = "батыры", Model = "Barbarian", Mount = true, Hp = 270, Armor = 0.3f, Speed = 7.8f, Accel = 5, Radius = 1.1f, Mass = 3.5f,
             Reach = 0.9f, Dmg = 24, Cd = 1.25f, AtkTime = 0.7f, ArrowBlock = 0.25f, VsCav = 1, Charge = 2.2f, Cols = 4, Rows = 2, Spacing = 2.7f,
             Note = "Натиск ×2,2, ложное бегство", Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Barbarian_Hat" },
             Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" } } };
@@ -201,7 +206,7 @@ namespace BattleSim.Core
             Note = "Стреляют часто", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
             Anim = new AnimSet { Idle = "2H_Ranged_Aiming", Run = "Running_A", Attack = new[] { "2H_Ranged_Shoot" }, Aim = "2H_Ranged_Aiming", Reload = "2H_Ranged_Reload", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
         static readonly UnitDef StHorseArcher = new UnitDef { Key = "horsearcher", Name = "Конные лучники", SquadName = "конные лучники", Model = "Rogue_Hooded", Mount = true, Ranged = true, Skirmish = true,
-            Hp = 160, Armor = 0.1f, Speed = 8.2f, Accel = 6, Radius = 1.1f, Mass = 3.2f, Reach = 0.6f, Dmg = 16, Cd = 1.6f, AtkTime = 0.6f, Range = 30, ArrowBlock = 0.1f, VsCav = 1, Charge = 1,
+            Hp = 160, Armor = 0.1f, Speed = 8.2f, Accel = 6, Radius = 1.1f, Mass = 3.2f, Reach = 0.6f, Dmg = 17, Cd = 1.6f, AtkTime = 0.6f, Range = 32, ArrowBlock = 0.1f, VsCav = 1, Charge = 1,
             Cols = 4, Rows = 2, Spacing = 2.8f, Note = "Стреляют на скаку, не даются в руки", Keep = new[] { "2H_Crossbow", "Rogue_Cape" },
             Anim = new AnimSet { Attack = new[] { "2H_Ranged_Shoot" } } };
         static readonly UnitDef StKhan = new UnitDef { Key = "khan", Name = "Хан", Model = "Barbarian", Mount = true, Special = Special.Commander, Hp = 320, Armor = 0.4f,
@@ -214,28 +219,51 @@ namespace BattleSim.Core
             Speed = 7.2f, Accel = 6, Radius = 1.05f, Mass = 3.5f, Reach = 0.9f, Dmg = 22, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, ScaleJit = 0,
             Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Barbarian_Hat" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
 
+        // ---------------------------------------------------------------- богатыри: по одному на армию
+        static UnitDef HeroOf(string key, string name, string model, float scale, string[] keep, bool axe) => new UnitDef
+        {
+            Key = key, Name = name, SquadName = name.ToLowerInvariant(), Model = model, Hero = true, Hp = 900, Armor = 0.35f, Speed = 3.6f, Accel = 10, Radius = 0.85f, Mass = 5,
+            Reach = 1.3f, Dmg = 40, Cd = 1.2f, AtkTime = 0.9f, ArrowBlock = 0.65f, VsCav = 2, Charge = 1, Cols = 1, Rows = 1, Spacing = 2, Fearless = true,
+            SpinEvery = 2, SpinR = 2.8f, KnockMul = 3.5f, Scale = scale, ScaleJit = 0, Keep = keep, Note = "Разметает строй, ищет поединка",
+            Anim = axe
+                ? new AnimSet { Idle = "2H_Melee_Idle", Run = "Running_A", Attack = new[] { "2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice" }, Melee = "2H_Melee_Attack_Spin", Cheer = "Cheer" }
+                : new AnimSet { Idle = "2H_Melee_Idle", Run = "Running_A", Attack = new[] { "2H_Melee_Attack_Stab", "1H_Melee_Attack_Slice_Horizontal" }, Melee = "2H_Melee_Attack_Spin", Cheer = "Cheer" },
+        };
+        static readonly UnitDef RusHero = HeroOf("bogatyr", "Богатырь", "Knight", 1.55f, new[] { "2H_Sword", "Knight_Helmet", "Knight_Cape" }, false);
+        static readonly UnitDef OrcHero = With(HeroOf("troll", "Тролль", "Barbarian", 1.9f, new[] { "2H_Axe" }, true),
+            d => { d.Hp = 1100; d.Armor = 0.2f; d.Dmg = 46; d.Cd = 1.5f; d.KnockMul = 4.5f; d.Speed = 3.3f; d.Radius = 1.0f; d.Mass = 7; });
+        static readonly UnitDef NavHero = With(HeroOf("wight", "Умертвие", "Knight", 1.6f, new[] { "2H_Sword", "Knight_Helmet" }, false),
+            d => { d.Hp = 800; d.Leech = 0.2f; d.Speed = 3.2f; });
+        static readonly UnitDef StHero = With(HeroOf("batur", "Богатур", "Barbarian", 1.5f, new[] { "2H_Axe", "Barbarian_Hat", "Barbarian_Cape" }, true),
+            d => { d.Hp = 950; d.Speed = 4.2f; });
+        static UnitDef With(UnitDef d, System.Action<UnitDef> f) { f(d); return d; }
+
         public static readonly RaceDef Rus = new RaceDef
         {
             Key = "rus", Name = "Русь", Cry = "За Русь!", Units = { [0] = Types[0], [1] = Types[1], [2] = Types[2], [3] = Types[3] },
             Cmd = Commander, Msg = Messenger, Cap = Captain,
+            Hero = RusHero, HeroNames = new[] { "Пересвет", "Илья Муромец", "Добрыня Никитич", "Алёша Попович", "Святогор", "Микула Селянинович" },
         };
         public static readonly RaceDef Orcs = new RaceDef
         {
             Key = "orcs", Name = "Орда", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
             Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 95, SkinSat = 0.45f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
             Names = new[] { "Грызь", "Хряк", "Шмяк", "Гнилозуб", "Рвач", "Бугай", "Кривоклык", "Жрун" },
+            Hero = OrcHero, HeroNames = new[] { "Гнилобрюх", "Камнелоб", "Кровохлёб", "Жмыхарь", "Костолом" },
         };
         public static readonly RaceDef Nav = new RaceDef
         {
             Key = "nav", Name = "Навь", Cry = "Навь идёт!", Units = { [0] = NavDead, [1] = NavGhoul, [2] = NavNecro, [3] = NavRider },
             Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 60, SkinSat = 0.1f, MetalHue = 25, MetalSat = 0.3f, HorseTint = 0.45f, Undead = true,
             Names = new[] { "Кощей", "Мара", "Морок", "Карачун", "Вий", "Лихо", "Мор", "Чернава" },
+            Hero = NavHero, HeroNames = new[] { "Вурдалак", "Могильщик", "Упырь-исполин", "Костяной Змей" },
         };
         public static readonly RaceDef Steppe = new RaceDef
         {
             Key = "steppe", Name = "Степь", Cry = "Урагх!", Units = { [0] = StNuker, [1] = StBatyr, [2] = StArcher, [3] = StHorseArcher },
             Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.42f, MetalHue = 38, MetalSat = 0.45f, Feign = true,
             Names = new[] { "Кончак", "Боняк", "Тугоркан", "Шарукан", "Итларь", "Котян", "Кобяк", "Гзак" },
+            Hero = StHero, HeroNames = new[] { "Челубей", "Тугарин Змеевич", "Идолище", "Калин" },
         };
         public static readonly RaceDef[] Races = { Rus, Orcs, Nav, Steppe };
 
@@ -255,6 +283,7 @@ namespace BattleSim.Core
                 for (int i = 0; i < 4; i++) { r.Units[i].Slot = i; r.Units[i].Race = r; all.Add(r.Units[i]); }
                 foreach (var s in new[] { r.Cmd, r.Msg, r.Cap }) { s.Race = r; all.Add(s); }
             }
+            foreach (var r in Races) { r.Hero.Race = r; r.Hero.Slot = 4; all.Add(r.Hero); }
             All = all.ToArray();
             for (int i = 0; i < All.Length; i++) All[i].Id = i;
         }
