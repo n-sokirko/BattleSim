@@ -56,7 +56,7 @@ Shader "BattleSim/Puff"
                 o.fog = ComputeFogFactor(o.positionCS.z);
                 // у камеры — тает: клуб в полуметре от объектива не должен закрывать кадр
                 float dist = length(_WorldSpaceCameraPos - center);
-                o.near = saturate((dist - 1.2 - size) / 3.0);
+                o.near = saturate((dist - 2.0 - size) / 6.0);
                 return o;
             }
 

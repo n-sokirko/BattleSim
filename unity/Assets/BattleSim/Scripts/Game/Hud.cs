@@ -284,8 +284,8 @@ namespace BattleSim
         void DrawFight()
         {
             float y = safe.y + Pad, bw = 88 * s, x = safe.xMax - Pad;
-            var r = new Rect[7];
-            for (int i = 6; i >= 0; i--) { float w = i == 6 ? 44 * s : i == 5 ? 106 * s : i == 4 ? 96 * s : bw; x -= w; r[i] = new Rect(x, y, w, BtnH); x -= 6 * s; }
+            var r = new Rect[8];
+            for (int i = 7; i >= 0; i--) { float w = i == 7 ? 64 * s : i == 6 ? 44 * s : i == 5 ? 106 * s : i == 4 ? 96 * s : bw; x -= w; r[i] = new Rect(x, y, w, BtnH); x -= 6 * s; }
             if (Button(r[0], Game.Paused ? "Дальше" : "Пауза", Game.Paused)) Game.Paused = !Game.Paused;
             if (Button(r[1], "×0,25", Game.Speed == 0.25f && !Game.Paused)) { Game.Speed = 0.25f; Game.Paused = false; }
             if (Button(r[2], "×1", Game.Speed == 1f && !Game.Paused)) { Game.Speed = 1f; Game.Paused = false; }
@@ -294,6 +294,8 @@ namespace BattleSim
             if (Button(r[4], "Облёт", orbit)) Game.SetOrbit(!orbit);
             if (Button(r[5], "Режиссёр", direct)) Game.SetDirector(!direct);
             if (Button(r[6], "?")) Game.OpenHelp(true);
+            bool muted = Game.Sound != null && Game.Sound.Muted;
+            if (Button(r[7], muted ? "<color=#8a8a8a>Звук</color>" : "Звук", !muted)) Game.ToggleSound();
             if (Game.Phase == Phase.Fight && Button(new Rect(safe.x + Pad, safe.yMax - Pad - BtnH, 180 * s, BtnH), "■ К расстановке")) Game.StopBattle();
         }
 

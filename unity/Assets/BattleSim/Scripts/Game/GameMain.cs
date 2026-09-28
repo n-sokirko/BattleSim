@@ -113,6 +113,7 @@ namespace BattleSim
             Battle.ClipDur = (type, name) => Lib.Inf.TryGetValue(type, out var cm) ? cm.Baked.Dur(name) : 0;
             overlays = new Overlays();
             fx = new Effects();
+            Sound = new Sound(Cam) { Muted = PlayerPrefs.GetInt("muted", 0) == 1 || System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-mute") >= 0 };
             overlays.SetBolt(Lib);
             LoadText = "Рисуем карту…";
             yield return null;
@@ -212,6 +213,7 @@ namespace BattleSim
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
                 $"perf: {Perf}\n" + $"нет модели: {(NoModel.Count > 0 ? string.Join(", ", NoModel) : "—")}\n" +
+                $"звуки: {(Sound != null ? string.Join(", ", System.Linq.Enumerable.Select(Sound.Played, kv => kv.Key + " " + kv.Value)) : "—")}\n" +
                 string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")) +
                 (directed ? "\nрежиссёр:\n" + string.Join("\n", Director.History) : ""));
             Application.Quit();
@@ -226,6 +228,16 @@ namespace BattleSim
         public void SetOrbit(bool on) { Rig.Cinematic = on; DirectorOn = false; directorWanted = false; }
 
         Effects fx;
+        /// <summary>Звук боя (синтезирован в коде); Muted — кнопка «Звук» и клавиша M.</summary>
+        public Sound Sound;
+
+        public void ToggleSound()
+        {
+            if (Sound == null) return;
+            Sound.Muted = !Sound.Muted;
+            PlayerPrefs.SetInt("muted", Sound.Muted ? 1 : 0);
+            ShowToast(Sound.Muted ? "Звук выключен" : "Звук включён");
+        }
 
         const float SimStep = 1f / 30;
         float simAcc;
@@ -381,6 +393,7 @@ namespace BattleSim
             {
                 if (InputBridge.Pressed(K.Space) && Phase == Phase.Fight) Paused = !Paused;
                 if (InputBridge.Pressed(K.Tab)) SetDirector(!Rig.Cinematic);
+                if (InputBridge.Pressed(K.M)) ToggleSound();
                 if (InputBridge.Pressed(K.N) && Phase == Phase.Fight) { SetDirector(true); Director.Next(); }
                 if (Phase == Phase.Setup)
                 {
@@ -449,6 +462,7 @@ namespace BattleSim
             overlays.DrawRings(Battle, Phase == Phase.Setup);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
+            Sound?.Update(Battle, Cam.transform.position, Conv.U(Rig.Target), SlowMo, Paused || Phase == Phase.Setup, Phase == Phase.Fight);
             if (fx != null)
             {
                 fx.Spawn(Battle.Fx);
@@ -531,11 +545,12 @@ namespace BattleSim
             if (since >= 0 && since < flash)
             {
                 float f = 1 - since / flash;
-                c = new Color(1 + 0.75f * f, 1 + 0.7f * f, 1 + 0.6f * f, 1);
+                // тёплая вспышка, а не белая: светлые модели (скелеты) не превращаются в белые силуэты
+                c = new Color(1 + 0.45f * f, 1 + 0.22f * f, 1 + 0.1f * f, 1);
             }
             var sq = u.Squad;
             if (u.Alive && sq != null && !sq.Special && sq.Order.Mode == Mode.Rout)
-                c.a = 1 - 0.6f * Mathf.Clamp01((now - sq.OrderT) / 0.8f);
+                c.a = 1 - 0.3f * Mathf.Clamp01((now - sq.OrderT) / 0.8f); // бегущие чуть блёкнут, но не «призраки»
             return c;
         }
 
