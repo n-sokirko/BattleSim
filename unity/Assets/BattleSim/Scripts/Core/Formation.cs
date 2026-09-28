@@ -115,7 +115,7 @@ namespace BattleSim.Core
                         {
                             // в гору, по броду и чаще точка отряда идёт так же медленно, как солдаты
                             float gy = World.GroundAt(sq.Anchor.x + wx / wl, sq.Anchor.z + wz / wl) - World.GroundAt(sq.Anchor.x, sq.Anchor.z);
-                            float tf = (gy > 0 ? MathF.Max(0.35f, 1 - gy * 1.4f) : MathF.Min(1f, 1 - gy * 0.5f)) * MathF.Max(0.2f, nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls));
+                            float tf = MathF.Min(1f, World.SlopeSpeed(gy)) * MathF.Max(0.2f, nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls));
                             lagK *= tf;
                             float step = MathF.Min(speed * lagK * dt, MathF.Min(wl, dist - stop));
                             bool queued = sq.Choke != null && !sq.ChokeGo;

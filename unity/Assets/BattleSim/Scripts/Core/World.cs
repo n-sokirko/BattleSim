@@ -177,6 +177,24 @@ namespace BattleSim.Core
             return d > g ? d : g;
         }
 
+        /// <summary>
+        /// Множитель скорости на склоне; gy — подъём (+) или спуск (−) на метр пути. В гору тяжело; под пологую горку
+        /// чуть быстрее, по крутому спуску — осторожно: и пеший, и конь не несутся вниз по откосу, сползая на полметра за кадр.
+        /// </summary>
+        public static float SlopeSpeed(float gy)
+        {
+            if (gy > 0) return MathF.Max(0.35f, 1 - gy * 1.4f);
+            float d = -gy;
+            return d < 0.25f ? 1 + d * 0.4f : MathF.Max(0.4f, 1.1f - (d - 0.25f) * 1.1f);
+        }
+
+        /// <summary>Земля или настил под точкой на высоте y — не настил над головой (тело, летящее под мостом).</summary>
+        public float GroundBelow(float x, float z, float y)
+        {
+            float g = HeightAt(x, z), d = Decks.SurfaceBelow(x, z, g, y);
+            return d > g ? d : g;
+        }
+
         public bool InField(float x, float z, float margin = 0f) => MathF.Abs(x) <= Field - margin && MathF.Abs(z) <= Field - margin;
 
         public V2 ClampField(float x, float z, float m = 4f) => new V2(M.Clamp(x, -Field + m, Field - m), M.Clamp(z, -Field + m, Field - m));
@@ -360,15 +378,16 @@ namespace BattleSim.Core
         public bool TooDeep(float x, float z) => Water - GroundAt(x, z) > WadeMax;
 
         /// <summary>Ближайшее к (x, z) место, где можно стоять (по спирали, до ~14 м); не нашлось — сама точка.</summary>
-        public V2 WalkableNear(float x, float z, float pad = 0.5f)
+        /// <summary>Ближайшая к (x, z) точка, где можно стоять; с y — только на этом уровне (не на стене над головой, не под обрывом).</summary>
+        public V2 WalkableNear(float x, float z, float pad = 0.5f, float y = float.NaN)
         {
             for (int k = 0; k < 40; k++)
             {
                 float a = k * 2.4f, r = k * 0.35f;
                 var q = ClampField(x + MathF.Cos(a) * r, z + MathF.Sin(a) * r, 4);
-                if (Walkable(q.x, q.z, pad)) return q;
+                if (Walkable(q.x, q.z, pad) && (float.IsNaN(y) || MathF.Abs(GroundAt(q.x, q.z) - y) < 0.8f)) return q;
             }
-            return new V2(x, z);
+            return float.IsNaN(y) ? new V2(x, z) : WalkableNear(x, z, pad);
         }
 
         /// <summary>Верх ограды в точке (или -∞, если ограды нет).</summary>
@@ -955,7 +974,7 @@ namespace BattleSim.Core
                 for (int i = 0; i < Field * 3; i++)
                 {
                     float x = M.Lerp(-Field, Field, r.F()), z = M.Lerp(-Field, Field, r.F());
-                    if (SlopeAt(x, z) > 0.1f || Nav.SpeedAt(x, z, 0) == 0) continue;
+                    if (SlopeAt(x, z) > 0.1f || Nav.SpeedAt(x, z, 0) == 0 || MaskAt(x, z) > 0.2f) continue; // на тропе деревья не растут
                     int kind = (int)(r.Next() * 2);
                     float rot = r.F() * M.PI * 2, k = M.Lerp(0.8f, 1.2f, r.F());
                     TreeLists[kind].Add(new Placement { Kind = kind, X = x, Y = HeightAt(x, z) - 0.2f, Z = z, Rot = rot, Scale = k });
@@ -968,13 +987,16 @@ namespace BattleSim.Core
             {
                 float x = M.Lerp(-Half + 5, Half - 5, r.F()), z = M.Lerp(-Half + 5, Half - 5, r.F());
                 bool inField = MathF.Abs(x) < Field + 4 && MathF.Abs(z) < Field + 4;
-                if (inField && (r.Next() > (T == MapType.Mountains ? 0.6 : 0.3) || Paving(x, z) > 0 || Obs.Hit(x, z, 1) != null)) continue;
+                if (inField && (r.Next() > (T == MapType.Mountains ? 0.6 : 0.3) || Paving(x, z) > 0 || Obs.Hit(x, z, 1) != null
+                    || (PathMask != null && MaskAt(x, z) > 0.05f) || Decks.Surface(x, z, 0) > float.NegativeInfinity)) continue;
                 float y = HeightAt(x, z);
                 if (y < Water - 1.5f || y > 40) continue;
                 float size = inField ? M.Lerp(0.5f, T == MapType.Mountains ? 2.5f : 1.1f, r.F()) : M.Lerp(1.2f, 4, r.F());
                 int kind = (int)Math.Floor(r.Next() * RockKinds);
                 float rot = r.F() * M.PI * 2;
                 RockLists[kind].Add(new Placement { Kind = kind, X = x, Y = y - size * 0.3f, Z = z, Rot = rot, Scale = size });
+                // валун по колено и выше — препятствие: сквозь него не проходят, обтекают (мелкие камни перешагивают)
+                if (inField && size >= 0.8f) Obs.AddCircle(x, z, size * 0.42f, size * 0.7f, y);
             }
 
             // Трава и цветы (на болоте — камыш)

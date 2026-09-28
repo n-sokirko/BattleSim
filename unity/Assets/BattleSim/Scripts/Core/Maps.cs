@@ -31,13 +31,14 @@ namespace BattleSim.Core
         }
 
         /// <summary>Точка внутри препятствия (с запасом pad)? Возвращает препятствие или null.</summary>
-        public Obstacle Hit(float x, float z, float pad = 0f)
+        public Obstacle Hit(float x, float z, float pad = 0f, float y = float.NaN)
         {
             var L = Grid.Near(x, z);
             if (L == null) return null;
             for (int i = 0; i < L.Count; i++)
             {
                 var o = L[i];
+                if (!float.IsNaN(y) && y > o.Ground + o.Top - 0.2f) continue;
                 float dx = x - o.X, dz = z - o.Z;
                 if (o.Rect)
                 {
@@ -50,13 +51,23 @@ namespace BattleSim.Core
         }
 
         /// <summary>Выталкивает круг радиуса r из препятствий (солдат скользит вдоль стены).</summary>
-        public void PushOut(ref float px, ref float pz, float r)
+        public void PushOut(ref float px, ref float pz, float r, float y = float.NaN)
         {
             var L = Grid.Near(px, pz);
             if (L == null || L.Count == 0) return;
+            // несколько проходов: вытолкнуло из одного ствола в соседний — выталкиваем и оттуда
+            for (int pass = 0; pass < 3; pass++)
+                if (!PushOnce(L, ref px, ref pz, r, y)) return;
+        }
+
+        bool PushOnce(List<Obstacle> L, ref float px, ref float pz, float r, float y)
+        {
+            bool moved = false;
             for (int i = 0; i < L.Count; i++)
             {
                 var o = L[i];
+                // над препятствием (на мосту, на стене, на уступе над камнем) — оно не мешает; плоские и ушедшие в землю — тоже
+                if (!float.IsNaN(y) && y > o.Ground + o.Top - 0.2f) continue;
                 float dx = px - o.X, dz = pz - o.Z;
                 if (o.Rect)
                 {
@@ -67,6 +78,7 @@ namespace BattleSim.Core
                     else lz = (lz != 0 ? M.Sign(lz) : 1f) * ez;
                     px = o.X + lx * o.C - lz * o.S;
                     pz = o.Z + lx * o.S + lz * o.C;
+                    moved = true;
                 }
                 else
                 {
@@ -75,8 +87,10 @@ namespace BattleSim.Core
                     float k = d > 1e-4f ? m / d : 0f;
                     px = o.X + (d > 1e-4f ? dx * k : m);
                     pz = o.Z + dz * k;
+                    moved = true;
                 }
             }
+            return moved;
         }
 
         /// <summary>Перекрывает ли препятствие точку на высоте y (для прямой видимости и болтов).</summary>
@@ -154,6 +168,22 @@ namespace BattleSim.Core
                     if (!d.Walk || !Locate(d, x, z, out float t, out _)) continue;
                     float h = HeightOf(d, t, ground);
                     if (h > best) best = h;
+                }
+            return best;
+        }
+
+        /// <summary>Самый высокий настил в точке не выше top (или -∞): куда падает тело, пролетая под мостом.</summary>
+        public float SurfaceBelow(float x, float z, float ground, float top)
+        {
+            var L = Grid.Near(x, z);
+            float best = float.NegativeInfinity;
+            if (L != null)
+                for (int i = 0; i < L.Count; i++)
+                {
+                    var d = L[i];
+                    if (!d.Walk || !Locate(d, x, z, out float t, out _)) continue;
+                    float h = HeightOf(d, t, ground);
+                    if (h <= top && h > best) best = h;
                 }
             return best;
         }
