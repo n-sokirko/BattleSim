@@ -343,7 +343,13 @@ namespace BattleSim.Core
         /// <summary>Отряд укрыт от глаз: в низине, в чаще или в камыше.</summary>
         public bool ConcealedAt(float x, float z) => ProminenceAt(x, z) < -0.9f || Nav.ConcealAt(x, z);
 
-        public bool Walkable(float x, float z, float pad = 0.3f) => Nav.SpeedAt(x, z, 0) > 0 && !TooDeep(x, z) && Obs.Hit(x, z, pad) == null;
+        public bool Walkable(float x, float z, float pad = 0.3f) => Nav.SpeedAt(x, z, 0) > 0 && !TooDeep(x, z) && Obs.Hit(x, z, pad) == null && OnCellLevel(x, z);
+
+        /// <summary>Точка на уровне своей клетки сетки путей (а не на земле под краем моста или стены, чья клетка числится настилом).</summary>
+        public bool OnCellLevel(float x, float z) { int i = Nav.Idx(x, z); return i < 0 || MathF.Abs(GroundAt(x, z) - Nav.Surf[i]) < 1f; }
+
+        /// <summary>Стоит ли точка на настиле (мост, стена, лестница), а не на земле.</summary>
+        public bool OnDeck(float x, float z) { float g = HeightAt(x, z); return Decks.Surface(x, z, g) > g + 0.01f; }
 
         /// <summary>
         /// Омут в самой точке (настил моста — не вода). Клетка сетки путей — полтора метра: у края моста

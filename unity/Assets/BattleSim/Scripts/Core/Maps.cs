@@ -264,6 +264,12 @@ namespace BattleSim.Core
         /// <summary>Загрузка дорог: сколько отрядов недавно проложили путь через клетку (затухает).</summary>
         public readonly float[] Crowd;
         public int Barriers;
+        /// <summary>
+        /// Отвесы между соседними клетками (биты: 1 — к x+1, 2 — к z+1, 4 — к x+1,z+1, 8 — к x-1,z+1). Высоты центров
+        /// клеток могут отличаться на 1,8 м, а между ними — метровый уступ террасы на 30 см: шаг его не пускает, значит,
+        /// и путь через него класть нельзя, иначе бойцы упираются в уступ, куда их ведёт поиск.
+        /// </summary>
+        readonly byte[] Sheer;
 
         readonly Search main;
 
@@ -277,6 +283,7 @@ namespace BattleSim.Core
             Conceal = new byte[n];
             Crowd = new float[n];
             Canopy = new byte[n];
+            Sheer = new byte[n];
             Build(w);
             main = new Search(n);
             Region = new[] { Label(0), Label(1) };
@@ -313,12 +320,25 @@ namespace BattleSim.Core
                     Speed[0][i] = si; Speed[1][i] = sc;
                     Conceal[i] = hide; Canopy[i] = canopy;
                 }
+            // отвесы между центрами соседних клеток: профиль рельефа (с настилами) с шагом ~0,3 м, как правило шага бойца
+            for (int iz = 0; iz < D; iz++)
+                for (int ix = 0; ix < D; ix++)
+                {
+                    int i = iz * D + ix;
+                    if (Speed[0][i] == 0 && Speed[1][i] == 0) continue;
+                    var p = Center(i);
+                    if (ix + 1 < D && SheerLine(w, p.x, p.z, p.x + c, p.z)) Sheer[i] |= 1;
+                    if (iz + 1 < D && SheerLine(w, p.x, p.z, p.x, p.z + c)) Sheer[i] |= 2;
+                    if (ix + 1 < D && iz + 1 < D && SheerLine(w, p.x, p.z, p.x + c, p.z + c)) Sheer[i] |= 4;
+                    if (ix > 0 && iz + 1 < D && SheerLine(w, p.x, p.z, p.x - c, p.z + c)) Sheer[i] |= 8;
+                }
             int b = 0;
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
                 {
                     int i = iz * D + ix;
-                    if (Speed[0][i] == 0) { b++; continue; }
+                    // и для конницы: ограды пехота перелезает, коню не перескочить — без этого обход не искался вовсе
+                    if (Speed[0][i] == 0 || Speed[1][i] == 0) { b++; continue; }
                     if (ix + 1 < D && !Step(i, i + 1, false)) b++;
                     if (iz + 1 < D && !Step(i, i + D, false)) b++;
                 }
@@ -402,7 +422,40 @@ namespace BattleSim.Core
         }
 
         /// <summary>Можно ли шагнуть между соседними клетками по высоте.</summary>
-        public bool Step(int a, int b, bool diag) => MathF.Abs(Surf[a] - Surf[b]) <= (diag ? 2.7f : 1.9f);
+        public bool Step(int a, int b, bool diag)
+        {
+            if (MathF.Abs(Surf[a] - Surf[b]) > (diag ? 2.7f : 1.9f)) return false;
+            int dx = b % Dim - a % Dim, dz = b / Dim - a / Dim;
+            switch (dz * 3 + dx)
+            {
+                case 1: return (Sheer[a] & 1) == 0;
+                case -1: return (Sheer[b] & 1) == 0;
+                case 3: return (Sheer[a] & 2) == 0;
+                case -3: return (Sheer[b] & 2) == 0;
+                case 4: return (Sheer[a] & 4) == 0;
+                case -4: return (Sheer[b] & 4) == 0;
+                case 2: return (Sheer[a] & 8) == 0;
+                case -2: return (Sheer[b] & 8) == 0;
+                default: return true;
+            }
+        }
+
+        /// <summary>Есть ли на прямой уступ круче, чем пускает шаг бойца (кроме края настила — въезда на мост, лестницу).</summary>
+        static bool SheerLine(World w, float ax, float az, float bx, float bz)
+        {
+            float d = M.Hypot(bx - ax, bz - az);
+            int n = Math.Max(2, (int)MathF.Ceiling(d / 0.3f));
+            float step = d / n, prev = w.GroundAt(ax, az);
+            bool prevDeck = w.OnDeck(ax, az);
+            for (int k = 1; k <= n; k++)
+            {
+                float x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, h = w.GroundAt(x, z);
+                bool deck = w.OnDeck(x, z);
+                if (MathF.Abs(h - prev) > step * 1.3f + (deck != prevDeck ? 0.2f : 0.02f)) return true;
+                prev = h; prevDeck = deck;
+            }
+            return false;
+        }
 
         public int Idx(float x, float z)
         {
@@ -415,18 +468,38 @@ namespace BattleSim.Core
         public bool ConcealAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Conceal[i] == 1; }
         public bool CanopyAt(float x, float z) { int i = Idx(x, z); return i >= 0 && Canopy[i] == 1; }
 
+        /// <summary>
+        /// Свободна ли прямая: обход всех клеток, через которые она проходит (DDA), переходы — только через стороны клеток.
+        /// Раньше проверялись точки через полклетки, и прямая, чиркнувшая угол ограды, считалась свободной — по такому
+        /// спрямлённому пути точка отряда упиралась в ограду навсегда.
+        /// </summary>
         public bool LineClear(float ax, float az, float bx, float bz, int cls)
         {
-            float d = M.Hypot(bx - ax, bz - az);
-            int n = Math.Max(1, (int)Math.Ceiling(d / (CellSize * 0.5f)));
             var sp = Speed[cls];
-            int prev = Idx(ax, az);
-            for (int k = 1; k <= n; k++)
+            float fx = (ax + Half) / CellSize, fz = (az + Half) / CellSize, tx = (bx + Half) / CellSize, tz = (bz + Half) / CellSize;
+            int x = M.Floor(fx), z = M.Floor(fz), x1 = M.Floor(tx), z1 = M.Floor(tz);
+            if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
+            float dx = tx - fx, dz = tz - fz;
+            int sx = dx > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+            float tdx = dx != 0 ? MathF.Abs(1 / dx) : float.PositiveInfinity, tdz = dz != 0 ? MathF.Abs(1 / dz) : float.PositiveInfinity;
+            float tmx = dx != 0 ? ((sx > 0 ? x + 1 - fx : fx - x) * tdx) : float.PositiveInfinity;
+            float tmz = dz != 0 ? ((sz > 0 ? z + 1 - fz : fz - z) * tdz) : float.PositiveInfinity;
+            int prev = z * Dim + x;
+            for (int guard = 0; guard < 4 * Dim && (x != x1 || z != z1); guard++)
             {
-                float t = (float)k / n;
-                int i = Idx(ax + (bx - ax) * t, az + (bz - az) * t);
-                if (i < 0 || i == prev) continue;
-                if (sp[i] == 0 || (prev >= 0 && !Step(prev, i, true))) return false;
+                if (tmx < tmz) { if (tmx > 1) break; x += sx; tmx += tdx; }
+                else if (tmz < tmx) { if (tmz > 1) break; z += sz; tmz += tdz; }
+                else
+                { // ровно через угол — должны быть проходимы обе соседние по сторонам клетки
+                    if (tmx > 1) break;
+                    int ca = z * Dim + x + sx, cb = (z + sz) * Dim + x;
+                    if (x + sx < 0 || x + sx >= Dim || z + sz < 0 || z + sz >= Dim) return true;
+                    if (sp[ca] == 0 || sp[cb] == 0 || !Step(prev, ca, false) || !Step(prev, cb, false)) return false;
+                    x += sx; z += sz; tmx += tdx; tmz += tdz;
+                }
+                if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
+                int i = z * Dim + x;
+                if (sp[i] == 0 || !Step(prev, i, false)) return false;
                 prev = i;
             }
             return true;
@@ -471,21 +544,42 @@ namespace BattleSim.Core
         public Search NewSearch() => new Search(Dim * Dim);
 
         /// <summary>A* по сетке с учётом перепадов высот; путь сглаживается до точек поворота.</summary>
-        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f)
+        public List<V2> FindPath(float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f, float ay = float.NaN)
         {
-            if (!Begin(main, ax, az, bx, bz, cls, crowdCost, avoidX, avoidZ, avoidR, maxExpand, greed)) return null;
+            if (!Begin(main, ax, az, bx, bz, cls, crowdCost, avoidX, avoidZ, avoidR, maxExpand, greed, ay)) return null;
             Continue(main, int.MaxValue, out var path);
             return path;
         }
 
         /// <summary>Начать поиск пути; false — идти некуда (старт или цель вне поля, нет достижимого места рядом с целью).</summary>
-        public bool Begin(Search q, float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f)
+        /// <summary>
+        /// Стоящий на земле у края моста или стены попал в клетку, чей центр на настиле: путь — от ближайшей клетки его уровня,
+        /// иначе поиск поведёт его поверху, куда ему не залезть.
+        /// </summary>
+        int NearestLevel(int s, float x, float z, float y, float[] sp)
+        {
+            int best = s, sx = s % Dim, sz = s / Dim; float bd = float.MaxValue;
+            for (int dz = -2; dz <= 2; dz++)
+                for (int dx = -2; dx <= 2; dx++)
+                {
+                    int cx = sx + dx, cz = sz + dz;
+                    if (cx < 0 || cz < 0 || cx >= Dim || cz >= Dim) continue;
+                    int i = cz * Dim + cx;
+                    if (sp[i] == 0 || MathF.Abs(Surf[i] - y) > 0.8f) continue;
+                    var c = Center(i); float d = M.Hypot(c.x - x, c.z - z);
+                    if (d < bd) { bd = d; best = i; }
+                }
+            return best;
+        }
+
+        public bool Begin(Search q, float ax, float az, float bx, float bz, int cls, float crowdCost = 0, float avoidX = 0, float avoidZ = 0, float avoidR = 0, int maxExpand = 40000, float greed = 1.35f, float ay = float.NaN)
         {
             StatCalls++;
             q.Active = false;
             var sp = Speed[cls];
             int s = Idx(ax, az), g = Idx(bx, bz);
             if (s < 0 || g < 0) return false;
+            if (!float.IsNaN(ay) && MathF.Abs(Surf[s] - ay) > 1f) s = NearestLevel(s, ax, az, ay, sp);
             if (sp[s] == 0) s = NearestOpen(s, sp);
             if (s < 0) return false;
             bool goalOpen = sp[g] > 0;

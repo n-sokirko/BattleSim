@@ -126,7 +126,15 @@ namespace BattleSim.Core
                                 if (step < speed * lagK * dt * 0.5f) sq.ChokeWaitT += dt;
                             }
                             var na = new V2(sq.Anchor.x + wx / wl * step, sq.Anchor.z + wz / wl * step);
-                            if (step > 0 && (nav.SpeedAt(na.x, na.z, cls) > 0 || nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls) == 0))
+                            bool free = nav.SpeedAt(na.x, na.z, cls) > 0 || nav.SpeedAt(sq.Anchor.x, sq.Anchor.z, cls) == 0;
+                            if (step > 0 && !free)
+                            { // точка сошла с линии пути, и прямая к следующей точке чиркнула ограду или обрыв: скользим вдоль,
+                              // а путь пересчитываем от себя (раньше точка стояла тут вечно, и строй её ждал)
+                                if (nav.SpeedAt(na.x, sq.Anchor.z, cls) > 0) { na = new V2(na.x, sq.Anchor.z); free = true; }
+                                else if (nav.SpeedAt(sq.Anchor.x, na.z, cls) > 0) { na = new V2(sq.Anchor.x, na.z); free = true; }
+                                if (!sq.APathQueued && Time - sq.APathT > 1) { sq.APath = null; sq.APathT = -99; }
+                            }
+                            if (step > 0 && free)
                             {
                                 sq.Anchor = na;
                                 moved = true;
@@ -491,7 +499,9 @@ namespace BattleSim.Core
             }
             var P = sq.APath;
             if (P == null) return g;
-            while (sq.APathI < P.Count - 1 && V2.Dist(P[sq.APathI], sq.Anchor) < 1.2f) sq.APathI++;
+            // к следующей вершине — только если к ней от точки отряда прямая свободна (иначе срезали угол ущелья или ограды)
+            while (sq.APathI < P.Count - 1 && V2.Dist(P[sq.APathI], sq.Anchor) < 1.2f
+                && (V2.Dist(P[sq.APathI], sq.Anchor) < 0.3f || nav.LineClear(sq.Anchor.x, sq.Anchor.z, P[sq.APathI + 1].x, P[sq.APathI + 1].z, cls))) sq.APathI++;
             return P[Math.Min(sq.APathI, P.Count - 1)];
         }
 
