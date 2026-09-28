@@ -205,6 +205,9 @@ namespace BattleSim.Core
             Ox = plan.Ox; Oz = plan.Oz;
             Pos = new V3(plan.X, world.GroundAt(plan.X, plan.Z), plan.Z);
             Yaw = plan.Yaw; Hp = T.Hp;
+            // прошлое положение = текущее: иначе первый кадр новичок (гонец, полководец, поднятый) рисуется
+            // на полпути от центра карты — мелькает и «пропадает»
+            PrevPos = Pos; PrevYaw = Yaw;
             RetargetT = Rng.Rand() * 0.5f; Cooldown = Rng.Rand() * 0.8f;
             Phase = Rng.Rand() * 6;
             Scale = T.Special == Special.Commander ? 1.12f : T.Special == Special.Captain ? 1.06f : 0.95f + Rng.Rand() * 0.1f;

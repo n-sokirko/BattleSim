@@ -171,6 +171,33 @@ namespace BattleSim
                 yield return new WaitForSeconds(directed ? 0.1f : 0.4f);
             }
             if (directed) SetDirector(false);
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-seq") >= 0)
+            { // серия кадров вблизи схватки: видно, не пропадают ли бойцы в движении
+                var eng = Battle.Units.Find(u => u.Alive && u.Engaged && !u.T.Mount) ?? Battle.Units.Find(u => u.Alive);
+                if (eng != null)
+                {
+                    Speed = 1;
+                    for (int k = 0; k < 24; k++)
+                    {
+                        Rig.LookAt(eng.Pos.x, eng.Pos.z, 1.2f, 20 * M.DEG, 11, true);
+                        yield return new WaitForSeconds(0.12f);
+                        ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{tag}_seq{k:00}.png"));
+                        // состояние бойцов у камеры: по нему видно, в каком клипе боец пропадает
+                        var sb = new System.Text.StringBuilder();
+                        foreach (var u in Battle.Units)
+                        {
+                            if (M.Hypot(u.Pos.x - eng.Pos.x, u.Pos.z - eng.Pos.z) > 9) continue;
+                            CrowdModel cm = null;
+                            if (u.T.Mount) Lib.Rider.TryGetValue(u.Type, out cm); else Lib.Inf.TryGetValue(u.Type, out cm);
+                            var st = u.T.Mount ? u.Ride : u.Anim;
+                            sb.AppendLine($"{k:00} #{u.GetHashCode() % 10000:0000} {u.T.Key} alive {u.Alive} {st.Name} T {st.T:F2} once {st.Once} row {(cm != null ? cm.Row(st) : -1)} prev {st.PrevRow} blend {st.Blend:F2} rows {(cm != null ? cm.Baked.Rows : -1)} has {(cm != null && cm.Baked.Clips.ContainsKey(st.Name))} down {u.DownT:F1}/{u.DownAnim} fly {u.Flying} pos {u.Pos.x:F1},{u.Pos.y:F2},{u.Pos.z:F1} scale {u.Scale:F2}");
+                        }
+                        System.IO.File.AppendAllText(System.IO.Path.Combine(dir, tag + "_seq.txt"), sb.ToString());
+                        yield return null;
+                    }
+                    Speed = 2;
+                }
+            }
             var c = Battle.Centroid();
             if (c.HasValue) Rig.LookAt(c.Value.x, c.Value.z, 2.2f, 22 * M.DEG, 22, true);
             yield return new WaitForSeconds(0.8f);
@@ -184,7 +211,7 @@ namespace BattleSim
             yield return new WaitForSeconds(1f);
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
-                $"perf: {Perf}\n" +
+                $"perf: {Perf}\n" + $"нет модели: {(NoModel.Count > 0 ? string.Join(", ", NoModel) : "—")}\n" +
                 string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")) +
                 (directed ? "\nрежиссёр:\n" + string.Join("\n", Director.History) : ""));
             Application.Quit();
@@ -434,6 +461,9 @@ namespace BattleSim
         }
 
         /// <summary>Раскладывает всех видимых солдат по пачкам: вид × армия × детализация.</summary>
+        /// <summary>Виды бойцов, которых нечем нарисовать (нет модели) — для проверки в логе снимков.</summary>
+        public readonly HashSet<string> NoModel = new HashSet<string>();
+
         void RenderCrowd(float animDt)
         {
             foreach (var m in Lib.Inf.Values) m.Begin();
@@ -462,7 +492,7 @@ namespace BattleSim
                     int hr = hm.Row(u.Anim);
                     hm.Add(0, l, m, hr, u.Anim.PrevRow, u.Anim.Blend, col);
                     u.Anim.LastRow = hr;
-                    if (!Lib.Rider.TryGetValue(u.Type, out var rm)) continue;
+                    if (!Lib.Rider.TryGetValue(u.Type, out var rm)) { NoModel.Add(u.T.Key); continue; }
                     int rr = rm.Row(u.Ride);
                     Vector3 off;
                     if (u.Alive)
@@ -479,7 +509,7 @@ namespace BattleSim
                 }
                 else
                 {
-                    if (!Lib.Inf.TryGetValue(u.Type, out var im)) continue;
+                    if (!Lib.Inf.TryGetValue(u.Type, out var im)) { NoModel.Add(u.T.Key); continue; }
                     int r = im.Row(u.Anim);
                     im.Add(u.Team, l, m, r, u.Anim.PrevRow, u.Anim.Blend, col);
                     u.Anim.LastRow = r;

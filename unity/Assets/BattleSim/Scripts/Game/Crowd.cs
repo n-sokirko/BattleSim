@@ -46,7 +46,10 @@ namespace BattleSim
             model.Mesh.Bounds(out var mn, out var mx);
             float diag = M.Hypot(mx.x - mn.x, mx.y - mn.y, mx.z - mn.z);
             bool heavy = model.Mesh.VertexCount > 10000;
-            float[] cells = heavy ? new[] { 0.012f, 0.02f, 0.034f } : new[] { 0f, 0.034f, 0.06f };
+            // лёгкие модели (скелет — 2 тыс. треугольников из тонких костей) не упрощаем на среднем плане:
+            // сетка упрощения крупнее кости, и руки-ноги схлопывались — скелеты «пропадали» вдали
+            bool light = model.Mesh.Idx.Length / 3 < 3000;
+            float[] cells = heavy ? new[] { 0.012f, 0.02f, 0.034f } : light ? new[] { 0f, 0f, 0.034f } : new[] { 0f, 0.034f, 0.06f };
             for (int l = 0; l < Lods; l++)
             {
                 var m = cells[l] > 0 ? ModelKit.Decimate(model.Mesh, diag * cells[l]) : model.Mesh.Clone();
