@@ -149,3 +149,50 @@ class ArmIK:
 
 def lerp3(a, b, w):
     return tuple(x + (y - x) * w for x, y in zip(a, b))
+
+
+
+# ---------------------------------------------------------------- пропорции как в игре (Pose.Stretch / Pose.Size в ModelKit.cs)
+import os, re
+
+def game_proportions():
+    """Читает растяжения костей и размер головы прямо из ModelKit.cs — один источник правды."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'unity', 'Assets', 'BattleSim',
+                            'Scripts', 'Core', 'ModelKit.cs'), encoding='utf-8').read()
+    def block(name):
+        m = re.search(r'Dictionary<string, float> ' + name + r' = new Dictionary<string, float>\s*\{(.*?)\};', src, re.S)
+        return {k: float(v) for k, v in re.findall(r'\["([\w.]+)"\] = ([\d.]+)f', m.group(1))} if m else {}
+    return block('Stretch'), block('Size')
+
+
+def apply_proportions(rig):
+    """Кость тянется вдоль себя (ось Y кости), потомки не наследуют растяжение; голова — целиком. Как Pose в игре."""
+    if 'upperleg.l' not in rig.arm.pose.bones: return False
+    stretch, size = game_proportions()
+    for n, f in stretch.items():
+        pb = rig.arm.pose.bones.get(n)
+        if pb is None: continue
+        pb.scale = (1, f, 1)
+        for c in rig.arm.data.bones[n].children: c.inherit_scale = 'NONE'
+    for n, f in size.items():
+        pb = rig.arm.pose.bones.get(n)
+        if pb is not None: pb.scale = (f, f, f)
+    bpy.context.view_layer.update()
+    rig.props = (stretch, size)
+    return True
+
+
+def freeze(rig):
+    """Итог позы (с IK) -> чистые повороты и переносы без растяжений: такой клип игра растянет сама и получит ту же позу."""
+    arm = rig.arm
+    local = {}
+    for n in order(arm):
+        pb = arm.pose.bones[n]
+        local[n] = arm.convert_space(pose_bone=pb, matrix=pb.matrix, from_space='POSE', to_space='LOCAL')
+    for pb in arm.pose.bones:
+        for c in pb.constraints: c.enabled = False
+    for n in order(arm):
+        l, r, _ = local[n].decompose()
+        arm.pose.bones[n].matrix_basis = Matrix.LocRotScale(l, r, Vector((1, 1, 1)))
+    for b in arm.data.bones: b.inherit_scale = 'FULL'
+    bpy.context.view_layer.update()

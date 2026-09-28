@@ -118,13 +118,13 @@ class Glb:
     def duration(self, anim):
         return max(self.acc(anim['samplers'][c['sampler']]['input'])[-1] for c in anim['channels'])
 
-    def _add_accessor(self, arr, typ, minmax=False):
-        arr = np.asarray(arr, dtype='<f4')
+    def _add_accessor(self, arr, typ, minmax=False, comp=5126):
+        arr = np.asarray(arr, dtype={5126: '<f4', 5123: '<u2', 5121: 'u1', 5125: '<u4'}[comp])
         while len(self.bin) % 4: self.bin.append(0)
         off = len(self.bin)
         self.bin += arr.tobytes()
         self.j['bufferViews'].append({'buffer': 0, 'byteOffset': off, 'byteLength': arr.nbytes})
-        a = {'bufferView': len(self.j['bufferViews']) - 1, 'componentType': 5126, 'count': int(arr.shape[0]), 'type': typ}
+        a = {'bufferView': len(self.j['bufferViews']) - 1, 'componentType': comp, 'count': int(arr.shape[0]), 'type': typ}
         if minmax:
             a['min'] = [float(arr.min())]; a['max'] = [float(arr.max())]
         self.j['accessors'].append(a)

@@ -119,12 +119,20 @@ POLE_R = (-0.7, 0.45, 1.45)           # локоть тетивы — высок
 TWIST = -35                           # левое плечо к цели
 
 
+CHEST_Z = 0.959  # высота груди Rogue в покое, под которую подобраны точки лука
+
+
 def bow_base(t):
-    """Ноги и таз — из покоя, грудь развёрнута левым плечом к цели, голова смотрит на цель."""
+    """Ноги и таз — из покоя, грудь развёрнута левым плечом к цели, голова смотрит на цель.
+    Возвращает сдвиг точек лука по высоте: при длинном корпусе плечи выше."""
     ik.enable(False); arms.enable(False)
     base = pk.capture(rig, 'Idle', t % 1.0667)
     pk.detach(rig); pk.apply_basis(rig, base)
     pk.rotate(rig, 'chest', Z, TWIST)
+    return rig.arm.pose.bones['chest'].head.z - CHEST_Z
+
+
+def up(p, dz): return (p[0], p[1], p[2] + dz)
 
 
 def bow_head(tilt=0.0):
@@ -134,7 +142,7 @@ def bow_head(tilt=0.0):
 
 def bow_shoot(t):
     """Выстрел из лука (~1 с): натянуть, прицелиться, отпустить, достать новую стрелу."""
-    bow_base(t)
+    dz = bow_base(t)
     raise_ = pk.smooth(t / 0.3)
     bow = pk.lerp3((0.16, -0.5, 1.0), BOW_HAND, raise_)
     if 0.55 <= t < 0.7:  # отдача лука
@@ -146,24 +154,24 @@ def bow_shoot(t):
     elif t < 0.6: hand = pk.lerp3(ANCHOR, RELEASE, 1 - (1 - (t - 0.55) / 0.05) ** 2)
     elif t < 0.78: hand = pk.lerp3(RELEASE, QUIVER, pk.smooth((t - 0.6) / 0.18))
     else: hand = pk.lerp3(QUIVER, NOCK, pk.smooth((t - 0.78) / 0.22))
-    arms.set('l', bow, POLE_L)
-    arms.set('r', hand, POLE_R)
+    arms.set('l', up(bow, dz), up(POLE_L, dz))
+    arms.set('r', up(hand, dz), up(POLE_R, dz))
     bow_head(6 * pk.smooth((t - 0.1) / 0.3) * (1 - pk.smooth((t - 0.6) / 0.2)))
 
 
 def bow_aim(t):
     """Тетива натянута, ждёт цель: дыхание и лёгкая дрожь."""
-    bow_base(t)
+    dz = bow_base(t)
     b = math.sin(2 * math.pi * t / 1.0667)
-    arms.set('l', (BOW_HAND[0], BOW_HAND[1], BOW_HAND[2] + 0.01 * b), POLE_L)
-    arms.set('r', (ANCHOR[0], ANCHOR[1] + 0.006 * math.sin(t * 40), ANCHOR[2] + 0.01 * b), POLE_R)
+    arms.set('l', (BOW_HAND[0], BOW_HAND[1], BOW_HAND[2] + 0.01 * b + dz), up(POLE_L, dz))
+    arms.set('r', (ANCHOR[0], ANCHOR[1] + 0.006 * math.sin(t * 40), ANCHOR[2] + 0.01 * b + dz), up(POLE_R, dz))
     bow_head(6)
 
 
 KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE)]
 BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
 # всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
-MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS}
+MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS, 'Skeleton': [c for c in KNIGHT if c[0] == 'Rise_Undead']}
 KEEP = {'Rise_Undead': preview.KEEP_DEAD, 'Bow_Shoot': {'Rogue_Cape', 'Bow'}, 'Bow_Aim': {'Rogue_Cape', 'Bow'}}
 only = os.environ.get('ONLY')
 pick = lambda name: not only or name in only.split(',')
@@ -174,7 +182,8 @@ for model, clips in MODELS.items():
     if not todo: continue
     src = load(model)
     for name, fn, dur in todo:
-        rig.record(name, fn, dur)
+        # поза — на скелете с игровыми пропорциями (IK решает на длинных ногах), в клип — чистые повороты
+        rig.record(name, lambda t, fn=fn: (pk.apply_proportions(rig), fn(t), pk.freeze(rig)), dur)
         print('recorded', model, name, dur)
     rig.g.save(src)
     print('saved', src)
@@ -190,7 +199,7 @@ for model, clips in MODELS.items():
             n = 8 if dur > 2.5 else 6
             for k in range(n):
                 t = dur * k / (n - 1) if dur > 2.5 else dur * k / n
-                fn(t)
+                pk.apply_proportions(rig); fn(t)
                 preview.aim(cam, (0, 0, 0.72), yaw_deg=yaw, dist=4.6, height=hgt)
                 p = os.path.join(out, f'{model}_{name}_{view}{k}.png'); rig.scene.render.filepath = p
                 bpy.ops.render.render(write_still=True)
