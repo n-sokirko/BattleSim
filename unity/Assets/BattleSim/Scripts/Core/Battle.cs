@@ -1315,6 +1315,7 @@ namespace BattleSim.Core
             f *= MathF.Max(0.2f, nav.SpeedAt(u.Pos.x, u.Pos.z, cls)); // топь, брод, чаща
             if (World.InWall(u.Pos.x, u.Pos.z)) f *= 0.35f; // перелезаем ограду
             u.CurSpeed = sp * f;
+            u.Pace += (u.CurSpeed - u.Pace) * (1 - MathF.Exp(-dt / 0.4f));
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y, lim = World.Field - 0.5f;
             float nx = M.Clamp(ox + (vx * f + u.Knock.x) * dt, -lim, lim), nz = M.Clamp(oz + (vz * f + u.Knock.z) * dt, -lim, lim);
             // Не заходим в непроходимое и не прыгаем с обрыва или со стены — скользим вдоль
@@ -1600,6 +1601,30 @@ namespace BattleSim.Core
         /// Выбирает анимацию по состоянию солдата. Здесь только имена клипов и время —
         /// сами позы берутся из запечённой текстуры.
         /// </summary>
+        // Скорость «земли» под опорной ногой в клипах при росте модели 1,9 м (замер по костям стоп, у коней — по копытам):
+        // юнит, идущий с такой скоростью, играет клип в темпе 1, и ноги не скользят. Масштаб модели удлиняет шаг.
+        const float WalkV = 0.72f, JogV = 2.0f, RunV = 3.8f, HorseWalkV = 1.43f, GallopV = 5.1f;
+
+        static float Tempo(float speed, float native, float scale, float lo, float hi) => M.Clamp(speed / (native * scale), lo, hi);
+
+        /// <summary>
+        /// Походка пешего: 0 стоит, 1 шаг, 2 трусца (Running_B), 3 бег (свой клип бега). Пороги с запасом в обе стороны,
+        /// чтобы на границе не мельтешил шаг-бег; у кого «бег» — это шаг (мертвецы), выше трусцы не поднимается.
+        /// </summary>
+        static int Gait(Unit u, string run)
+        {
+            float speed = u.Pace, now = u.CurSpeed;
+            string cur = u.Anim.Name;
+            bool fast = run != "Walking_A" && run != "Running_B";
+            int g = fast && cur == run ? 3 : cur == "Running_B" ? 2 : cur == "Walking_A" || cur == "Shield_Wall_Walk" ? 1 : 0;
+            // тронуться и встать — сразу (по мгновенной скорости), шаг/трусца/бег — по сглаженной
+            if (g == 0) { if (now > 0.35f) g = 1; }
+            else if (now < 0.2f && speed < 0.4f) g = 0;
+            if (g >= 1) g = speed > 1.35f ? Math.Max(g, 2) : speed < 0.9f ? 1 : g;
+            if (g >= 2) g = !fast ? 2 : speed > 3.0f ? 3 : speed < 2.5f ? 2 : g;
+            return g;
+        }
+
         public void Animate(Unit u, bool cheer)
         {
             var a = u.T.Anim;
@@ -1616,8 +1641,14 @@ namespace BattleSim.Core
                     }
                     return;
                 }
-                if (speed > 3.5f) u.Anim.Play("Gallop", speed: M.Clamp(speed / 7, 0.7f, 1.4f));
-                else if (speed > 0.4f) u.Anim.Play("Walk", speed: M.Clamp(speed / 1.6f, 0.6f, 1.6f));
+                // шаг или галоп (рыси у коня нет) — с запасом по порогам
+                int hg = u.Anim.Name == "Gallop" ? 2 : u.Anim.Name == "Walk" ? 1 : 0;
+                float pace = u.Pace;
+                if (hg == 0) { if (speed > 0.4f) hg = 1; }
+                else if (speed < 0.25f && pace < 0.5f) hg = 0;
+                if (hg >= 1) hg = pace > 3.2f ? 2 : pace < 2.6f ? 1 : hg;
+                if (hg == 2) u.Anim.Play("Gallop", speed: Tempo(speed, GallopV, u.Scale, 0.65f, 2.0f));
+                else if (hg == 1) u.Anim.Play("Walk", speed: Tempo(speed, HorseWalkV, u.Scale, 0.5f, 2.2f));
                 else u.Anim.Play("Idle");
                 if (u.AtkNew && a.Attack.Length > 0)
                 {
@@ -1678,13 +1709,19 @@ namespace BattleSim.Core
             if (u.Squad != null && u.Squad.ShieldWall && !u.Engaged)
             { // стена щитов: щит вперёд, шаг медленный
                 bool own = ClipDur != null && ClipDur(u.Type, "Shield_Wall_Idle") > 0;
-                if (speed > 0.3f) u.Anim.Play(own && ClipDur(u.Type, "Shield_Wall_Walk") > 0 ? "Shield_Wall_Walk" : "Walking_A", speed: M.Clamp(speed / 1.4f, 0.5f, 1.2f));
+                if (speed > 0.3f) u.Anim.Play(own && ClipDur(u.Type, "Shield_Wall_Walk") > 0 ? "Shield_Wall_Walk" : "Walking_A", speed: Tempo(speed, WalkV, u.Scale, 0.5f, 2.0f));
                 else u.Anim.Play(own ? "Shield_Wall_Idle" : "Blocking");
                 return;
             }
-            if (speed > 1.6f) u.Anim.Play(a.Run, speed: M.Clamp(speed / 3.4f, 0.6f, 1.5f));
-            else if (speed > 0.3f) u.Anim.Play("Walking_A", speed: M.Clamp(speed / 1.4f, 0.6f, 1.4f));
-            else u.Anim.Play(a.Idle);
+            string run = a.Run ?? "Running_A";
+            switch (Gait(u, run))
+            {
+                case 3: u.Anim.Play(run, speed: Tempo(speed, RunV, u.Scale, 0.7f, 1.5f)); break;
+                // трусца; у кого это и есть бег (гоблины, упыри, лучники) — темп выше
+                case 2: u.Anim.Play("Running_B", speed: Tempo(speed, JogV, u.Scale, 0.6f, run == "Running_A" ? 1.6f : 2.2f)); break;
+                case 1: u.Anim.Play("Walking_A", speed: Tempo(speed, WalkV, u.Scale, 0.5f, 1.8f)); break;
+                default: u.Anim.Play(a.Idle); break;
+            }
         }
     }
 }
