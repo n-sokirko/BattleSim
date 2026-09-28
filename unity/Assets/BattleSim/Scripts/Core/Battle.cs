@@ -386,6 +386,7 @@ namespace BattleSim.Core
         Unit Leader(int type, float x, float z, string key, int team, float yaw)
         {
             var p = World.ClampField(x, z, 4);
+            p = World.WalkableNear(p.x, p.z); // не в реку и не в дом
             var u = new Unit(new UnitPlan { Type = type, Team = team, X = p.x, Z = p.z, Yaw = yaw, Variant = Defs.All[type].Special == Special.Commander ? 1 : 0 }, World);
             Units.Add(u);
             var sq = new Squad(key, type, team, yaw);
@@ -459,7 +460,8 @@ namespace BattleSim.Core
         {
             var c = cmd.Unit.Pos;
             float side = Rng.Rand() < 0.5f ? -1.5f : 1.5f;
-            var plan = new UnitPlan { Type = Races[cmd.Team].Msg.Id, Team = cmd.Team, X = M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), Z = c.z, Yaw = cmd.Unit.Yaw, Variant = 0 };
+            var at = World.WalkableNear(M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), c.z);
+            var plan = new UnitPlan { Type = Races[cmd.Team].Msg.Id, Team = cmd.Team, X = at.x, Z = at.z, Yaw = cmd.Unit.Yaw, Variant = 0 };
             var u = new Unit(plan, World);
             var carry = extra ?? new Carry();
             carry.Squad = sq; carry.Order = order; carry.Cmd = cmd; carry.Delivered = false;
@@ -572,7 +574,13 @@ namespace BattleSim.Core
                         if (World.Obs.Hit(fx, fz, 0.2f) == null) { u.Pos.x = fx; u.Pos.z = fz; } else { u.Fly.x = 0; u.Fly.z = 0; }
                         u.Pos.y += u.Fly.y * dt;
                         float g = World.GroundAt(u.Pos.x, u.Pos.z);
-                        if (u.Pos.y <= g) { u.Pos.y = g; u.Flying = false; Emit(FxKind.Kill, u.Pos, 0, 0, u.Team); }
+                        if (u.Pos.y <= g)
+                        {
+                            u.Pos.y = g; u.Flying = false;
+                            // тело, сброшенное с моста или берега, уходит под воду с плеском
+                            if (g < World.Water - 0.3f) Emit(FxKind.Splash, new V3(u.Pos.x, World.Water, u.Pos.z));
+                            else Emit(FxKind.Kill, u.Pos, 0, 0, u.Team);
+                        }
                     }
                     u.DeadT += dt;
                     if (u.DeadT > 24) Units.RemoveAt(i);
@@ -1334,8 +1342,11 @@ namespace BattleSim.Core
             // переход между клетками — только там, где его допускает и поиск пути (иначе забредают на отрезанные уступы)
             int a = nav.Idx(ox, oz), b = nav.Idx(nx, nz);
             if (a >= 0 && b >= 0 && a != b && !nav.Step(a, b, a % nav.Dim != b % nav.Dim && a / nav.Dim != b / nav.Dim)) return false;
+            float g = World.GroundAt(nx, nz);
+            // в омут не шагаем, даже если клетка в целом проходима (край моста, крутая набережная); выбираться — можно
+            if (World.Water - g > World.WadeMax && g < oy) return false;
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
-            return MathF.Abs(World.GroundAt(nx, nz) - oy) <= M.Hypot(nx - ox, nz - oz) * 1.3f + 0.06f;
+            return MathF.Abs(g - oy) <= M.Hypot(nx - ox, nz - oz) * 1.3f + 0.06f;
         }
 
         // ---------------------------------------------------------------- соседи

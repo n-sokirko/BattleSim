@@ -56,3 +56,13 @@ python -m http.server 8766
 - [KayKit Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) — солдаты и анимации
 - [KayKit Medieval Hexagon](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0) — замки, дома, деревья, камни
 - [Quaternius Horse](https://poly.pizza/m/qvTrSG9pZF), [White Horse](https://poly.pizza/m/bEdE4rmZy9) — кони
+
+## Свои анимации (Blender)
+
+Клипов, которых нет в KayKit, в `tools/blender/` собирается три: стена щитов мечников Руси (`Shield_Wall_Idle`, `Shield_Wall_Walk`) и восстание мертвецов Нави (`Rise_Undead`). Поза строится в Blender из клипов KayKit с правками поверх и IK ног, снимается в локальные повороты костей и дописывается в `Resources/Models/Knight.bytes`. Меши, скелет и остальные клипы остаются байт в байт.
+
+```bash
+pip install bpy pillow                        # Blender как модуль Python (нужен Python 3.11)
+python tools/blender/make_clips.py            # пересобрать клипы в Knight.bytes (повторный запуск их заменяет)
+RENDER=1 python tools/blender/make_clips.py   # и нарисовать превью в tools/blender/out/
+```

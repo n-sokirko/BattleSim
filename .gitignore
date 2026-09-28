@@ -24,3 +24,6 @@ Thumbs.db
 
 # Локальные настройки Claude Code
 .claude/
+
+# Превью Blender-скриптов
+tools/blender/out/

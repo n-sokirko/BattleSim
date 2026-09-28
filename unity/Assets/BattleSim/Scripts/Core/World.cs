@@ -53,6 +53,8 @@ namespace BattleSim.Core
     public sealed class World
     {
         public const float Water = 0f;
+        /// <summary>Глубже этого вброд не пройти (вода по пояс): так размечена сетка путей, так же проверяется каждый шаг.</summary>
+        public const float WadeMax = 0.9f;
         public const int TreeKinds = 7, RockKinds = 5;
         public static readonly string[] TreeModels = { "tree_single_A", "tree_single_B", "trees_A_large", "trees_A_medium", "trees_B_large", "trees_B_medium", "trees_B_small" };
         public static readonly float[] TreeHeights = { 6.5f, 7f, 9f, 7.5f, 9f, 7.5f, 6f };
@@ -341,7 +343,25 @@ namespace BattleSim.Core
         /// <summary>Отряд укрыт от глаз: в низине, в чаще или в камыше.</summary>
         public bool ConcealedAt(float x, float z) => ProminenceAt(x, z) < -0.9f || Nav.ConcealAt(x, z);
 
-        public bool Walkable(float x, float z, float pad = 0.3f) => Nav.SpeedAt(x, z, 0) > 0 && Obs.Hit(x, z, pad) == null;
+        public bool Walkable(float x, float z, float pad = 0.3f) => Nav.SpeedAt(x, z, 0) > 0 && !TooDeep(x, z) && Obs.Hit(x, z, pad) == null;
+
+        /// <summary>
+        /// Омут в самой точке (настил моста — не вода). Клетка сетки путей — полтора метра: у края моста
+        /// или крутой набережной её центр проходим, а край — уже над руслом.
+        /// </summary>
+        public bool TooDeep(float x, float z) => Water - GroundAt(x, z) > WadeMax;
+
+        /// <summary>Ближайшее к (x, z) место, где можно стоять (по спирали, до ~14 м); не нашлось — сама точка.</summary>
+        public V2 WalkableNear(float x, float z, float pad = 0.5f)
+        {
+            for (int k = 0; k < 40; k++)
+            {
+                float a = k * 2.4f, r = k * 0.35f;
+                var q = ClampField(x + MathF.Cos(a) * r, z + MathF.Sin(a) * r, 4);
+                if (Walkable(q.x, q.z, pad)) return q;
+            }
+            return new V2(x, z);
+        }
 
         /// <summary>Верх ограды в точке (или -∞, если ограды нет).</summary>
         public float WallTop(float x, float z)

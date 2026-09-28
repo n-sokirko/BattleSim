@@ -76,14 +76,16 @@ namespace BattleSim.Core
             sq.RaiseT = 8f + Rng.Rand() * 2;
             int budget = Math.Min(3, sq.Alive);
             var dead = Races[sq.Team].Units[0];
-            float riseDur = ClipDur != null ? MathF.Max(ClipDur(dead.Id, "Rise_Undead"), ClipDur(dead.Id, "Lie_StandUp")) : 0;
+            // свой клип играется как есть, запасной Lie_StandUp — в 1,2 раза быстрее (см. Animate)
+            float own = ClipDur != null ? ClipDur(dead.Id, "Rise_Undead") : 0;
+            float riseDur = own > 0 ? own : (ClipDur != null ? ClipDur(dead.Id, "Lie_StandUp") : 0) / 1.2f;
             if (riseDur <= 0) riseDur = 2;
             int raised = 0;
             for (int i = 0; i < Units.Count && raised < budget; i++)
             {
                 var c = Units[i];
                 if (c.Alive || c.Gone || c.Flying || c.T.Mount || c.T.Special != Special.None || c.DeadT < 1.2f || c.DeadT > 20) continue;
-                if (D2d(c.Pos, sq.Center) > 15 || MathF.Abs(c.Pos.y - sq.Center.y) > 4) continue;
+                if (D2d(c.Pos, sq.Center) > 15 || MathF.Abs(c.Pos.y - sq.Center.y) > 4 || World.TooDeep(c.Pos.x, c.Pos.z)) continue; // утопленника не поднять
                 if (Units.Count >= MaxUnits) break;
                 if (sq.Raised == null)
                 {
@@ -98,7 +100,7 @@ namespace BattleSim.Core
                 var nu = new Unit(plan, World) { Squad = r, Risen = true };
                 nu.PrevPos = nu.Pos; nu.PrevYaw = nu.Yaw;
                 nu.Hp = dead.Hp * 0.55f;
-                nu.DownT = riseDur / 1.2f; nu.DownAnim = 3; // встаёт из земли (анимация — в Animate)
+                nu.DownT = riseDur; nu.DownAnim = 3; // встаёт из земли (анимация — в Animate)
                 c.Gone = true;
                 r.Units.Add(nu); r.Size++; r.Cells = null;
                 Units.Add(nu);
