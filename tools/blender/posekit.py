@@ -106,3 +106,46 @@ def mix(a, b, w):
 def smooth(x):
     x = min(1.0, max(0.0, x))
     return x * x * (3 - 2 * x)
+
+
+class ArmIK:
+    """IK рук: цель — запястье (конец предплечья), полюс — куда смотрит локоть. Координаты — пространство арматуры."""
+    def __init__(self, rig):
+        self.rig = rig
+        self.t, self.p = {}, {}
+        for s in 'lr':
+            for kind, store in (('tgt', self.t), ('pole', self.p)):
+                e = bpy.data.objects.new(f'arm_{kind}_{s}', None)
+                bpy.context.scene.collection.objects.link(e)
+                store[s] = e
+            c = rig.arm.pose.bones[f'lowerarm.{s}'].constraints.new('IK')
+            c.name = 'ArmIK'; c.target = self.t[s]; c.pole_target = self.p[s]
+            c.chain_count = 2; c.pole_angle = math.radians(-90); c.enabled = False
+
+        self.angle = {}
+
+    def set(self, side, pos, pole):
+        aw = self.rig.arm.matrix_world
+        self.t[side].matrix_world = aw @ Matrix.Translation(Vector(pos))
+        self.p[side].matrix_world = aw @ Matrix.Translation(Vector(pole))
+        c = self.rig.arm.pose.bones[f'lowerarm.{side}'].constraints['ArmIK']
+        c.enabled = True
+        if side not in self.angle:
+            # угол полюса зависит от крена костей: берём тот, при котором локоть ближе всего к полюсу
+            best = None
+            for deg in range(-180, 180, 15):
+                c.pole_angle = math.radians(deg)
+                bpy.context.view_layer.update()
+                d = (self.rig.arm.pose.bones[f'lowerarm.{side}'].head - Vector(pole)).length
+                if best is None or d < best[0]: best = (d, deg)
+            self.angle[side] = math.radians(best[1])
+        c.pole_angle = self.angle[side]
+        bpy.context.view_layer.update()
+
+    def enable(self, on):
+        for s in 'lr': self.rig.arm.pose.bones[f'lowerarm.{s}'].constraints['ArmIK'].enabled = on
+        bpy.context.view_layer.update()
+
+
+def lerp3(a, b, w):
+    return tuple(x + (y - x) * w for x, y in zip(a, b))

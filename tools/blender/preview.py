@@ -5,6 +5,11 @@ from mathutils import Vector
 from PIL import Image, ImageDraw
 
 KEEP_RUS = {'1H_Sword', 'Badge_Shield', 'Knight_Helmet', 'Knight_Cape'}
+KEEP = {'Knight': KEEP_RUS, 'Rogue_Hooded': {'Rogue_Cape'}}
+# снаряжение, которое прячется, если не выбрано (как Defs.AllAttachments)
+ATTACH = {'1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
+          'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat',
+          'Barbarian_Cape', 'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape'}
 KEEP_DEAD = {'1H_Sword', 'Round_Shield'}
 BODY = {'Knight_ArmLeft', 'Knight_ArmRight', 'Knight_Body', 'Knight_Head', 'Knight_LegLeft', 'Knight_LegRight'}
 
@@ -13,7 +18,7 @@ def show(keep):
     """Оставить тело и снаряжение вида войск (как Keep в Defs)."""
     for o in bpy.data.objects:
         if o.type == 'MESH' and o.name != 'Plane':
-            on = o.name in BODY or o.name in keep
+            on = o.name not in ATTACH and o.name != 'Icosphere' or o.name in keep
             o.hide_render = not on; o.hide_viewport = not on
 
 
