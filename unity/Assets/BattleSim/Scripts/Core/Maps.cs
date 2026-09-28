@@ -299,7 +299,7 @@ namespace BattleSim.Core
                     if (!onDeck)
                     {
                         float depth = World.Water - g;
-                        if (depth > 1.1f) si = sc = 0;                              // глубокая вода
+                        if (depth > World.WadeMax) si = sc = 0;                     // глубокая вода
                         else if (depth > 0.4f) { si *= 0.35f; sc *= 0.25f; }        // брод
                         else if (depth > -0.35f) { si *= 0.6f; sc *= 0.42f; }       // топь у берега
                         float f = w.ForestAt(x, z);

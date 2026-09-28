@@ -83,7 +83,7 @@ namespace BattleSim.Core
             {
                 var c = Units[i];
                 if (c.Alive || c.Gone || c.Flying || c.T.Mount || c.T.Special != Special.None || c.DeadT < 1.2f || c.DeadT > 20) continue;
-                if (D2d(c.Pos, sq.Center) > 15 || MathF.Abs(c.Pos.y - sq.Center.y) > 4) continue;
+                if (D2d(c.Pos, sq.Center) > 15 || MathF.Abs(c.Pos.y - sq.Center.y) > 4 || World.TooDeep(c.Pos.x, c.Pos.z)) continue; // утопленника не поднять
                 if (Units.Count >= MaxUnits) break;
                 if (sq.Raised == null)
                 {
