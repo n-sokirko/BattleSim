@@ -101,14 +101,51 @@ namespace BattleSim.Core
         public Mat4 Root = Mat4.Identity;
         readonly Dictionary<string, int> byName = new Dictionary<string, int>();
 
+        /// <summary>
+        /// Пропорции людей KayKit не кукольные: голова меньше, ноги, корпус и руки длиннее. Кость тянется только
+        /// вдоль себя (её потомки сдвигаются дальше, но не раздуваются), голова — целиком со шлемом.
+        /// Клипы не меняются: это поправка к позе. У коней другие имена костей — их не касается.
+        /// </summary>
+        public static readonly Dictionary<string, float> Stretch = new Dictionary<string, float>
+        {
+            ["upperleg.l"] = 1.35f, ["upperleg.r"] = 1.35f, ["lowerleg.l"] = 1.35f, ["lowerleg.r"] = 1.35f,
+            ["spine"] = 1.2f, ["upperarm.l"] = 1.1f, ["upperarm.r"] = 1.1f, ["lowerarm.l"] = 1.1f, ["lowerarm.r"] = 1.1f,
+        };
+        public static readonly Dictionary<string, float> Size = new Dictionary<string, float> { ["head"] = 0.7f };
+        readonly float[] len, size;
+        readonly float[][] dir;
+
         public Pose(GltfDoc d)
         {
             doc = d;
             int n = d.Nodes.Count;
             t = new float[n][]; r = new float[n][]; s = new float[n][];
             World = new Mat4[n];
+            len = new float[n]; size = new float[n]; dir = new float[n][];
             for (int i = 0; i < n; i++) { t[i] = new float[3]; r[i] = new float[4]; s[i] = new float[3]; if (!byName.ContainsKey(d.Nodes[i].Name)) byName[d.Nodes[i].Name] = i; }
+            for (int i = 0; i < n; i++)
+            {
+                var nd = d.Nodes[i];
+                len[i] = 1; size[i] = Size.TryGetValue(nd.Name ?? "", out float sz) ? sz : 1;
+                if (!Stretch.TryGetValue(nd.Name ?? "", out float f) || nd.Children.Count == 0) continue;
+                // ось кости — к самому дальнему потомку-суставу в позе покоя
+                var c = nd.Children.OrderByDescending(ch => ch.T[0] * ch.T[0] + ch.T[1] * ch.T[1] + ch.T[2] * ch.T[2]).First();
+                float l = MathF.Sqrt(c.T[0] * c.T[0] + c.T[1] * c.T[1] + c.T[2] * c.T[2]);
+                if (l < 1e-6f) continue;
+                len[i] = f; dir[i] = new[] { c.T[0] / l, c.T[1] / l, c.T[2] / l };
+            }
             Reset();
+        }
+
+        /// <summary>Матрица скиннинга кости: мир сустава, растянутый вдоль кости (для вершин, привязанных к ней).</summary>
+        public Mat4 SkinMat(int i)
+        {
+            if (len[i] == 1) return World[i];
+            var d = dir[i]; float k = len[i] - 1;
+            var st = new Mat4();
+            for (int col = 0; col < 3; col++)
+                for (int row = 0; row < 3; row++) st.E[col * 4 + row] += k * d[row] * d[col];
+            return World[i] * st;
         }
 
         public void Reset()
@@ -150,7 +187,14 @@ namespace BattleSim.Core
         void Walk(GNode n, Mat4 parent)
         {
             int i = n.Index;
-            var local = n.Matrix ?? Mat4.Compose(t[i][0], t[i][1], t[i][2], r[i][0], r[i][1], r[i][2], r[i][3], s[i][0], s[i][1], s[i][2]);
+            float tx = t[i][0], ty = t[i][1], tz = t[i][2], z = size[i];
+            var p = n.Parent;
+            if (p != null && len[p.Index] != 1)
+            { // родитель вытянут вдоль своей оси — сустав уезжает дальше по ней
+                var d = dir[p.Index]; float along = (tx * d[0] + ty * d[1] + tz * d[2]) * (len[p.Index] - 1);
+                tx += d[0] * along; ty += d[1] * along; tz += d[2] * along;
+            }
+            var local = n.Matrix ?? Mat4.Compose(tx, ty, tz, r[i][0], r[i][1], r[i][2], r[i][3], s[i][0] * z, s[i][1] * z, s[i][2] * z);
             World[i] = parent * local;
             foreach (var c in n.Children) Walk(c, World[i]);
         }
@@ -271,16 +315,11 @@ namespace BattleSim.Core
             }
             var merged = MeshData.Merge(parts);
             merged.Image = parts[0].Image;
-            // Масштаб: заданный рост, ступни на нуле
-            var world = merged.Clone();
-            world.Transform(refBind);
-            world.Bounds(out var mn, out var mx);
+            var model = new SkinnedModel { Doc = doc, Mesh = merged, BoneNodes = skin.Joints, BoneInv = boneInv, Bind = refBind, Height = targetHeight };
+            // Масштаб: заданный рост, ступни на нуле — по позе покоя с поправкой пропорций
+            Skin(model, pose).Bounds(out var mn, out var mx);
             float k = targetHeight / (mx.y - mn.y);
-            var model = new SkinnedModel
-            {
-                Doc = doc, Mesh = merged, BoneNodes = skin.Joints, BoneInv = boneInv, Bind = refBind,
-                Root = Mat4.Translation(0, -mn.y * k, 0) * Mat4.Scale(k), Height = targetHeight,
-            };
+            model.Root = Mat4.Translation(0, -mn.y * k, 0) * Mat4.Scale(k);
             model.Min = new V3(mn.x * k, 0, mn.z * k); model.Max = new V3(mx.x * k, (mx.y - mn.y) * k, mx.z * k);
             return model;
         }
@@ -310,7 +349,7 @@ namespace BattleSim.Core
         public static MeshData Skin(SkinnedModel m, Pose pose)
         {
             var mats = new Mat4[m.BoneNodes.Length];
-            for (int b = 0; b < mats.Length; b++) mats[b] = pose.World[m.BoneNodes[b]] * m.BoneInv[b] * m.Bind;
+            for (int b = 0; b < mats.Length; b++) mats[b] = pose.SkinMat(m.BoneNodes[b]) * m.BoneInv[b] * m.Bind;
             var src = m.Mesh;
             var o = new MeshData { Pos = new float[src.Pos.Length], Idx = src.Idx };
             for (int v = 0; v < src.VertexCount; v++)
@@ -355,7 +394,7 @@ namespace BattleSim.Core
                     var row = new float[nb * 16];
                     for (int b = 0; b < nb; b++)
                     {
-                        var mm = pose.World[m.BoneNodes[b]] * m.BoneInv[b] * m.Bind;
+                        var mm = pose.SkinMat(m.BoneNodes[b]) * m.BoneInv[b] * m.Bind;
                         Array.Copy(mm.E, 0, row, b * 16, 16);
                     }
                     rows.Add(row);

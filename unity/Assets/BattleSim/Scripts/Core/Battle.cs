@@ -1601,9 +1601,9 @@ namespace BattleSim.Core
         /// Выбирает анимацию по состоянию солдата. Здесь только имена клипов и время —
         /// сами позы берутся из запечённой текстуры.
         /// </summary>
-        // Скорость «земли» под опорной ногой в клипах при росте модели 1,9 м (замер по костям стоп, у коней — по копытам):
-        // юнит, идущий с такой скоростью, играет клип в темпе 1, и ноги не скользят. Масштаб модели удлиняет шаг.
-        const float WalkV = 0.72f, JogV = 2.0f, RunV = 3.8f, HorseWalkV = 1.43f, GallopV = 5.1f;
+        // Скорость «земли» под опорной ногой в клипах при росте модели 1,9 м и пропорциях Pose.Stretch (замер по костям стоп,
+        // у коней — по копытам): юнит, идущий с такой скоростью, играет клип в темпе 1, и ноги не скользят. Масштаб модели удлиняет шаг.
+        const float WalkV = 0.85f, JogV = 2.55f, RunV = 4.8f, HorseWalkV = 1.43f, GallopV = 5.1f;
 
         static float Tempo(float speed, float native, float scale, float lo, float hi) => M.Clamp(speed / (native * scale), lo, hi);
 
@@ -1620,8 +1620,8 @@ namespace BattleSim.Core
             // тронуться и встать — сразу (по мгновенной скорости), шаг/трусца/бег — по сглаженной
             if (g == 0) { if (now > 0.35f) g = 1; }
             else if (now < 0.2f && speed < 0.4f) g = 0;
-            if (g >= 1) g = speed > 1.35f ? Math.Max(g, 2) : speed < 0.9f ? 1 : g;
-            if (g >= 2) g = !fast ? 2 : speed > 3.0f ? 3 : speed < 2.5f ? 2 : g;
+            if (g >= 1) g = speed > 1.5f ? Math.Max(g, 2) : speed < 1.05f ? 1 : g;
+            if (g >= 2) g = !fast ? 2 : speed > 3.4f ? 3 : speed < 2.9f ? 2 : g;
             return g;
         }
 

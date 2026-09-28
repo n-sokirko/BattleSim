@@ -79,3 +79,50 @@ def stack(paths, out):
     sheet = Image.new('RGB', (w, h), 'white'); y = 0
     for im in ims: sheet.paste(im, (0, y)); y += im.size[1]
     sheet.save(out)
+
+
+# ---------------------------------------------------------------- цвета как в игре (ModelKit.RecolorRace / RecolorCells / TeamTint)
+import numpy as np
+
+RACES = {  # SkinHue, SkinSat, SkinLit, MetalHue, MetalSat (Defs.cs)
+    'rus': None, 'orcs': (100, 0.55, 0.62, 30, 0.08), 'nav': (80, 0.07, 0.82, 25, 0.3), 'steppe': (24, 0.45, 0.85, 38, 0.45)}
+TEAMS = [(214, 0.62), (2, 0.66)]
+
+
+def team_cells(model):
+    return {'Knight': [(0, 1), (2, 2)], 'Skeleton': [(0, 1), (2, 2)], 'Barbarian': [(0, 1), (1, 1), (2, 2)]}.get(model, [(0, 1), (1, 1), (1, 2)])
+
+
+def _hsl(rgb):
+    mx, mn = rgb.max(-1), rgb.min(-1); l = (mx + mn) / 2; d = mx - mn
+    s = np.where(d == 0, 0, d / np.maximum(1e-9, 1 - np.abs(2 * l - 1)))
+    return s, l
+
+
+def _from_hsl(h, s, l):
+    c = (1 - np.abs(2 * l - 1)) * s; hp = (h * 6) % 6; x = c * (1 - np.abs(hp % 2 - 1)); m = l - c / 2
+    z = np.zeros_like(l); i = np.floor(hp).astype(int)
+    r = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [c, x, z, z, x, c])
+    g = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [x, c, c, x, z, z])
+    b = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [z, z, x, c, c, x])
+    return np.stack([r + m, g + m, b + m], -1)
+
+
+def game_texture(png_bytes_path, model, race, team, out_png):
+    """Атлас модели в цветах расы и команды — как его перекрашивает игра."""
+    im = np.asarray(Image.open(png_bytes_path).convert('RGB'), float) / 255
+    H, W, _ = im.shape; cw, ch = W // 8, H // 4
+    def cell(cx, cy, fn):
+        blk = im[cy * ch:(cy + 1) * ch, cx * cw:(cx + 1) * cw]
+        s, l = _hsl(blk); im[cy * ch:(cy + 1) * ch, cx * cw:(cx + 1) * cw] = fn(s, l)
+    rp = RACES.get(race)
+    if rp:
+        hue, sat, lit, mh, ms = rp
+        for cx in (0, 1): cell(cx, 0, lambda s, l: _from_hsl(np.full_like(l, hue / 360), np.full_like(l, sat), l * lit))
+        if model in ('Knight', 'Skeleton'): cell(3, 0, lambda s, l: _from_hsl(np.full_like(l, mh / 360), np.full_like(l, ms), l))
+    th, ts = TEAMS[team]
+    for cx, cy in team_cells(model):
+        cell(cx, cy, lambda s, l: _from_hsl(np.full_like(l, th / 360), np.maximum(s, ts), np.clip(l * 0.95 + 0.03, 0.08, 0.8)))
+    tint = np.array([1, 1, 1]) * 0.86 + _from_hsl(np.array(th / 360), np.array(0.7), np.array(0.6)) * 0.14
+    Image.fromarray((np.clip(im * tint, 0, 1) * 255).astype(np.uint8)).save(out_png)
+    return out_png
