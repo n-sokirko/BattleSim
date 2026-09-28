@@ -143,29 +143,29 @@ namespace BattleSim.Core
         // ---------------------------------------------------------------- Орда: гоблины, громилы, бомбы, чёрные всадники
         static readonly UnitDef OrcGoblin = new UnitDef { Key = "goblin", Name = "Гоблины", SquadName = "гоблины", Model = "Rogue_Hooded", Hp = 56, Armor = 0.05f, Speed = 4.3f, Accel = 14, Radius = 0.4f, Mass = 0.55f,
             Reach = 0.5f, Dmg = 10, Cd = 0.65f, AtkTime = 0.45f, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 7, Rows = 4, Spacing = 1.0f, Scale = 0.68f, ScaleJit = 0.12f, RoutAt = 26,
-            Note = "Рой: много, быстро, трусливо", Keep = new[] { "Knife", "Knife_Offhand" },
+            Note = "Рой: много, быстро, трусливо", Keep = new[] { "Knife", "Knife_Offhand", "Orc_Tusks", "Orc_Ears" },
             Anim = new AnimSet { Idle = "Idle", Run = "Running_B", Attack = new[] { "Dualwield_Melee_Attack_Stab", "Dualwield_Melee_Attack_Slice" }, Cheer = "Cheer" } };
         static readonly UnitDef OrcBrute = new UnitDef { Key = "brute", Name = "Громилы", SquadName = "громилы", Model = "Barbarian", Hp = 215, Armor = 0.15f, Speed = 3.2f, Accel = 10, Radius = 0.78f, Mass = 2.0f,
             Reach = 1.2f, Dmg = 32, Cd = 1.7f, AtkTime = 0.9f, ArrowBlock = 0, VsCav = 2.0f, Charge = 1, Cols = 4, Rows = 2, Spacing = 1.9f, Scale = 1.3f, ScaleJit = 0.08f, KnockMul = 2.5f,
-            SpinEvery = 3, SpinR = 2.2f, Note = "Каждый третий удар — вихрем", Keep = new[] { "2H_Axe" },
+            SpinEvery = 3, SpinR = 2.2f, Note = "Каждый третий удар — вихрем", Keep = new[] { "2H_Axe", "Orc_Tusks", "Orc_Ears" },
             Anim = new AnimSet { Idle = "2H_Melee_Idle", Run = "Running_A", Attack = new[] { "2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice" }, Melee = "2H_Melee_Attack_Spin", Cheer = "Cheer" } };
         static readonly UnitDef OrcBomber = new UnitDef { Key = "bomber", Name = "Бомбомёты", SquadName = "бомбомёты", Model = "Rogue_Hooded", Hp = 45, Armor = 0.05f, Speed = 3.8f, Accel = 12, Radius = 0.42f, Mass = 0.6f,
             Reach = 0.5f, Dmg = 6, Cd = 3.2f, AtkTime = 0.7f, Ranged = true, Range = 22, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 7, Rows = 2, Spacing = 1.2f, Scale = 0.72f, ScaleJit = 0.1f, RoutAt = 26,
-            AoeR = 2.2f, AoeDmg = 24, AoeKnock = 4.5f, Note = "Бомба рвёт кучу, тела летят", Keep = new[] { "Throwable" },
+            AoeR = 2.2f, AoeDmg = 24, AoeKnock = 4.5f, Note = "Бомба рвёт кучу, тела летят", Keep = new[] { "Throwable", "Orc_Tusks", "Orc_Ears" },
             Anim = new AnimSet { Idle = "Idle", Run = "Running_B", Attack = new[] { "Throw" }, Aim = "Idle", Reload = "Idle", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
         static readonly UnitDef OrcRider = new UnitDef { Key = "orcrider", Name = "Чёрные всадники", SquadName = "чёрные всадники", Model = "Barbarian", Mount = true, Hp = 240, Armor = 0.22f, Speed = 7.2f, Accel = 5, Radius = 1.1f, Mass = 3.6f,
             Reach = 0.9f, Dmg = 26, Cd = 1.3f, AtkTime = 0.7f, ArrowBlock = 0.2f, VsCav = 1, Charge = 2.0f, Cols = 3, Rows = 2, Spacing = 2.7f, Scale = 1.1f, ScaleJit = 0.05f,
-            Note = "Натиск ×2", Keep = new[] { "1H_Axe", "Barbarian_Round_Shield" },
+            Note = "Натиск ×2", Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Orc_Tusks", "Orc_Ears" },
             Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" } } };
         static readonly UnitDef OrcWarlord = new UnitDef { Key = "warlord", Name = "Вождь", Model = "Barbarian", Mount = true, Special = Special.Commander, Hp = 340, Armor = 0.4f,
             Speed = 6.5f, Accel = 6, Radius = 1.1f, Mass = 3.6f, Reach = 1.0f, Dmg = 28, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.2f, ScaleJit = 0,
-            Keep = new[] { "2H_Axe", "Barbarian_Hat" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
+            Keep = new[] { "2H_Axe", "Barbarian_Hat", "Orc_Tusks", "Orc_Ears" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
         static readonly UnitDef OrcRunner = new UnitDef { Key = "runner", Name = "Посыльный", Model = "Rogue_Hooded", Mount = true, Special = Special.Messenger, Hp = 40, Armor = 0,
             Speed = 11.5f, Accel = 10, Radius = 0.9f, Mass = 2.5f, Reach = 0.5f, Dmg = 0, Cd = 99, AtkTime = 0.5f, ArrowBlock = 0, VsCav = 1, Charge = 1, Scale = 0.75f, ScaleJit = 0,
-            Keep = new[] { "Knife" }, Anim = new AnimSet() };
+            Keep = new[] { "Knife", "Orc_Tusks", "Orc_Ears" }, Anim = new AnimSet() };
         static readonly UnitDef OrcChief = new UnitDef { Key = "chief", Name = "Вожак", Model = "Barbarian", Mount = true, Special = Special.Captain, Hp = 260, Armor = 0.35f,
             Speed = 6.8f, Accel = 6, Radius = 1.05f, Mass = 3.6f, Reach = 0.9f, Dmg = 24, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.12f, ScaleJit = 0,
-            Keep = new[] { "1H_Axe", "Barbarian_Round_Shield" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
+            Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Orc_Tusks", "Orc_Ears" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
 
         // ---------------------------------------------------------------- Навь: мертвецы, упыри, колдуны, костяные всадники
         static readonly UnitDef NavDead = new UnitDef { Key = "dead", Name = "Мертвецы", SquadName = "мертвецы", Model = "Knight", Hp = 75, Armor = 0.15f, Speed = 2.7f, Accel = 9, Radius = 0.56f, Mass = 1,
@@ -233,7 +233,7 @@ namespace BattleSim.Core
                 : new AnimSet { Idle = "2H_Melee_Idle", Run = "Running_A", Attack = new[] { "2H_Melee_Attack_Stab", "1H_Melee_Attack_Slice_Horizontal" }, Melee = "2H_Melee_Attack_Spin", Cheer = "Cheer" },
         };
         static readonly UnitDef RusHero = HeroOf("bogatyr", "Богатырь", "Knight", 1.55f, new[] { "2H_Sword", "Knight_Helmet", "Knight_Cape" }, false);
-        static readonly UnitDef OrcHero = With(HeroOf("troll", "Тролль", "Barbarian", 1.9f, new[] { "2H_Axe" }, true),
+        static readonly UnitDef OrcHero = With(HeroOf("troll", "Тролль", "Barbarian", 1.9f, new[] { "2H_Axe", "Orc_Tusks", "Orc_Ears" }, true),
             d => { d.Hp = 1100; d.Armor = 0.2f; d.Dmg = 46; d.Cd = 1.5f; d.KnockMul = 4.5f; d.Speed = 3.3f; d.Radius = 1.0f; d.Mass = 7; });
         static readonly UnitDef NavHero = With(HeroOf("wight", "Умертвие", "Knight", 1.6f, new[] { "2H_Sword", "Knight_Helmet" }, false),
             d => { d.Hp = 800; d.Leech = 0.2f; d.Speed = 3.2f; });
@@ -295,7 +295,7 @@ namespace BattleSim.Core
         {
             "1H_Sword_Offhand", "Badge_Shield", "Rectangle_Shield", "Round_Shield", "Spike_Shield", "1H_Sword", "2H_Sword",
             "Knight_Helmet", "Knight_Cape", "1H_Axe_Offhand", "Barbarian_Round_Shield", "1H_Axe", "2H_Axe", "Mug", "Barbarian_Hat", "Barbarian_Cape",
-            "Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Knife", "Throwable", "Rogue_Cape", "Bow",
+            "Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Knife", "Throwable", "Rogue_Cape", "Bow", "Orc_Tusks", "Orc_Ears",
         };
 
         public static readonly TeamDef[] Teams =

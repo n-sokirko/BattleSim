@@ -9,7 +9,8 @@ KEEP = {'Knight': KEEP_RUS, 'Rogue_Hooded': {'Rogue_Cape'}}
 # снаряжение, которое прячется, если не выбрано (как Defs.AllAttachments)
 ATTACH = {'1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
           'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat',
-          'Barbarian_Cape', 'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape', 'Bow'}
+          'Barbarian_Cape', 'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape', 'Bow',
+          'Orc_Tusks', 'Orc_Ears'}
 KEEP_DEAD = {'1H_Sword', 'Round_Shield'}
 BODY = {'Knight_ArmLeft', 'Knight_ArmRight', 'Knight_Body', 'Knight_Head', 'Knight_LegLeft', 'Knight_LegRight'}
 

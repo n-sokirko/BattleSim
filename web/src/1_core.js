@@ -81,7 +81,7 @@ const TYPES = [
 ];
 const ALL_ATTACHMENTS = ['1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
   'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat', 'Barbarian_Cape',
-  'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape', 'Bow'];
+  'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape', 'Bow', 'Orc_Tusks', 'Orc_Ears'];
 
 const TEAM = [
   { name: 'Синие', hue: 214, sat: 0.62, css: '#3f7fe6' },
