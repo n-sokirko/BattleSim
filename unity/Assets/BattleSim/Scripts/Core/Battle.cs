@@ -880,7 +880,7 @@ namespace BattleSim.Core
                         PathBudget--;
                         bool fromCenter = D2d(sq.Center, u.Pos) < 12 && nav.SpeedAt(sq.Center.x, sq.Center.z, cls) > 0;
                         float fx = fromCenter ? sq.Center.x : u.Pos.x, fz = fromCenter ? sq.Center.z : u.Pos.z;
-                        path = nav.FindPath(fx, fz, gx, gz, cls, 0, 0, 0, 0, 8000);
+                        path = nav.FindPath(fx, fz, gx, gz, cls, 0, 0, 0, 0, 8000, 1.35f, fromCenter ? sq.Center.y : u.Pos.y);
                         PathWork -= nav.LastExpanded;
                         if (fromCenter) sq.PathCache = new PathCache { Cls = cls, Gx = gx, Gz = gz, T = Time, Path = path };
                     }
@@ -899,7 +899,9 @@ namespace BattleSim.Core
             }
             var P = u.Path;
             if (P == null) return new V2(gx, gz);
-            while (u.PathI < P.Count - 1 && M.Hypot(P[u.PathI].x - u.Pos.x, P[u.PathI].z - u.Pos.z) < 2.5f) u.PathI++;
+            // к следующей вершине — если к ней прямая свободна, иначе дойти до этой (не срезать угол обрыва, ограды, моста)
+            while (u.PathI < P.Count - 1 && M.Hypot(P[u.PathI].x - u.Pos.x, P[u.PathI].z - u.Pos.z) < 2.5f
+                && (M.Hypot(P[u.PathI].x - u.Pos.x, P[u.PathI].z - u.Pos.z) < 0.5f || nav.LineClear(u.Pos.x, u.Pos.z, P[u.PathI + 1].x, P[u.PathI + 1].z, cls))) u.PathI++;
             if (u.PathI >= P.Count - 1 && M.Hypot(P[P.Count - 1].x - u.Pos.x, P[P.Count - 1].z - u.Pos.z) < 3) return new V2(gx, gz);
             return P[Math.Min(u.PathI, P.Count - 1)];
         }
@@ -1342,12 +1344,20 @@ namespace BattleSim.Core
             if (nav.SpeedAt(nx, nz, cls) == 0 && nav.SpeedAt(ox, oz, cls) > 0) return false;
             // переход между клетками — только там, где его допускает и поиск пути (иначе забредают на отрезанные уступы)
             int a = nav.Idx(ox, oz), b = nav.Idx(nx, nz);
-            if (a >= 0 && b >= 0 && a != b && !nav.Step(a, b, a % nav.Dim != b % nav.Dim && a / nav.Dim != b / nav.Dim)) return false;
             float g = World.GroundAt(nx, nz);
+            if (a >= 0 && b >= 0 && a != b && !nav.Step(a, b, a % nav.Dim != b % nav.Dim && a / nav.Dim != b / nav.Dim))
+            { // Сетка путей переход не допускает. Кроме одного случая: клетка полтора метра, её центр на мосту или стене,
+              // а боец стоит у края на земле — не на её уровне. Такого выпускаем в соседнюю клетку его уровня, иначе он заперт.
+                if (MathF.Abs(oy - nav.Surf[a]) < 1f || MathF.Abs(g - nav.Surf[b]) > 0.6f) return false;
+            }
             // в омут не шагаем, даже если клетка в целом проходима (край моста, крутая набережная); выбираться — можно
             if (World.Water - g > World.WadeMax && g < oy) return false;
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
-            return MathF.Abs(g - oy) <= M.Hypot(nx - ox, nz - oz) * 1.3f + 0.06f;
+            float dy = MathF.Abs(g - oy), d = M.Hypot(nx - ox, nz - oz);
+            if (dy <= d * 1.3f + 0.005f) return true;
+            // ступенька круче уклона — только на краю настила (въезд на мост, начало лестницы). На склоне такой поблажки нет:
+            // толкотня дёргает бойца по 1–2 см несколько раз за шаг, и по 6 см за раз он сползал по отвесу ущелья
+            return dy <= d * 1.3f + 0.06f && World.OnDeck(ox, oz) != World.OnDeck(nx, nz);
         }
 
         // ---------------------------------------------------------------- соседи
