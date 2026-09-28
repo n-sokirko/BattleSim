@@ -475,6 +475,29 @@ namespace BattleSim.Core
                     }
         }
 
+        /// <summary>
+        /// Облик расы: кожа (клетки палитры (0,0) и (1,0) у всех моделей KayKit) и сталь рыцаря (3,0) перекрашиваются
+        /// в оттенок расы с сохранением светлоты — зелёные орки, ржавое железо.
+        /// </summary>
+        public static void RecolorRace(byte[] rgba, int w, int h, string model, RaceDef race)
+        {
+            if (race == null) return;
+            int cw = w / 8, ch = h / 4;
+            void Cell(int cx, int cy, float hue, float sat)
+            {
+                for (int y = cy * ch; y < (cy + 1) * ch; y++)
+                    for (int x = cx * cw; x < (cx + 1) * cw; x++)
+                    {
+                        int i = (y * w + x) * 4;
+                        new Rgb(rgba[i] / 255f, rgba[i + 1] / 255f, rgba[i + 2] / 255f).ToHsl(out _, out _, out float l);
+                        var o = Rgb.FromHsl(hue / 360f, sat, l);
+                        rgba[i] = B(o.r); rgba[i + 1] = B(o.g); rgba[i + 2] = B(o.b);
+                    }
+            }
+            if (race.SkinHue >= 0) { Cell(0, 0, race.SkinHue, race.SkinSat); Cell(1, 0, race.SkinHue, race.SkinSat); }
+            if (race.MetalHue >= 0 && model == "Knight") Cell(3, 0, race.MetalHue, race.MetalSat);
+        }
+
         /// <summary>Лёгкий оттенок команды на всём солдате — так армии различимы издалека.</summary>
         public static Rgb TeamTint(TeamDef team) => new Rgb(1, 1, 1).Lerp(Rgb.FromHsl(team.Hue / 360f, 0.7f, 0.6f), 0.14f);
 

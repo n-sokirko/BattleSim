@@ -21,7 +21,8 @@ namespace BattleSim
     /// </summary>
     public sealed class ModelLibrary
     {
-        public CrowdModel[] Inf = new CrowdModel[3];
+        /// <summary>Пехота по типу бойца (Defs.All), всадники — тоже по типу.</summary>
+        public Dictionary<int, CrowdModel> Inf = new Dictionary<int, CrowdModel>();
         public Dictionary<int, CrowdModel> Rider = new Dictionary<int, CrowdModel>();
         public CrowdModel[] Horse = new CrowdModel[2];
         public V3[] Saddle = new V3[2];
@@ -112,19 +113,25 @@ namespace BattleSim
         public IEnumerator Load(System.Action<float, string> progress)
         {
             var steps = new List<(string, System.Action)>();
-            string[] inf = { "Knight", "Barbarian", "Rogue_Hooded" };
-            for (int i = 0; i < 3; i++)
+            foreach (var race in Defs.Races)
             {
-                int k = i;
-                steps.Add(("Войско: " + Defs.Types[k].Name.ToLowerInvariant(), () => Inf[k] = MakeInfantry(k)));
+                var rc = race;
+                for (int i = 0; i < 3; i++)
+                {
+                    var t = rc.Units[i];
+                    steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => Inf[t.Id] = MakeInfantry(t)));
+                }
+                steps.Add((rc.Name + ": конница и вожди", () =>
+                {
+                    Rider[rc.Units[3].Id] = MakeRider(rc.Units[3], 1.75f);
+                    Rider[rc.Cmd.Id] = MakeRider(rc.Cmd, 1.85f);
+                    Rider[rc.Msg.Id] = MakeRider(rc.Msg, 1.7f);
+                    Rider[rc.Cap.Id] = MakeRider(rc.Cap, 1.8f);
+                }));
             }
             steps.Add(("Кони", () => { for (int h = 0; h < 2; h++) MakeHorse(h); }));
-            steps.Add(("Рыцари", () => Rider[3] = MakeRider(Defs.Types[3], 1.75f)));
-            steps.Add(("Полководцы и гонцы", () =>
+            steps.Add(("Посадка всадника", () =>
             {
-                Rider[Defs.TCmd] = MakeRider(Defs.Commander, 1.85f);
-                Rider[Defs.TMsg] = MakeRider(Defs.Messenger, 1.7f);
-                Rider[Defs.TCap] = MakeRider(Defs.Captain, 1.8f);
                 var knight = Doc("Knight");
                 var rider = ModelKit.PrepareCharacter(knight, Defs.Types[3].Keep, 1.75f);
                 RiderHipsY = ModelKit.NodeWorld(rider, "hips", new ClipLayer { Src = knight, Anim = knight.Anim("Sit_Chair_Idle"), Filter = s => !ModelKit.UpperBones.IsMatch(s) }, 0).y;
@@ -141,10 +148,16 @@ namespace BattleSim
             progress(1, "Готово");
         }
 
-        Material[] TeamMats(string model, string png)
+        readonly Dictionary<string, Material[]> teamMats = new Dictionary<string, Material[]>();
+
+        Material[] TeamMats(string model, string png, RaceDef race = null)
         {
+            string key = model + "|" + (race?.Key ?? "");
+            if (teamMats.TryGetValue(key, out var cached)) return cached;
             var mats = new Material[2];
+            teamMats[key] = mats;
             var rgba0 = Rgba(png, out int w, out int h);
+            ModelKit.RecolorRace(rgba0, w, h, model, race);
             for (int team = 0; team < 2; team++)
             {
                 var rgba = (byte[])rgba0.Clone();
@@ -156,9 +169,8 @@ namespace BattleSim
             return mats;
         }
 
-        CrowdModel MakeInfantry(int type)
+        CrowdModel MakeInfantry(UnitDef t)
         {
-            var t = Defs.Types[type];
             var doc = Doc(t.Model);
             var model = ModelKit.PrepareCharacter(doc, t.Keep, t.Mount ? 1.75f : 1.9f);
             var a = t.Anim;
@@ -170,9 +182,9 @@ namespace BattleSim
                 seen.Add(name);
                 defs.Add(new ClipDef { Name = name, Loop = loop, Layers = { new ClipLayer { Src = doc, Anim = doc.Anim(name) } } });
             }
-            foreach (var n in new[] { a.Idle, a.Run, "Walking_A", a.Cheer, a.Aim, a.Reload }) Add(n, true);
-            foreach (var n in a.Attack.Concat(new[] { a.Melee, "Death_A", "Death_B", "Hit_A", "Hit_B", "Block_Hit" })) Add(n, false);
-            return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh)));
+            foreach (var n in new[] { a.Idle, a.Run, "Walking_A", "Running_B", a.Cheer, a.Aim, a.Reload }) Add(n, true);
+            foreach (var n in a.Attack.Concat(new[] { a.Melee, "Death_A", "Death_B", "Hit_A", "Hit_B", "Block_Hit", "Lie_Down", "Lie_StandUp" })) Add(n, false);
+            return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh), t.Race));
         }
 
         CrowdModel MakeRider(UnitDef t, float height)
@@ -183,12 +195,12 @@ namespace BattleSim
             System.Func<string, bool> upper = s => ModelKit.UpperBones.IsMatch(s), lower = s => !ModelKit.UpperBones.IsMatch(s);
             var sit = new ClipLayer { Src = knight, Anim = knight.Anim("Sit_Chair_Idle"), Filter = lower };
             var defs = new List<ClipDef> { new ClipDef { Name = "ride", Layers = { new ClipLayer { Src = knight, Anim = knight.Anim("Idle"), Filter = upper }, sit } } };
-            var atk = Defs.Types[3].Anim.Attack;
+            var atk = t.Anim.Attack.Length > 0 ? t.Anim.Attack : Defs.Types[3].Anim.Attack;
             for (int i = 0; i < atk.Length; i++)
                 defs.Add(new ClipDef { Name = "atk" + i, Loop = false, Layers = { new ClipLayer { Src = knight, Anim = knight.Anim(atk[i]), Filter = upper }, sit } });
             defs.Add(new ClipDef { Name = "Death_A", Loop = false, Layers = { new ClipLayer { Src = knight, Anim = knight.Anim("Death_A") } } });
             defs.Add(new ClipDef { Name = "Death_B", Loop = false, Layers = { new ClipLayer { Src = knight, Anim = knight.Anim("Death_B") } } });
-            return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh)));
+            return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh), t.Race));
         }
 
         void MakeHorse(int i)

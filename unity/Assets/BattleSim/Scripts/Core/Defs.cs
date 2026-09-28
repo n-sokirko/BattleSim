@@ -28,6 +28,39 @@ namespace BattleSim.Core
         public int Cols, Rows;
         public string[] Keep;
         public AnimSet Anim;
+        // --- расы
+        /// <summary>Номер в Defs.All (тип бойца), место в армии (0 строевые, 1 ударные, 2 стрелки, 3 конница) и раса.</summary>
+        public int Id, Slot;
+        public RaceDef Race;
+        /// <summary>Как называть отряд в летописи («мечники»).</summary>
+        public string SquadName;
+        /// <summary>Рост модели (×) и разброс роста; бесстрашие; при каком духе бегут.</summary>
+        public float Scale = 1, ScaleJit = 0.1f, RoutAt = 18;
+        public bool Fearless;
+        /// <summary>Каждый SpinEvery-й удар — с разворота по всем вокруг в радиусе SpinR (громилы).</summary>
+        public int SpinEvery;
+        public float SpinR;
+        /// <summary>Снаряд рвётся: радиус, урон, отброс (бомбы).</summary>
+        public float AoeR, AoeDmg, AoeKnock;
+        /// <summary>Уменьшать урон в тени щита спереди (стена щитов), доп. урон и т.п. — задел.</summary>
+        public float KnockMul = 1;
+    }
+
+    /// <summary>
+    /// Раса: четыре вида бойцов по местам в армии, вожди, боевой клич и облик (цвет кожи и стали в палитре KayKit).
+    /// </summary>
+    public sealed class RaceDef
+    {
+        public string Key, Name, Cry;
+        public UnitDef[] Units = new UnitDef[4];
+        public UnitDef Cmd, Msg, Cap;
+        /// <summary>Кожа и сталь: оттенок (0..360, &lt;0 — не менять) и насыщенность; конь — множитель цвета.</summary>
+        public float SkinHue = -1, SkinSat, MetalHue = -1, MetalSat;
+        public float HorseTint = 1;
+        /// <summary>Ярость орды: копится в бою, на пике армия ревёт (быстрее, сильнее, не бежит).</summary>
+        public bool Rage;
+        /// <summary>Имена вождей для летописи.</summary>
+        public string[] Names;
     }
 
     public sealed class TeamDef
@@ -86,8 +119,65 @@ namespace BattleSim.Core
             Speed = 6.8f, Accel = 6, Radius = 1.05f, Mass = 3.5f, Reach = 0.9f, Dmg = 22, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.35f, VsCav = 1, Charge = 1,
             Keep = new[] { "1H_Sword", "Badge_Shield", "Knight_Helmet", "Knight_Cape" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Slice_Horizontal" } } };
 
-        public static readonly UnitDef[] All = { Types[0], Types[1], Types[2], Types[3], Commander, Messenger, Captain };
+        // ---------------------------------------------------------------- Орда: гоблины, громилы, бомбы, чёрные всадники
+        static readonly UnitDef OrcGoblin = new UnitDef { Key = "goblin", Name = "Гоблины", SquadName = "гоблины", Model = "Rogue_Hooded", Hp = 50, Armor = 0.05f, Speed = 4.3f, Accel = 14, Radius = 0.4f, Mass = 0.55f,
+            Reach = 0.5f, Dmg = 9, Cd = 0.65f, AtkTime = 0.45f, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 7, Rows = 4, Spacing = 1.0f, Scale = 0.68f, ScaleJit = 0.12f, RoutAt = 30,
+            Note = "Рой: много, быстро, трусливо", Keep = new[] { "Knife", "Knife_Offhand" },
+            Anim = new AnimSet { Idle = "Idle", Run = "Running_B", Attack = new[] { "Dualwield_Melee_Attack_Stab", "Dualwield_Melee_Attack_Slice" }, Cheer = "Cheer" } };
+        static readonly UnitDef OrcBrute = new UnitDef { Key = "brute", Name = "Громилы", SquadName = "громилы", Model = "Barbarian", Hp = 215, Armor = 0.15f, Speed = 3.2f, Accel = 10, Radius = 0.78f, Mass = 2.0f,
+            Reach = 1.2f, Dmg = 32, Cd = 1.7f, AtkTime = 0.9f, ArrowBlock = 0, VsCav = 2.0f, Charge = 1, Cols = 4, Rows = 2, Spacing = 1.9f, Scale = 1.3f, ScaleJit = 0.08f, KnockMul = 2.5f,
+            SpinEvery = 3, SpinR = 2.2f, Note = "Каждый третий удар — вихрем", Keep = new[] { "2H_Axe" },
+            Anim = new AnimSet { Idle = "2H_Melee_Idle", Run = "Running_A", Attack = new[] { "2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice" }, Melee = "2H_Melee_Attack_Spin", Cheer = "Cheer" } };
+        static readonly UnitDef OrcBomber = new UnitDef { Key = "bomber", Name = "Бомбомёты", SquadName = "бомбомёты", Model = "Rogue_Hooded", Hp = 45, Armor = 0.05f, Speed = 3.8f, Accel = 12, Radius = 0.42f, Mass = 0.6f,
+            Reach = 0.5f, Dmg = 6, Cd = 3.2f, AtkTime = 0.7f, Ranged = true, Range = 22, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 7, Rows = 2, Spacing = 1.2f, Scale = 0.72f, ScaleJit = 0.1f, RoutAt = 26,
+            AoeR = 2.2f, AoeDmg = 24, AoeKnock = 4.5f, Note = "Бомба рвёт кучу, тела летят", Keep = new[] { "Throwable" },
+            Anim = new AnimSet { Idle = "Idle", Run = "Running_B", Attack = new[] { "Throw" }, Aim = "Idle", Reload = "Idle", Melee = "1H_Melee_Attack_Stab", Cheer = "Cheer" } };
+        static readonly UnitDef OrcRider = new UnitDef { Key = "orcrider", Name = "Чёрные всадники", SquadName = "чёрные всадники", Model = "Barbarian", Mount = true, Hp = 240, Armor = 0.22f, Speed = 7.2f, Accel = 5, Radius = 1.1f, Mass = 3.6f,
+            Reach = 0.9f, Dmg = 26, Cd = 1.3f, AtkTime = 0.7f, ArrowBlock = 0.2f, VsCav = 1, Charge = 2.0f, Cols = 3, Rows = 2, Spacing = 2.7f, Scale = 1.1f, ScaleJit = 0.05f,
+            Note = "Натиск ×2", Keep = new[] { "1H_Axe", "Barbarian_Round_Shield" },
+            Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" } } };
+        static readonly UnitDef OrcWarlord = new UnitDef { Key = "warlord", Name = "Вождь", Model = "Barbarian", Mount = true, Special = Special.Commander, Hp = 340, Armor = 0.4f,
+            Speed = 6.5f, Accel = 6, Radius = 1.1f, Mass = 3.6f, Reach = 1.0f, Dmg = 28, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.2f, ScaleJit = 0,
+            Keep = new[] { "2H_Axe", "Barbarian_Hat" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
+        static readonly UnitDef OrcRunner = new UnitDef { Key = "runner", Name = "Посыльный", Model = "Rogue_Hooded", Mount = true, Special = Special.Messenger, Hp = 40, Armor = 0,
+            Speed = 11.5f, Accel = 10, Radius = 0.9f, Mass = 2.5f, Reach = 0.5f, Dmg = 0, Cd = 99, AtkTime = 0.5f, ArrowBlock = 0, VsCav = 1, Charge = 1, Scale = 0.75f, ScaleJit = 0,
+            Keep = new[] { "Knife" }, Anim = new AnimSet() };
+        static readonly UnitDef OrcChief = new UnitDef { Key = "chief", Name = "Вожак", Model = "Barbarian", Mount = true, Special = Special.Captain, Hp = 260, Armor = 0.35f,
+            Speed = 6.8f, Accel = 6, Radius = 1.05f, Mass = 3.6f, Reach = 0.9f, Dmg = 24, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.3f, VsCav = 1, Charge = 1, Scale = 1.12f, ScaleJit = 0,
+            Keep = new[] { "1H_Axe", "Barbarian_Round_Shield" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
+
+        public static readonly RaceDef Rus = new RaceDef
+        {
+            Key = "rus", Name = "Русь", Cry = "За Русь!", Units = { [0] = Types[0], [1] = Types[1], [2] = Types[2], [3] = Types[3] },
+            Cmd = Commander, Msg = Messenger, Cap = Captain,
+        };
+        public static readonly RaceDef Orcs = new RaceDef
+        {
+            Key = "orcs", Name = "Орда", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
+            Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 95, SkinSat = 0.45f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
+            Names = new[] { "Грызь", "Хряк", "Шмяк", "Гнилозуб", "Рвач", "Бугай", "Кривоклык", "Жрун" },
+        };
+        public static readonly RaceDef[] Races = { Rus, Orcs };
+
+        /// <summary>Все виды бойцов всех рас; номер в массиве — тип бойца (Unit.Type, Squad.Type).</summary>
+        public static readonly UnitDef[] All;
         public const int TCmd = 4, TMsg = 5, TCap = 6;
+
+        static Defs()
+        {
+            var all = new List<UnitDef> { Types[0], Types[1], Types[2], Types[3], Commander, Messenger, Captain };
+            string[] rusNames = { "мечники", "варвары", "арбалетчики", "рыцари" };
+            for (int i = 0; i < 4; i++) { Types[i].Slot = i; Types[i].SquadName = rusNames[i]; Types[i].Race = Rus; }
+            Commander.Race = Messenger.Race = Captain.Race = Rus;
+            foreach (var r in Races)
+            {
+                if (r == Rus) continue;
+                for (int i = 0; i < 4; i++) { r.Units[i].Slot = i; r.Units[i].Race = r; all.Add(r.Units[i]); }
+                foreach (var s in new[] { r.Cmd, r.Msg, r.Cap }) { s.Race = r; all.Add(s); }
+            }
+            All = all.ToArray();
+            for (int i = 0; i < All.Length; i++) All[i].Id = i;
+        }
 
         public static readonly string[] AllAttachments =
         {

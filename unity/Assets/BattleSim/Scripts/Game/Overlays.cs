@@ -17,7 +17,7 @@ namespace BattleSim
         readonly Vector4[] teamCol, hiddenCol;
         readonly Vector4 routCol;
         public int GhostCount;
-        InstancedSet bolts;
+        InstancedSet bolts, bombs;
         Quaternion boltBase;
 
         public Overlays()
@@ -64,6 +64,9 @@ namespace BattleSim
         {
             bolts = new InstancedSet(lib.Bolt.Mesh, lib.Bolt.Mat, false);
             boltBase = Quaternion.identity;
+            // бомба орды — тёмный шар с запалом
+            var bombMat = ModelLibrary.NewLit(null, new Color(0.16f, 0.15f, 0.14f), "bomb");
+            bombs = new InstancedSet(Conv.ToMesh(WorldMeshes.Flower(0.22f), "bomb"), bombMat, true);
         }
 
         public void DrawRings(Battle b)
@@ -94,7 +97,7 @@ namespace BattleSim
         {
             GhostCount = 0;
             if (p == null) return;
-            var t = Defs.Types[type];
+            var t = Defs.All[type];
             float yaw = team == 0 ? 0 : M.PI, cos = Mathf.Cos(yaw), sin = Mathf.Sin(yaw);
             var c = teamCol[team];
             for (int r = 0; r < t.Rows; r++)
@@ -119,16 +122,17 @@ namespace BattleSim
         public void DrawBolts(Battle b, ModelLibrary lib)
         {
             if (bolts == null) return;
-            bolts.Clear();
+            bolts.Clear(); bombs.Clear();
             var axis = Conv.U(lib.BoltAxis);
             var scale = Vector3.one * lib.BoltNorm;
             foreach (var a in b.Bolts.List)
             {
+                if (a.AoeR > 0) { bombs.Add(Matrix4x4.TRS(Conv.U(a.Pos), Quaternion.Euler(a.Age * 400, a.Age * 250, 0), Vector3.one)); continue; }
                 var d = Conv.U(a.Dir);
                 if (d.sqrMagnitude < 1e-8f) continue;
                 bolts.Add(Matrix4x4.TRS(Conv.U(a.Pos), Quaternion.FromToRotation(axis, d.normalized), scale));
             }
-            bolts.Draw();
+            bolts.Draw(); bombs.Draw();
         }
     }
 

@@ -247,7 +247,7 @@ namespace BattleSim.Core
             public int Cav;
         }
 
-        static float Val(Squad q) => q.Alive * (q.T.Mount ? 2.2f : q.T.Ranged ? 0.8f : q.Type == 1 ? 1.1f : 1);
+        static float Val(Squad q) => q.Alive * (q.T.Mount ? 2.2f : q.T.Ranged ? 0.8f : q.T.Slot == 1 ? 1.1f : 1);
 
         /// <summary>Главнокомандующий: сравнивает силы на каждом крыле и ставит воеводам задачи.</summary>
         void ThinkWings()
@@ -478,9 +478,9 @@ namespace BattleSim.Core
                 var cav = en.FirstOrDefault(e => e.T.Mount && D(e.C, xb.C) < 34);
                 if (cav == null || D(sq.C, xb.C) > 40) continue;
                 string claim = "screen:" + xb.Id;
-                bool barbNear = my.Any(q => q.Type == 1 && q != sq && D(q.C, xb.C) < 40 && !claims.Contains(claim));
+                bool barbNear = my.Any(q => q.T.Slot == 1 && q != sq && D(q.C, xb.C) < 40 && !claims.Contains(claim));
                 if (claims.Contains(claim)) continue;
-                if (sq.Type == 1 || !barbNear)
+                if (sq.T.Slot == 1 || !barbNear)
                 {
                     var v = M.Norm2(cav.Center.x - xb.Center.x, cav.Center.z - xb.Center.z);
                     return new Order(OrderKind.Screen, Mode.Move)

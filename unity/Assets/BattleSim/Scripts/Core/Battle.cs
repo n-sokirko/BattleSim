@@ -38,6 +38,12 @@ namespace BattleSim.Core
         public float LastKillT;
         float foesT;
         CmdSpec[] cmdSpec;
+        /// <summary>Раса каждой армии.</summary>
+        public RaceDef[] Races = { Defs.Rus, Defs.Rus };
+        /// <summary>Тип бойца армии team на месте slot (0 строевые, 1 ударные, 2 стрелки, 3 конница).</summary>
+        public int Ty(int team, int slot) => Races[team].Units[slot].Id;
+        /// <summary>Ярость орды (0–100) и до какого времени армия ревёт.</summary>
+        public readonly float[] Rage = new float[2], RoarUntil = new float[2];
 
         /// <summary>Предел солдат на поле (на слабых телефонах меньше).</summary>
         public static int MaxUnits = 3200;
@@ -70,7 +76,7 @@ namespace BattleSim.Core
 
         public int PlaceSquad(int type, int team, float cx, float cz, float yaw)
         {
-            var t = Defs.Types[type];
+            var t = Defs.All[type];
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
             int id = ++squadSeq;
             var sq = new Squad(id.ToString(), type, team, yaw);
@@ -153,7 +159,7 @@ namespace BattleSim.Core
         void NumberSquads()
         {
             for (int team = 0; team < 2; team++)
-                for (int type = 0; type < Defs.Types.Length; type++)
+                for (int type = 0; type < Defs.All.Length; type++)
                 {
                     var list = Squads.Where(q => q.Team == team && q.Type == type).OrderBy(q => q.Center.x).ToList();
                     for (int i = 0; i < list.Count; i++) list[i].Num = list.Count > 1 ? i + 1 : 0;
@@ -190,7 +196,7 @@ namespace BattleSim.Core
                     int front = Pick(cfgFront[size]);
                     for (int i = 0; i < front; i++)
                     {
-                        int type = Rng.Rand() < 0.55f ? 0 : 1;
+                        int type = Ty(team, Rng.Rand() < 0.55f ? 0 : 1);
                         float x = (i - (front - 1) / 2f) * 10 + (Rng.Rand() - 0.5f) * 2;
                         PlaceSquad(type, team, x, dir * (z0 + line * 8 + Rng.Rand() * 2), yaw);
                     }
@@ -202,7 +208,7 @@ namespace BattleSim.Core
                     for (int i = 0; i < n; i++)
                     {
                         float x = (i - (n - 1) / 2f) * 11 + (Rng.Rand() - 0.5f) * 2;
-                        PlaceSquad(2, team, x, dir * (z0 + 2 + lines * 8 + row * 6 + Rng.Rand() * 2), yaw);
+                        PlaceSquad(Ty(team, 2), team, x, dir * (z0 + 2 + lines * 8 + row * 6 + Rng.Rand() * 2), yaw);
                     }
                 }
                 int cav = Pick(cfgCav[size]);
@@ -211,7 +217,7 @@ namespace BattleSim.Core
                     float side = i % 2 == 1 ? -1 : 1;
                     int k = i / 2;
                     float x = side * (World.Field * 0.72f + k * 3 - Rng.Rand() * 4);
-                    PlaceSquad(3, team, x, dir * (z0 + 4 + k * 10 + Rng.Rand() * 4), yaw);
+                    PlaceSquad(Ty(team, 3), team, x, dir * (z0 + 4 + k * 10 + Rng.Rand() * 4), yaw);
                 }
             }
         }
@@ -230,15 +236,15 @@ namespace BattleSim.Core
             {
                 int n = Pick(front) + 1;
                 for (int i = 0; i < n; i++)
-                    PlaceSquad(Rng.Rand() < 0.55f ? 0 : 1, 0, (i - (n - 1) / 2f) * 10 + (Rng.Rand() - 0.5f) * 2, -(z0 + line * 8 + Rng.Rand() * 2), 0);
+                    PlaceSquad(Ty(0, Rng.Rand() < 0.55f ? 0 : 1), 0, (i - (n - 1) / 2f) * 10 + (Rng.Rand() - 0.5f) * 2, -(z0 + line * 8 + Rng.Rand() * 2), 0);
             }
             int xr = Pick(xbow);
-            for (int i = 0; i < xr; i++) PlaceSquad(2, 0, (i - (xr - 1) / 2f) * 11, -(z0 - 5), 0); // стрелки впереди, у берега
+            for (int i = 0; i < xr; i++) PlaceSquad(Ty(0, 2), 0, (i - (xr - 1) / 2f) * 11, -(z0 - 5), 0); // стрелки впереди, у берега
             int cv = Pick(cav);
             for (int i = 0; i < cv; i++)
             {
                 float side = i % 2 == 1 ? -1 : 1;
-                PlaceSquad(3, 0, side * (town.CX * 0.85f + (i / 2) * 3), -(z0 + 6 + (i / 2) * 10), 0);
+                PlaceSquad(Ty(0, 3), 0, side * (town.CX * 0.85f + (i / 2) * 3), -(z0 + 6 + (i / 2) * 10), 0);
             }
 
             // Гарнизон: места на улицах южной половины города
@@ -261,8 +267,8 @@ namespace BattleSim.Core
                 {
                     if (V2.Dist(p, near) > maxR) break;
                     if (used.Any(q => V2.Dist(q, p) < 9)) continue;
-                    int placed = PlaceSquad(type, 1, p.x, p.z, M.PI);
-                    if (placed >= Defs.Types[type].Cols * Defs.Types[type].Rows * 0.6f) { used.Add(p); return true; }
+                    int placed = PlaceSquad(Ty(1, type), 1, p.x, p.z, M.PI);
+                    if (placed >= Defs.All[Ty(1, type)].Cols * Defs.All[Ty(1, type)].Rows * 0.6f) { used.Add(p); return true; }
                     if (placed > 0) RemoveSquadAt(p);
                 }
                 return false;
@@ -270,8 +276,8 @@ namespace BattleSim.Core
             // Гарнизон рубежа: ставим прямо в точку, держит её (командиры его не трогают)
             bool Hold(int type, float x, float z, float yaw, float leash, string why)
             {
-                int placed = PlaceSquad(type, 1, x, z, yaw);
-                if (placed >= Defs.Types[type].Cols * Defs.Types[type].Rows * 0.6f)
+                int placed = PlaceSquad(Ty(1, type), 1, x, z, yaw);
+                if (placed >= Defs.All[Ty(1, type)].Cols * Defs.All[Ty(1, type)].Rows * 0.6f)
                 {
                     var g = Squads[Squads.Count - 1];
                     g.Garrison = true;
@@ -321,8 +327,8 @@ namespace BattleSim.Core
                 foreach (var p in wallSpots.OrderBy(q => V2.Dist(q, want)))
                 {
                     if (usedWall.Any(q => V2.Dist(q, p) < 9)) continue;
-                    int placed = PlaceSquad(2, 1, p.x, p.z, M.PI);
-                    if (placed >= Defs.Types[2].Cols * Defs.Types[2].Rows * 0.6f)
+                    int placed = PlaceSquad(Ty(1, 2), 1, p.x, p.z, M.PI);
+                    if (placed >= Defs.All[Ty(1, 2)].Cols * Defs.All[Ty(1, 2)].Rows * 0.6f)
                     {
                         usedWall.Add(p);
                         var ws = Squads[Squads.Count - 1];
@@ -358,7 +364,7 @@ namespace BattleSim.Core
             cmdSpec ??= new CmdSpec[2];
             if (cmdSpec[team] == null)
             {
-                var names = Defs.CmdNames[team];
+                var names = Races[team].Names ?? Defs.CmdNames[team];
                 cmdSpec[team] = new CmdSpec { Name = names[(int)(Rng.Rand() * names.Length)], Trait = Defs.TraitKeys[(int)(Rng.Rand() * Defs.TraitKeys.Length)] };
             }
             return cmdSpec[team];
@@ -378,7 +384,7 @@ namespace BattleSim.Core
         Unit Leader(int type, float x, float z, string key, int team, float yaw)
         {
             var p = World.ClampField(x, z, 4);
-            var u = new Unit(new UnitPlan { Type = type, Team = team, X = p.x, Z = p.z, Yaw = yaw, Variant = type == Defs.TCmd ? 1 : 0 }, World);
+            var u = new Unit(new UnitPlan { Type = type, Team = team, X = p.x, Z = p.z, Yaw = yaw, Variant = Defs.All[type].Special == Special.Commander ? 1 : 0 }, World);
             Units.Add(u);
             var sq = new Squad(key, type, team, yaw);
             sq.Units.Add(u); u.Squad = sq; sq.Size = 1;
@@ -399,9 +405,9 @@ namespace BattleSim.Core
             float back = team == 0 ? -1 : 1, yaw = team == 0 ? 0 : M.PI;
             var c = Commander.Center(mine).Value;
             var role = mine.Count >= 7 ? Role.General : Role.Solo;
-            var gen = new Commander(this, team, Leader(Defs.TCmd, c.x, c.z + back * 18, "cmd" + team, team, yaw), spec.Trait, spec.Name, role);
+            var gen = new Commander(this, team, Leader(Races[team].Cmd.Id, c.x, c.z + back * 18, "cmd" + team, team, yaw), spec.Trait, spec.Name, role);
             Commanders[team] = gen;
-            Couriers[team] = new Squad("msg" + team, Defs.TMsg, team, yaw);
+            Couriers[team] = new Squad("msg" + team, Races[team].Msg.Id, team, yaw);
             string army = team == 0 ? "синих" : "красных";
             var tr = Defs.Traits[spec.Trait];
             if (role == Role.Solo)
@@ -428,7 +434,7 @@ namespace BattleSim.Core
             int n = rest.Count;
             int[] cuts = { 0, M.Round(n / 3f), M.Round(2 * n / 3f), n };
             var keys = team == 0 ? new[] { WingKey.Right, WingKey.Center, WingKey.Left } : new[] { WingKey.Left, WingKey.Center, WingKey.Right };
-            var names = Defs.CmdNames[team].Where(x => x != spec.Name).OrderBy(_ => Rng.Rand()).ToList();
+            var names = (Races[team].Names ?? Defs.CmdNames[team]).Where(x => x != spec.Name).OrderBy(_ => Rng.Rand()).ToList();
             var desc = new List<string>();
             for (int k = 0; k < 3; k++)
             {
@@ -438,7 +444,7 @@ namespace BattleSim.Core
                 foreach (var sq in list) sq.Wing = w;
                 var wc = Commander.Center(list).Value;
                 var trait = Defs.TraitKeys[(int)(Rng.Rand() * Defs.TraitKeys.Length)];
-                var cap = new Commander(this, team, Leader(Defs.TCap, wc.x, wc.z + back * 11, "cap" + team + keys[k], team, yaw), trait, names[k], Role.Captain, w);
+                var cap = new Commander(this, team, Leader(Races[team].Cap.Id, wc.x, wc.z + back * 11, "cap" + team + keys[k], team, yaw), trait, names[k], Role.Captain, w);
                 w.Captain = cap;
                 Captains[team].Add(cap);
                 Wings[team].Add(w);
@@ -451,7 +457,7 @@ namespace BattleSim.Core
         {
             var c = cmd.Unit.Pos;
             float side = Rng.Rand() < 0.5f ? -1.5f : 1.5f;
-            var plan = new UnitPlan { Type = Defs.TMsg, Team = cmd.Team, X = M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), Z = c.z, Yaw = cmd.Unit.Yaw, Variant = 0 };
+            var plan = new UnitPlan { Type = Races[cmd.Team].Msg.Id, Team = cmd.Team, X = M.Clamp(c.x + side, -World.Field + 1, World.Field - 1), Z = c.z, Yaw = cmd.Unit.Yaw, Variant = 0 };
             var u = new Unit(plan, World);
             var carry = extra ?? new Carry();
             carry.Squad = sq; carry.Order = order; carry.Cmd = cmd; carry.Delivered = false;
@@ -557,6 +563,15 @@ namespace BattleSim.Core
                 if (u.Gone) { u.Alive = false; Units.RemoveAt(i); continue; }
                 if (!u.Alive)
                 {
+                    if (u.Flying && dt > 0)
+                    {
+                        u.Fly.y -= 20 * dt;
+                        float fx = M.Clamp(u.Pos.x + u.Fly.x * dt, -World.Field + 1, World.Field - 1), fz = M.Clamp(u.Pos.z + u.Fly.z * dt, -World.Field + 1, World.Field - 1);
+                        if (World.Obs.Hit(fx, fz, 0.2f) == null) { u.Pos.x = fx; u.Pos.z = fz; } else { u.Fly.x = 0; u.Fly.z = 0; }
+                        u.Pos.y += u.Fly.y * dt;
+                        float g = World.GroundAt(u.Pos.x, u.Pos.z);
+                        if (u.Pos.y <= g) { u.Pos.y = g; u.Flying = false; Emit(FxKind.Kill, u.Pos, 0, 0, u.Team); }
+                    }
                     u.DeadT += dt;
                     if (u.DeadT > 24) Units.RemoveAt(i);
                 }
@@ -567,8 +582,29 @@ namespace BattleSim.Core
         static float D2d(V3 a, V2 b) => M.Hypot(a.x - b.x, a.z - b.z);
 
         /// <summary>Боевой дух, скрытность в низинах и смена фаз приказа.</summary>
+        void UpdateRage(float dt)
+        {
+            for (int team = 0; team < 2; team++)
+            {
+                if (!Races[team].Rage || Time < RoarUntil[team]) continue;
+                int fighting = 0;
+                foreach (var q in Squads) if (q.Team == team && !q.Special && q.Alive > 0 && q.Engaged) fighting++;
+                Rage[team] = M.Clamp(Rage[team] + (fighting > 0 ? 0.3f * fighting : -1f) * dt, 0, 100);
+                if (Rage[team] < 100) continue;
+                Rage[team] = 0; RoarUntil[team] = Time + 10;
+                var cmd = Commanders[team];
+                var at = cmd != null && cmd.Unit.Alive ? cmd.Unit.Pos : new V3(ArmyC[team]?.x ?? 0, 0, ArmyC[team]?.z ?? 0);
+                Emit(FxKind.Roar, at, 0, 0, team);
+                AddLog(team, $"{Races[team].Cry} {Races[team].Name} ревёт — быстрее, злее, не бежит!");
+                foreach (var q in Squads)
+                    if (q.Team == team && !q.Special && q.Alive > 0 && q.Order.Mode != Mode.Rout)
+                    { q.Morale = 100; q.CryUntil = Time + 0.6f; q.RushUntil = Time + 10; }
+            }
+        }
+
         void UpdateSquads(float dt)
         {
+            UpdateRage(dt);
             foreach (var sq in Squads.ToList())
             {
                 if (sq.Special || sq.Alive == 0) continue;
@@ -582,12 +618,38 @@ namespace BattleSim.Core
 
                 bool enemyNear = sq.Foes.Count > 0 && sq.Foes[0].Alive > 0 && D2d(sq.Foes[0].Center, sq.Center) < 20;
 
-                if (o.Mode != Mode.Rout && sq.Morale < 18)
+                bool roaring = Time < RoarUntil[sq.Team];
+                if (roaring) sq.Morale = MathF.Max(sq.Morale, 60);
+                if (o.Mode != Mode.Rout && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
                 {
                     ApplyOrder(sq, new Order(OrderKind.Rout, Mode.Rout));
                     sq.Pending = null;
                     AddLog(sq.Team, $"{Defs.Cap(sq.Name)} дрогнули и бегут!");
+                    Emit(FxKind.Rout, sq.Center, 0, 0, sq.Team);
+                    SpreadPanic(sq);
                     continue;
+                }
+                // Боевой клич перед сшибкой: отряд замирает, кричит — и срывается в разбег
+                if (!sq.T.Ranged && !sq.T.Mount && (o.Mode == Mode.Advance || o.Mode == Mode.Charge) && !sq.Engaged && sq.Choke == null
+                    && sq.FoeDist > 11 && sq.FoeDist < 18 && Time - sq.CryT > 30 && sq.Alive >= sq.Size * 0.5f
+                    && sq.Foes.Count > 0 && World.Nav.LineClear(sq.Center.x, sq.Center.z, sq.Foes[0].Center.x, sq.Foes[0].Center.z, 0))
+                {
+                    sq.CryT = Time; sq.CryUntil = Time + 0.7f; sq.RushUntil = Time + 4f;
+                    Emit(FxKind.Cry, sq.Center, 0, 0, sq.Team);
+                    foreach (var e in Squads)
+                        if (e.Team != sq.Team && !e.Special && e.Alive > 0 && D2d(e.Center, sq.Center) < 16) e.Morale -= 4;
+                }
+                // Бегущих рядом — добивать: конница бросается в погоню
+                if (sq.T.Mount && !sq.Engaged && o.Mode != Mode.Charge)
+                {
+                    Squad prey = null; float best = 45;
+                    foreach (var e in Squads)
+                        if (e.Team != sq.Team && !e.Special && e.Alive > 0 && e.Order.Mode == Mode.Rout && D2d(e.Center, sq.Center) < best) { best = D2d(e.Center, sq.Center); prey = e; }
+                    if (prey != null)
+                    {
+                        ApplyOrder(sq, new Order(OrderKind.Charge, Mode.Charge) { Target = prey, Why = "добить бегущих" });
+                        AddLog(sq.Team, $"{Defs.Cap(sq.Name)} гонятся за бегущими ({prey.Name})");
+                    }
                 }
                 if (o.Mode == Mode.Rout)
                 {
@@ -621,6 +683,21 @@ namespace BattleSim.Core
             }
         }
 
+        /// <summary>Отряд побежал — страх волной расходится по соседям (воевода рядом вдвое смягчает).</summary>
+        void SpreadPanic(Squad src)
+        {
+            foreach (var q in Squads)
+            {
+                if (q == src || q.Team != src.Team || q.Special || q.Alive == 0 || q.Order.Mode == Mode.Rout) continue;
+                float d = D2d(q.Center, src.Center);
+                if (d > 20 || Time - q.PanicT < 5) continue;
+                float hit = 8 + 0.4f * src.Size * (1 - d / 20);
+                var cap = q.Wing?.Captain;
+                if (cap != null && cap.Unit.Alive && D2d(cap.Unit.Pos, q.Center) < 22) hit *= 0.5f;
+                q.Morale -= hit; q.PanicT = Time;
+            }
+        }
+
         void Think(Unit u, float dt)
         {
             var t = u.T;
@@ -629,6 +706,12 @@ namespace BattleSim.Core
             u.Cooldown -= dt; u.RetargetT -= dt; u.HitAnimT -= dt;
             u.Engaged = false; u.Aiming = false;
             if (t.Special == Special.Messenger) { ThinkMessenger(u, dt); return; }
+            if (u.DownT > 0)
+            { // сбит с ног — лежит и встаёт
+                u.DownT -= dt; u.AtkT = -1; u.Settled = false;
+                Steer(u, 0, 0, dt, false);
+                return;
+            }
             if (o.Mode == Mode.Rout) { Flee(u, dt); return; }
 
 #if PROF
@@ -1035,6 +1118,7 @@ namespace BattleSim.Core
         void StartAttack(Unit u, bool shot)
         {
             u.AtkT = 0; u.HitDone = false; u.Shot = shot; u.AtkNew = true;
+            u.SpinNext = !shot && u.T.SpinEvery > 0 && (u.AtkCount + 1) % u.T.SpinEvery == 0;
             u.AtkDur = shot || !u.T.Ranged ? u.T.AtkTime : 0.55f;
             float cd = shot || !u.T.Ranged ? u.T.Cd : 1.0f;
             u.Cooldown = cd * (0.85f + Rng.Rand() * 0.3f);
@@ -1055,9 +1139,28 @@ namespace BattleSim.Core
             bool rear = MathF.Sin(tg.Yaw) * nx + MathF.Cos(tg.Yaw) * nz > 0.35f; // цель смотрит от нас
             if (rear) dmg *= 1.35f;
             if (Time - u.Squad.FirstStrikeT < 2.5f) dmg *= 1.6f;               // удар из засады
+            if (Time < u.Squad.RushUntil) dmg *= 1.25f;                        // удар с разбега после клича
             bool charge = u.T.Charge > 1 && u.ChargeT > 0.8f;
             if (charge) { dmg *= u.T.Charge; u.ChargeT = 0; Trample(u, tg); }
-            float kb = (charge ? 5 : 1.3f) / tg.T.Mass;
+            float kb = (charge ? 5 : 1.3f) * u.T.KnockMul / tg.T.Mass;
+            u.AtkCount++;
+            if (u.SpinNext)
+            { // удар вихрем: всех врагов вокруг
+                u.SpinNext = false;
+                CellOf(u.Pos.x, u.Pos.z, out int scx, out int scz);
+                for (int z = Math.Max(scz - 1, 0); z <= Math.Min(scz + 1, gridDim - 1); z++)
+                    for (int x = Math.Max(scx - 1, 0); x <= Math.Min(scx + 1, gridDim - 1); x++)
+                        for (int j = head[z * gridDim + x]; j >= 0; j = next[j])
+                        {
+                            if (j >= Units.Count) continue;
+                            var e = Units[j];
+                            if (e == tg || !e.Alive || e.Team == u.Team || MathF.Abs(e.Pos.y - u.Pos.y) > 1.5f) continue;
+                            float ex = e.Pos.x - u.Pos.x, ez = e.Pos.z - u.Pos.z, ed = M.Hypot(ex, ez);
+                            if (ed > u.T.SpinR + e.T.Radius || ed < 1e-3f) continue;
+                            float ek = kb * 0.8f * tg.T.Mass / e.T.Mass;
+                            Damage(e, dmg * 0.7f, ex / ed * ek, ez / ed * ek, false, u);
+                        }
+            }
             Damage(tg, dmg, nx * kb, nz * kb, false, u, rear);
         }
 
@@ -1085,6 +1188,7 @@ namespace BattleSim.Core
             if (arrow && t.Pos.y > World.HeightAt(t.Pos.x, t.Pos.z) + 3) amount *= 0.55f; // за зубцами стены
             amount *= 1 - t.T.Armor;
             t.Hp -= amount;
+            t.LastKnock = new V3(t.Knock.x + kx, 0, t.Knock.z + kz);
             LastHitT = Time;
             t.Knock.x += kx; t.Knock.z += kz;
             var sq = t.Squad;
@@ -1099,7 +1203,12 @@ namespace BattleSim.Core
                 var hp = new V3(t.Pos.x - (kl > 1e-4f ? kx / kl : 0) * t.T.Radius * 0.6f, t.Pos.y + (t.T.Mount ? 1.9f : 1.1f), t.Pos.z - (kl > 1e-4f ? kz / kl : 0) * t.T.Radius * 0.6f);
                 Emit(t.T.ArrowBlock > 0.3f && !rear && t.Hp > 0 ? FxKind.Block : FxKind.Hit, hp, kx, kz, t.Team);
             }
-            if (t.Hp <= 0) { Kill(t); return; }
+            if (t.Hp <= 0)
+            {
+                if (src != null && Races[src.Team].Rage && Time >= RoarUntil[src.Team]) Rage[src.Team] += src.T.Slot == 0 ? 0.5f : 1f;
+                Kill(t);
+                return;
+            }
             // видимая реакция на удар: щитоносец спереди принимает удар на щит, остальные вздрагивают
             if (!arrow && t.AtkT < 0 && t.HitAnimT <= 0) t.HitReact = t.T.ArrowBlock > 0.3f && !rear ? 2 : 1;
             else if (arrow && t.AtkT < 0 && t.HitAnimT <= 0 && Rng.Rand() < 0.5f) t.HitReact = 1;
@@ -1109,7 +1218,13 @@ namespace BattleSim.Core
         void Kill(Unit u)
         {
             Emit(FxKind.Kill, u.Pos, 0, 0, u.Team);
-            u.Alive = false; u.DeadT = 0; u.Target = null; u.AtkT = -1;
+            float kl = M.Hypot(u.LastKnock.x, u.LastKnock.z);
+            if (kl > 2.5f && !u.T.Mount)
+            { // сильный удар (натиск, громила, взрыв) — тело взлетает и падает поодаль
+                u.Fly = new V3(u.LastKnock.x * 1.1f, 2.5f + kl * 0.45f, u.LastKnock.z * 1.1f);
+                u.Flying = true;
+            }
+            u.Alive = false; u.DeadT = 0; u.Target = null; u.AtkT = -1; u.DownT = 0;
             if (u.T.Special != Special.Messenger) LastKillT = Time;
             u.Vel = new V3(0, 0, 0); u.CurSpeed = 0;
             var sq = u.Squad;
@@ -1233,6 +1348,7 @@ namespace BattleSim.Core
         static float Mob(Unit a, bool foe)
         {
             var o = a.Squad?.Order;
+            if (a.DownT > 0) return 1.5f;
             if (foe) return (a.Settled && o != null && o.Mode == Mode.Hold ? 0.35f : 1f) / a.T.Mass;
             if (o != null && o.Mode == Mode.Rout) return 1.2f;
             if (a.Engaged) return 0.15f;
@@ -1274,6 +1390,10 @@ namespace BattleSim.Core
                                 float d = MathF.Sqrt(d2) + 1e-5f;
                                 float nx = d > 2e-5f ? dx / d : MathF.Cos(i), nz = d > 2e-5f ? dz / d : MathF.Sin(i);
                                 float pen = (min - d) * 0.8f;
+                                if (foe && it == 0 && u.T.Mount != o.T.Mount)
+                                { // конь врезается в пехотинца: удар с импульсом
+                                    if (u.T.Mount) ChargeImpact(u, o, -nx, -nz); else ChargeImpact(o, u, nx, nz);
+                                }
                                 if (!foe && u.Squad == o.Squad && u.Squad != null && u.Squad.FormMarch)
                                 { // своя колонна на марше: не «гармошка» — продольную часть поправки ослабляем
                                     float fx = MathF.Sin(u.Squad.Facing), fz = MathF.Cos(u.Squad.Facing), al = nx * fx + nz * fz;
@@ -1312,6 +1432,56 @@ namespace BattleSim.Core
                 if (vn < 0) { u.Vel.x -= nx * vn; u.Vel.z -= nz * vn; }
                 if (u.Engaged) { u.Vel.x *= 0.7f; u.Vel.z *= 0.7f; }
             }
+        }
+
+        /// <summary>
+        /// Удар коня о пехотинца (n — от коня к пехотинцу): неупругий удар масс. Конь теряет скорость и вязнет
+        /// в глубоком строю; пехотинец отлетает, а при сильном ударе падает с ног. Строй «на упоре» (стоит,
+        /// держит место, лицом к удару) тяжелее — выдерживает.
+        /// </summary>
+        void ChargeImpact(Unit k, Unit e, float nx, float nz)
+        {
+            float vRel = (k.Vel.x - e.Vel.x) * nx + (k.Vel.z - e.Vel.z) * nz;
+            if (vRel < 2.5f || e.DownT > 0 || Time - k.LastImpactT < 0.12f) return;
+            float fx = MathF.Sin(e.Yaw), fz = MathF.Cos(e.Yaw);
+            bool braced = e.Settled && e.Squad != null && e.Squad.Order.Mode == Mode.Hold && -(fx * nx + fz * nz) > 0.7f;
+            float brace = braced ? MathF.Min(4, 1 + 0.4f * Math.Max(0, (e.Squad?.Rows ?? 1) - 1 - e.Row)) : 1;
+            float me = e.T.Mass * brace, mk = k.T.Mass;
+            float J = mk * me / (mk + me) * vRel * 1.2f;
+            k.Vel.x -= nx * J / mk; k.Vel.z -= nz * J / mk;                // конь вязнет
+            e.Knock.x += nx * J / me * 0.8f; e.Knock.z += nz * J / me * 0.8f; // пехотинец отлетает
+            if (J / me > 3f && brace < 1.5f) { e.DownT = 1f + Rng.Rand() * 1.5f; e.DownAnim = 0; Emit(FxKind.Down, e.Pos, nx, nz, e.Team); }
+            float slope = M.Clamp((k.Pos.y - e.Pos.y) * 0.15f, -0.3f, 0.5f);  // под гору — сильнее
+            Emit(FxKind.Charge, e.Pos, nx, nz, e.Team);
+            Damage(e, J * 1.6f * (1 + slope), 0, 0, false, k);
+            if (e.Squad != null) e.Squad.Morale -= 0.8f;
+            k.LastImpactT = Time;
+        }
+
+        /// <summary>
+        /// Взрыв: всем в радиусе урон и отброс со спадом к краю (своим — вполовину). Сильно отброшенные
+        /// летят (полёт тел), выжившие падают с ног.
+        /// </summary>
+        public void Explode(V3 p, float r, float dmg, float knock, int team)
+        {
+            Emit(FxKind.Explosion, p, 0, 0, team);
+            CellOf(p.x, p.z, out int cx, out int cz);
+            int rr = (int)MathF.Ceiling(r / GRID);
+            for (int z = Math.Max(cz - rr, 0); z <= Math.Min(cz + rr, gridDim - 1); z++)
+                for (int x = Math.Max(cx - rr, 0); x <= Math.Min(cx + rr, gridDim - 1); x++)
+                    for (int j = head[z * gridDim + x]; j >= 0; j = next[j])
+                    {
+                        if (j >= Units.Count) continue;
+                        var e = Units[j];
+                        if (!e.Alive || MathF.Abs(e.Pos.y - p.y) > 3) continue;
+                        float ex = e.Pos.x - p.x, ez = e.Pos.z - p.z, d = M.Hypot(ex, ez);
+                        if (d > r + e.T.Radius) continue;
+                        float fall = 1 - M.Clamp(d / (r + e.T.Radius), 0, 1) * 0.6f, own = e.Team == team ? 0.5f : 1f;
+                        float k = knock * fall / e.T.Mass, nx = d > 1e-3f ? ex / d : 0, nz = d > 1e-3f ? ez / d : 0;
+                        if (!e.T.Mount && k > 3 && e.DownT <= 0) { e.DownT = 1.2f + Rng.Rand() * 1.2f; e.DownAnim = 0; }
+                        Damage(e, dmg * fall * own, nx * k, nz * k, false, null);
+                        if (e.Squad != null) e.Squad.Morale -= 1.5f * own;
+                    }
         }
 
         void Separate()
@@ -1425,6 +1595,14 @@ namespace BattleSim.Core
                 return;
             }
             if (cheer) { u.Anim.Play(a.Cheer); return; }
+            if (u.DownT > 0)
+            { // упал — лежит — встаёт
+                float up = ClipDur != null ? ClipDur(u.Type, "Lie_StandUp") : 0;
+                if (u.DownAnim == 0) { u.Anim.Play("Lie_Down", once: true, restart: true, speed: 1.6f); u.DownAnim = 1; }
+                else if (u.DownAnim == 1 && up > 0 && u.DownT < up / 1.4f) { u.Anim.Play("Lie_StandUp", once: true, restart: true, speed: 1.4f); u.DownAnim = 2; }
+                return;
+            }
+            if (u.Squad != null && Time < u.Squad.CryUntil && !u.Engaged) { u.Anim.Play(a.Cheer); return; }
             if (u.HitReact > 0 && !u.AtkNew)
             { // вздрогнул или принял удар на щит — короткая анимация поверх стойки
                 string hit = u.HitReact == 2 ? "Block_Hit" : Rng.Rand() < 0.5f ? "Hit_A" : "Hit_B";
@@ -1438,6 +1616,7 @@ namespace BattleSim.Core
                 u.AtkNew = false;
                 string name = a.Attack[(int)(Rng.Rand() * a.Attack.Length)];
                 if (u.T.Ranged && !u.Shot) name = a.Melee;
+                if (u.SpinNext && a.Melee != null) name = a.Melee;
                 float dur = ClipDur != null ? ClipDur(u.Type, name) : 0;
                 u.Anim.Play(name, once: true, restart: true, speed: dur > 0 ? M.Clamp(dur / u.AtkDur, 0.8f, 2.2f) : 1);
                 return;

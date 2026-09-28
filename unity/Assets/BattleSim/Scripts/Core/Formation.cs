@@ -68,6 +68,8 @@ namespace BattleSim.Core
                 bool contact = advance && !sq.T.Ranged && (sq.Engaged || (foe != null && V2.Dist(foe.C, sq.C) < (sq.T.Mount ? 16 : 10)
                     && nav.LineClear(sq.C.x, sq.C.z, foe.C.x, foe.C.z, cls)));
                 float speed = sq.T.Speed * (sq.T.Mount ? 0.95f : 0.9f);
+                if (Time < sq.CryUntil) speed = 0;                 // кричат — стоят
+                else if (Time < sq.RushUntil) speed *= 1.35f;      // разбег после клича
                 // точка отряда ждёт своих; если строй долго не собирается (кто-то застрял) — идёт дальше потихоньку
                 sq.LagT = sq.Lag > 6 ? sq.LagT + dt : 0;
                 float lagK = M.Clamp(1.25f - sq.Lag / 6f, sq.LagT > 8 ? 0.3f : 0f, 1f);
@@ -831,7 +833,7 @@ namespace BattleSim.Core
                 float lx = ex - fx * al, lz = ez - fz * al;
                 dx = sq.AnchorVel.x + fx * al * 1.6f + lx * 0.9f;
                 dz = sq.AnchorVel.z + fz * al * 1.6f + lz * 0.9f;
-                float l = M.Hypot(dx, dz), max = t.Speed * 1.08f;
+                float l = M.Hypot(dx, dz), max = t.Speed * (Time < sq.RushUntil ? 1.4f : 1.08f);
                 if (l > max) { dx *= max / l; dz *= max / l; }
             }
             YieldAhead(u, ref dx, ref dz);

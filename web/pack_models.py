@@ -29,7 +29,9 @@ KEEP_ANIMS = {
 COMBAT_EXTRA = ["Block", "Block_Hit", "Blocking", "Block_Attack", "Hit_A", "Hit_B", "Dodge_Backward", "Dodge_Left", "Dodge_Right",
                 "2H_Melee_Attack_Spin", "2H_Melee_Attack_Stab", "1H_Melee_Attack_Stab", "Throw", "Spellcast_Shoot", "Spellcast_Raise",
                 "Spellcasting", "Walking_Backwards", "Running_B", "Unarmed_Melee_Attack_Kick", "Unarmed_Melee_Attack_Punch_A",
-                "Jump_Full_Short", "Lie_Down", "Lie_Idle", "Lie_StandUp", "Idle", "2H_Melee_Idle", "Sit_Chair_Idle"]
+                "Jump_Full_Short", "Lie_Down", "Lie_Idle", "Lie_StandUp", "Idle", "2H_Melee_Idle", "Sit_Chair_Idle",
+                "Dualwield_Melee_Attack_Stab", "Dualwield_Melee_Attack_Slice", "Dualwield_Melee_Attack_Chop", "1H_Melee_Attack_Chop",
+                "1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Slice_Horizontal"]
 for k in ("Knight", "Barbarian", "Rogue_Hooded"):
     KEEP_ANIMS[k] = sorted(set(KEEP_ANIMS[k]) | set(COMBAT_EXTRA))
 

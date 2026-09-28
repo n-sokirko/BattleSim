@@ -253,12 +253,12 @@ namespace BattleSim
             {
                 var r = new Rect(bx, by + t * (cardH / 2), teamW, cardH / 2 - 2 * s);
                 bool on = Game.Team == t;
-                if (Button(r, $"<color=#{Hex(t == 0 ? Blue : Red)}>■</color> {Defs.Teams[t].Name}", on)) { Game.Team = t; Game.Eraser = false; }
+                if (Button(r, $"<color=#{Hex(t == 0 ? Blue : Red)}>■</color> {Game.Battle.Races[t].Name}", on)) { if (Game.Team == t) Game.CycleRace(t); Game.Team = t; Game.Eraser = false; }
             }
             float cx = bx + teamW + 8 * s;
-            for (int i = 0; i < Defs.Types.Length; i++)
+            for (int i = 0; i < 4; i++)
             {
-                var t = Defs.Types[i];
+                var t = Game.Battle.Races[Game.Team].Units[i];
                 var r = new Rect(cx, by, cardW, cardH);
                 bool on = Game.Type == i && !Game.Eraser;
                 string stats = $"{t.Hp:0} ОЗ · урон {t.Dmg:0}{(t.Ranged ? " · " + t.Range + " м" : "")}";

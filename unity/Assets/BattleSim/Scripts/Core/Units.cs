@@ -74,6 +74,8 @@ namespace BattleSim.Core
         // постоянная сетка мест: Cells[шеренга * CellFiles + колонна]; бреши закрывают задние, а не перераздача
         /// <summary>Сцепка строй-на-строй, в которой отряд держит линию фронта (или null — свободный бой).</summary>
         public Engagement Front;
+        /// <summary>Боевой клич: до CryUntil отряд стоит и кричит, до RushUntil — разбег; PanicT — когда последний раз ловил волну паники.</summary>
+        public float CryT = -99, CryUntil, RushUntil, PanicT = -99;
         public Unit[] Cells;
         public int CellFiles, CellRows;
         public bool CellMarch;
@@ -94,7 +96,7 @@ namespace BattleSim.Core
         {
             get
             {
-                string b = Type < Defs.SquadName.Length ? Defs.SquadName[Type] : T.Name.ToLowerInvariant();
+                string b = T.SquadName ?? T.Name.ToLowerInvariant();
                 return Num > 0 ? b + " " + Defs.Roman(Num) : b;
             }
         }
@@ -144,9 +146,18 @@ namespace BattleSim.Core
         public bool Shot, HitDone, Aiming, AtkNew, Engaged, DeathShown, LosOk, Gone;
         /// <summary>Реакция на удар для анимации: 1 — вздрогнул, 2 — принял удар на щит (показывается один раз).</summary>
         public int HitReact;
+        /// <summary>Сколько ударов нанёс (у громил каждый третий — вихрем) и будет ли следующий вихрем.</summary>
+        public int AtkCount;
+        public bool SpinNext;
         public float HitAnimT;
         /// <summary>Стоит на своём месте в строю (гистерезис: встал ближе 0,2 м — стоит, пока не сдвинут дальше 0,6 м).</summary>
         public bool Settled;
+        /// <summary>Сбит с ног натиском: лежит DownT секунд (DownAnim: 1 — упал, 2 — встаёт).</summary>
+        public float DownT, LastImpactT = -9;
+        public int DownAnim;
+        /// <summary>Последний отброс (для полёта тела при гибели) и скорость летящего тела.</summary>
+        public V3 LastKnock, Fly;
+        public bool Flying;
         /// <summary>Колонна в строю (номер места в шеренге) и зерно «дрейфа» — строй не выглядит роботом.</summary>
         public int File;
         public float DriftSeed;
@@ -176,9 +187,11 @@ namespace BattleSim.Core
             RetargetT = Rng.Rand() * 0.5f; Cooldown = Rng.Rand() * 0.8f;
             Phase = Rng.Rand() * 6;
             Scale = T.Special == Special.Commander ? 1.12f : T.Special == Special.Captain ? 1.06f : 0.95f + Rng.Rand() * 0.1f;
+            Scale *= T.Scale * (1 + (Rng.Rand() - 0.5f) * 2 * (T.Special == Special.None ? T.ScaleJit : 0));
             if (T.Mount)
             {
                 Horse = T.Special == Special.Commander ? 1 : T.Special != Special.None ? 0 : Variant % 2;
+                if (T.Race != null && T.Race.HorseTint < 0.8f) Horse = 0; // у орды кони тёмные
                 Anim = new AnimState("Idle");
                 Ride = new AnimState("ride");
             }
@@ -219,7 +232,7 @@ namespace BattleSim.Core
     }
 
     /// <summary>Что случилось в бою — для эффектов на экране (пыль, искры, брызги).</summary>
-    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround }
+    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar }
 
     public struct FxEvent
     {
@@ -243,6 +256,8 @@ namespace BattleSim.Core
         public float Age, Dur, Arc, Dmg, Stuck;
         public int Team;
         public bool Flying = true;
+        /// <summary>Бомба: рвётся там, где упала (радиус, отброс).</summary>
+        public float AoeR, AoeKnock;
     }
 
     public sealed class Bolts
@@ -278,6 +293,12 @@ namespace BattleSim.Core
             var to = new V3(dst.Pos.x + dst.Vel.x * dur + MathF.Cos(ang) * rad + W.Wind.x * dur * 0.8f, 0,
                             dst.Pos.z + dst.Vel.z * dur + MathF.Sin(ang) * rad + W.Wind.z * dur * 0.8f);
             to.y = W.GroundAt(to.x, to.z) + 0.9f;
+            if (src.T.AoeR > 0)
+            { // бомба: навесом и медленнее, рвётся при падении
+                List.Add(new Bolt { From = from, To = to, Age = 0, Dur = d / 16 + 0.45f, Arc = 1.5f + d * 0.16f, Team = src.Team, Dmg = src.T.AoeDmg, Flying = true, Pos = from, Dir = new V3(dx, 0, dz),
+                    AoeR = src.T.AoeR, AoeKnock = src.T.AoeKnock });
+                return;
+            }
             List.Add(new Bolt { From = from, To = to, Age = 0, Dur = dur, Arc = 0.4f + d * 0.07f, Team = src.Team, Dmg = src.T.Dmg, Flying = true, Pos = from, Dir = new V3(dx, 0, dz) });
         }
 
@@ -302,11 +323,13 @@ namespace BattleSim.Core
                     if (s > 0.08f && s < 1 && (a.Pos.y < gy + 0.05f || W.WallTop(a.Pos.x, a.Pos.z) > a.Pos.y || W.Obs.Blocks(a.Pos.x, a.Pos.z, a.Pos.y)
                         || W.Decks.SolidTop(a.Pos.x, a.Pos.z, W.HeightAt(a.Pos.x, a.Pos.z)) > a.Pos.y || inTrees))
                     {
+                        if (a.AoeR > 0) { battle.Explode(a.Pos, a.AoeR, a.Dmg, a.AoeKnock, a.Team); L.RemoveAt(i); continue; }
                         a.Flying = false; a.Stuck = 8; a.Dir = a.Dir.Normalized;
                         battle.Emit(W.HeightAt(a.Pos.x, a.Pos.z) < World.Water && a.Pos.y < World.Water + 0.3f ? FxKind.Splash : FxKind.BoltGround, a.Pos);
                         continue;
                     }
                     if (s < 1) continue;
+                    if (a.AoeR > 0) { battle.Explode(a.To, a.AoeR, a.Dmg, a.AoeKnock, a.Team); L.RemoveAt(i); continue; }
                     var hit = battle.EnemyNear(a.To.x, a.To.z, a.Team, 0.35f);
                     if (hit != null)
                     {

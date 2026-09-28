@@ -95,7 +95,7 @@ namespace BattleSim
         {
             yield return null;
             yield return Lib.Load((p, text) => { LoadProgress = p; LoadText = text; });
-            Battle.ClipDur = (type, name) => type < 3 && Lib.Inf[type] != null ? Lib.Inf[type].Baked.Dur(name) : 0;
+            Battle.ClipDur = (type, name) => Lib.Inf.TryGetValue(type, out var cm) ? cm.Baked.Dur(name) : 0;
             overlays = new Overlays();
             fx = new Effects();
             overlays.SetBolt(Lib);
@@ -109,6 +109,11 @@ namespace BattleSim
                 if (Arg("-map") != null) MapSel = int.Parse(Arg("-map"));
                 if (Arg("-size") != null) ArmySize = int.Parse(Arg("-size"));
                 if (Arg("-seed") != null) Seed = int.Parse(Arg("-seed"));
+                for (int tm = 0; tm < 2; tm++)
+                {
+                    var rk = Arg("-race" + tm);
+                    if (rk != null) foreach (var r in Defs.Races) if (r.Key == rk) Battle.Races[tm] = r;
+                }
             }
             NewMap(Seed != 0 ? Seed : 0);
             Battle.RandomArmies(ArmySize);
@@ -227,6 +232,15 @@ namespace BattleSim
             ShowToast(MapName);
         }
 
+        /// <summary>Сменить расу армии и заново собрать войска.</summary>
+        public void CycleRace(int team)
+        {
+            int i = System.Array.IndexOf(Defs.Races, Battle.Races[team]);
+            Battle.Races[team] = Defs.Races[(i + 1) % Defs.Races.Length];
+            MakeArmies();
+            ShowToast($"{Defs.Teams[team].Name}: {Battle.Races[team].Name}");
+        }
+
         public void MakeArmies()
         {
             if ((ArmySize == 3) != Big) NewMap(MapSeed); // для великой сечи — большое поле
@@ -288,7 +302,7 @@ namespace BattleSim
                 return;
             }
             if (!World.InField(p.Value.x, p.Value.z, 1)) { ShowToast("Ставить отряды можно только на поле боя"); return; }
-            int n = Battle.PlaceSquad(Type, Team, p.Value.x, p.Value.z, Team == 0 ? 0 : M.PI);
+            int n = Battle.PlaceSquad(Battle.Ty(Team, Type), Team, p.Value.x, p.Value.z, Team == 0 ? 0 : M.PI);
             if (n == 0) ShowToast(Battle.Units.Count >= Battle.MaxUnits ? $"Предел — {Battle.MaxUnits} солдат" : "Здесь тесно — выберите другое место");
         }
 
@@ -298,7 +312,7 @@ namespace BattleSim
             if (Phase != Phase.Setup || Eraser || HelpOpen) { overlays.GhostCount = 0; return; }
             var p = Rig.GroundPoint(screen);
             if (p == null || !World.InField(p.Value.x, p.Value.z, 1)) { overlays.GhostCount = 0; return; }
-            overlays.SetGhost(World, p, Type, Team);
+            overlays.SetGhost(World, p, Battle.Ty(Team, Type), Team);
         }
 
         void Update()
@@ -383,7 +397,7 @@ namespace BattleSim
         /// <summary>Раскладывает всех видимых солдат по пачкам: вид × армия × детализация.</summary>
         void RenderCrowd(float animDt)
         {
-            foreach (var m in Lib.Inf) m.Begin();
+            foreach (var m in Lib.Inf.Values) m.Begin();
             foreach (var m in Lib.Rider.Values) m.Begin();
             foreach (var m in Lib.Horse) m.Begin();
             GeometryUtility.CalculateFrustumPlanes(Cam, frustum);
@@ -406,7 +420,7 @@ namespace BattleSim
                     int hr = hm.Row(u.Anim);
                     hm.Add(0, l, m, hr, u.Anim.PrevRow, u.Anim.Blend);
                     u.Anim.LastRow = hr;
-                    var rm = Lib.Rider[u.Type];
+                    if (!Lib.Rider.TryGetValue(u.Type, out var rm)) continue;
                     int rr = rm.Row(u.Ride);
                     Vector3 off;
                     if (u.Alive)
@@ -423,14 +437,14 @@ namespace BattleSim
                 }
                 else
                 {
-                    var im = Lib.Inf[u.Type];
+                    if (!Lib.Inf.TryGetValue(u.Type, out var im)) continue;
                     int r = im.Row(u.Anim);
                     im.Add(u.Team, l, m, r, u.Anim.PrevRow, u.Anim.Blend);
                     u.Anim.LastRow = r;
                 }
             }
             bool shadows = true;
-            foreach (var m in Lib.Inf) m.End(shadows);
+            foreach (var m in Lib.Inf.Values) m.End(shadows);
             foreach (var m in Lib.Rider.Values) m.End(shadows);
             foreach (var m in Lib.Horse) m.End(shadows);
         }

@@ -74,6 +74,35 @@ namespace BattleSim
                         for (int k = 0; k < 7; k++) Add(p, Vector3.up * Random.Range(2f, 3.4f) + Rnd(1.1f), Random.Range(0.4f, 0.6f), 0.05f, 0, 9.8f, Water);
                         Add(p, Vector3.zero, 0.4f, 0.15f, 1.6f, 0, new Color(1, 1, 1, 0.5f));
                         break;
+                    case FxKind.Explosion:
+                        Add(p + Vector3.up * 0.4f, Vector3.zero, 0.18f, 0.6f, 9f, 0, new Color(1f, 0.85f, 0.5f, 0.9f));
+                        for (int k = 0; k < 16; k++)
+                        {
+                            float a = k / 16f * Mathf.PI * 2;
+                            var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                            Add(p + dir * 0.4f + Vector3.up * 0.3f, dir * Random.Range(3f, 5f) + Vector3.up * Random.Range(0.3f, 1.2f), Random.Range(0.6f, 1.0f), 0.3f, 1.4f, 0.4f, Dust);
+                        }
+                        for (int k = 0; k < 10; k++) Add(p + Vector3.up * 0.3f, Rnd(3f) + Vector3.up * Random.Range(4f, 7f), 1.1f, 0.07f, 0, 9.8f, Chip);
+                        break;
+                    case FxKind.Roar:
+                        for (int k = 0; k < 36; k++)
+                        {
+                            float a = k / 36f * Mathf.PI * 2;
+                            var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                            Add(p + dir * 1.5f + Vector3.up * 0.4f, dir * 34f, 1.3f, 0.45f, 0.6f, 0, new Color(1f, 0.25f, 0.15f, 0.7f));
+                        }
+                        break;
+                    case FxKind.Cry:
+                        for (int k = 0; k < 14; k++)
+                        {
+                            float a = k / 14f * Mathf.PI * 2;
+                            var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                            Add(p + dir * 2f + Vector3.up * 0.2f, dir * 7f, 0.7f, 0.18f, 0.6f, 0, new Color(1f, 0.92f, 0.6f, 0.55f));
+                        }
+                        break;
+                    case FxKind.Down:
+                        for (int k = 0; k < 5; k++) Add(p + new Vector3(Random.Range(-0.4f, 0.4f), 0.15f, Random.Range(-0.4f, 0.4f)), Rnd(0.4f) + Vector3.up * 0.3f, 0.8f, 0.2f, 0.6f, 0, Dust);
+                        break;
                     case FxKind.BoltGround:
                         for (int k = 0; k < 2; k++) Add(p + Rnd(0.05f), Vector3.up * 0.4f + Rnd(0.3f), 0.45f, 0.08f, 0.35f, 0, Dust);
                         break;
