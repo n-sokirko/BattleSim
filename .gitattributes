@@ -2,3 +2,4 @@
 *.png binary
 *.glb binary
 *.bin binary
+*.bytes binary

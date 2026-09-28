@@ -1,0 +1,108 @@
+"""Поза в Blender из нескольких клипов + правки в пространстве арматуры + IK ног со ступнями на земле."""
+import math
+import bpy
+from mathutils import Matrix, Vector
+
+LEG = {'l': ('upperleg.l', 'lowerleg.l', 'foot.l'), 'r': ('upperleg.r', 'lowerleg.r', 'foot.r')}
+ORDER = None
+
+
+def order(arm):
+    global ORDER
+    if ORDER is None:
+        out = []
+        def walk(b):
+            out.append(b.name)
+            for c in b.children: walk(c)
+        for b in arm.data.bones:
+            if b.parent is None: walk(b)
+        ORDER = out
+    return ORDER
+
+
+def capture(rig, action, t):
+    """Локальные позы (matrix_basis) всех костей из клипа в момент t (сек)."""
+    rig.use_action(action)
+    f = t * rig.fps
+    rig.scene.frame_set(int(math.floor(f)), subframe=f - math.floor(f))
+    return {pb.name: pb.matrix_basis.copy() for pb in rig.arm.pose.bones}
+
+
+def detach(rig):
+    ad = rig.arm.animation_data
+    if ad: ad.action = None
+
+
+def apply_basis(rig, basis):
+    for pb in rig.arm.pose.bones:
+        if pb.name in basis: pb.matrix_basis = basis[pb.name]
+    bpy.context.view_layer.update()
+
+
+def rotate(rig, bone, axis, deg, pivot=None):
+    """Поворот кости вокруг её головы (или pivot) в пространстве арматуры; потомки следуют."""
+    pb = rig.arm.pose.bones[bone]
+    head = pivot if pivot is not None else pb.matrix.to_translation()
+    r = Matrix.Rotation(math.radians(deg), 4, axis)
+    pb.matrix = Matrix.Translation(head) @ r @ Matrix.Translation(-head) @ pb.matrix
+    bpy.context.view_layer.update()
+
+
+def move(rig, bone, offset):
+    pb = rig.arm.pose.bones[bone]
+    pb.matrix = Matrix.Translation(Vector(offset)) @ pb.matrix
+    bpy.context.view_layer.update()
+
+
+class LegIK:
+    """IK на голень (цепь 2) с полюсом перед коленом; ступня копирует сохранённый поворот."""
+    def __init__(self, rig):
+        self.rig = rig
+        self.t, self.p, self.f = {}, {}, {}
+        for s, (up, lo, ft) in LEG.items():
+            for kind, store in (('tgt', self.t), ('pole', self.p), ('foot', self.f)):
+                e = bpy.data.objects.new(f'ik_{kind}_{s}', None)
+                bpy.context.scene.collection.objects.link(e)
+                store[s] = e
+            pb = rig.arm.pose.bones[lo]
+            c = pb.constraints.new('IK'); c.target = self.t[s]; c.pole_target = self.p[s]
+            c.chain_count = 2; c.pole_angle = math.radians(-90); c.enabled = False
+            fc = rig.arm.pose.bones[ft].constraints.new('COPY_ROTATION'); fc.target = self.f[s]; fc.enabled = False
+        self.on = False
+
+    def pin(self, spread=0.0, lift=None):
+        """Запомнить текущие ступни (голова стопы, её поворот, колено) и включить IK."""
+        aw = self.rig.arm.matrix_world
+        for s, (up, lo, ft) in LEG.items():
+            pbs = self.rig.arm.pose.bones
+            foot = aw @ pbs[ft].matrix
+            knee = aw @ pbs[lo].matrix.to_translation()
+            side = 1 if s == 'l' else -1
+            pos = foot.to_translation() + Vector((side * spread, 0, 0))
+            if lift is not None: pos.z = max(pos.z, lift)
+            self.t[s].matrix_world = Matrix.Translation(pos)
+            self.p[s].matrix_world = Matrix.Translation(knee + Vector((side * spread, -0.6, 0)))
+            self.f[s].matrix_world = Matrix.Translation(pos) @ foot.to_quaternion().to_matrix().to_4x4()
+        self.enable(True)
+
+    def enable(self, on):
+        for s, (up, lo, ft) in LEG.items():
+            self.rig.arm.pose.bones[lo].constraints['IK'].enabled = on
+            self.rig.arm.pose.bones[ft].constraints['Copy Rotation'].enabled = on
+        bpy.context.view_layer.update()
+
+
+def mix(a, b, w):
+    """Смесь двух наборов matrix_basis: перенос и масштаб линейно, поворот — slerp."""
+    out = {}
+    for k in a:
+        if k not in b: out[k] = a[k]; continue
+        la, ra, sa = a[k].decompose(); lb, rb, sb = b[k].decompose()
+        from mathutils import Matrix
+        out[k] = Matrix.LocRotScale(la.lerp(lb, w), ra.slerp(rb, w), sa.lerp(sb, w))
+    return out
+
+
+def smooth(x):
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
