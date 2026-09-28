@@ -149,7 +149,7 @@ namespace BattleSim.Core
         void TryFeign(Squad sq)
         {
             var o = sq.Order;
-            if (sq.Feigning || o.Mode == Mode.Rout || !sq.Engaged || sq.EngagedFor < 2.5f || Time - sq.FeignT < 40) return;
+            if (sq.Feigning || o.Mode == Mode.Rout || !sq.Engaged || sq.EngagedFor < 4f || Time < 15 || Time - sq.FeignT < 40) return;
             if (sq.Morale > 75 && sq.Alive > sq.Size * 0.75f) return;
             if (sq.Morale < sq.T.RoutAt + 8) return; // уже не хитрость — настоящее бегство
             sq.Feigning = true; sq.FeignT = Time; sq.FeignUntil = Time + 4.5f + Rng.Rand() * 2;

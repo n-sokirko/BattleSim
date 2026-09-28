@@ -119,7 +119,8 @@ namespace BattleSim
             for (int i = 0; i < 3; i++)
             {
                 var t = rc.Units[i];
-                steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => Inf[t.Id] = MakeInfantry(t)));
+                // конные бывают и не на месте конницы (батыры Степи — ударные): им всадник, а не пехотинец
+                steps.Add((rc.Name + ": " + t.Name.ToLowerInvariant(), () => { if (t.Mount) Rider[t.Id] = MakeRider(t, 1.75f); else Inf[t.Id] = MakeInfantry(t); }));
             }
             if (rc.Hero != null) steps.Add((rc.Name + ": " + rc.Hero.Name.ToLowerInvariant(), () => Inf[rc.Hero.Id] = MakeInfantry(rc.Hero)));
             steps.Add((rc.Name + ": конница и вожди", () =>

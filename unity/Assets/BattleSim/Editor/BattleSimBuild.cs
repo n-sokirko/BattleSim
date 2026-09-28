@@ -11,6 +11,7 @@ namespace BattleSim.EditorTools
         [MenuItem("BattleSim/Собрать для Windows", priority = 20)]
         public static void BuildWindows()
         {
+            BattleSimSetup.IncludeShaders();
             var r = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
@@ -25,6 +26,7 @@ namespace BattleSim.EditorTools
         [MenuItem("BattleSim/Собрать APK для Android", priority = 21)]
         public static void BuildAndroid()
         {
+            BattleSimSetup.IncludeShaders();
             EditorUserBuildSettings.buildAppBundle = false;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);

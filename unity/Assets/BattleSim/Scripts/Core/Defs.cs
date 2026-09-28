@@ -68,6 +68,8 @@ namespace BattleSim.Core
         public UnitDef Cmd, Msg, Cap;
         /// <summary>Кожа и сталь: оттенок (0..360, &lt;0 — не менять) и насыщенность; конь — множитель цвета.</summary>
         public float SkinHue = -1, SkinSat, MetalHue = -1, MetalSat;
+        /// <summary>Светлота кожи (×): у KayKit кожа очень светлая — зелёная без затемнения выходит бледно-мятной.</summary>
+        public float SkinLit = 1;
         public float HorseTint = 1;
         /// <summary>Ярость орды: копится в бою, на пике армия ревёт (быстрее, сильнее, не бежит).</summary>
         public bool Rage;
@@ -248,21 +250,21 @@ namespace BattleSim.Core
         public static readonly RaceDef Orcs = new RaceDef
         {
             Key = "orcs", Name = "Орда", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
-            Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 95, SkinSat = 0.45f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
+            Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 100, SkinSat = 0.55f, SkinLit = 0.62f, MetalHue = 30, MetalSat = 0.08f, HorseTint = 0.45f, Rage = true,
             Names = new[] { "Грызь", "Хряк", "Шмяк", "Гнилозуб", "Рвач", "Бугай", "Кривоклык", "Жрун" },
             Hero = OrcHero, HeroNames = new[] { "Гнилобрюх", "Камнелоб", "Кровохлёб", "Жмыхарь", "Костолом" },
         };
         public static readonly RaceDef Nav = new RaceDef
         {
             Key = "nav", Name = "Навь", Cry = "Навь идёт!", Units = { [0] = NavDead, [1] = NavGhoul, [2] = NavNecro, [3] = NavRider },
-            Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 60, SkinSat = 0.1f, MetalHue = 25, MetalSat = 0.3f, HorseTint = 0.45f, Undead = true,
+            Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 80, SkinSat = 0.07f, SkinLit = 0.82f, MetalHue = 25, MetalSat = 0.3f, HorseTint = 0.45f, Undead = true,
             Names = new[] { "Кощей", "Мара", "Морок", "Карачун", "Вий", "Лихо", "Мор", "Чернава" },
             Hero = NavHero, HeroNames = new[] { "Вурдалак", "Могильщик", "Упырь-исполин", "Костяной Змей" },
         };
         public static readonly RaceDef Steppe = new RaceDef
         {
             Key = "steppe", Name = "Степь", Cry = "Урагх!", Units = { [0] = StNuker, [1] = StBatyr, [2] = StArcher, [3] = StHorseArcher },
-            Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.42f, MetalHue = 38, MetalSat = 0.45f, Feign = true,
+            Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.45f, SkinLit = 0.85f, MetalHue = 38, MetalSat = 0.45f, Feign = true,
             Names = new[] { "Кончак", "Боняк", "Тугоркан", "Шарукан", "Итларь", "Котян", "Кобяк", "Гзак" },
             Hero = StHero, HeroNames = new[] { "Челубей", "Тугарин Змеевич", "Идолище", "Калин" },
         };

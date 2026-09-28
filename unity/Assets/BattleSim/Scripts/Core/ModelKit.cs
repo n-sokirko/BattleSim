@@ -483,18 +483,18 @@ namespace BattleSim.Core
         {
             if (race == null) return;
             int cw = w / 8, ch = h / 4;
-            void Cell(int cx, int cy, float hue, float sat)
+            void Cell(int cx, int cy, float hue, float sat, float lit = 1)
             {
                 for (int y = cy * ch; y < (cy + 1) * ch; y++)
                     for (int x = cx * cw; x < (cx + 1) * cw; x++)
                     {
                         int i = (y * w + x) * 4;
                         new Rgb(rgba[i] / 255f, rgba[i + 1] / 255f, rgba[i + 2] / 255f).ToHsl(out _, out _, out float l);
-                        var o = Rgb.FromHsl(hue / 360f, sat, l);
+                        var o = Rgb.FromHsl(hue / 360f, sat, l * lit);
                         rgba[i] = B(o.r); rgba[i + 1] = B(o.g); rgba[i + 2] = B(o.b);
                     }
             }
-            if (race.SkinHue >= 0) { Cell(0, 0, race.SkinHue, race.SkinSat); Cell(1, 0, race.SkinHue, race.SkinSat); }
+            if (race.SkinHue >= 0) { Cell(0, 0, race.SkinHue, race.SkinSat, race.SkinLit); Cell(1, 0, race.SkinHue, race.SkinSat, race.SkinLit); }
             if (race.MetalHue >= 0 && model == "Knight") Cell(3, 0, race.MetalHue, race.MetalSat);
         }
 
