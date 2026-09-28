@@ -121,6 +121,8 @@ namespace BattleSim.Core
         public float Len, Ux, Uz, X, Z;
         /// <summary>Профиль верха (абсолютные высоты, равномерно от A к B) — вместо линейного HA→HB: боевой ход стены.</summary>
         public float[] Prof;
+        /// <summary>Перила (парапет) по бокам: сойти с настила и взойти на него можно только с концов.</summary>
+        public bool Rails;
     }
 
     public sealed class Decks
@@ -216,6 +218,23 @@ namespace BattleSim.Core
                 foreach (var d in L)
                     if (d.Kind == DeckKind.Wall && Locate(d, x, z, out _, out _)) return d;
             return null;
+        }
+
+        /// <summary>Шаг из (ax, az) в (bx, bz) — через перила моста (сбоку, а не с конца настила)?</summary>
+        public bool RailCross(float ax, float az, float bx, float bz)
+        {
+            var L = Grid.Near((ax + bx) / 2, (az + bz) / 2);
+            if (L == null) return false;
+            for (int i = 0; i < L.Count; i++)
+            {
+                var d = L[i];
+                if (!d.Rails) continue;
+                bool ia = Locate(d, ax, az, out _, out _), ib = Locate(d, bx, bz, out _, out _);
+                if (ia == ib) continue;
+                float ox = ia ? bx : ax, oz = ia ? bz : az, along = (ox - d.Ax) * d.Ux + (oz - d.Az) * d.Uz;
+                if (along > 1.5f && along < d.Len - 1.5f) return true;
+            }
+            return false;
         }
 
         /// <summary>Тонкий настил моста перекрывает точку на высоте y?</summary>
@@ -385,23 +404,31 @@ namespace BattleSim.Core
                 }
             // сплошные ограды (баррикада за воротами, стенки у мостов): тонкие, клетку целиком не закрывают — но шагнуть
             // через них нельзя, только в проём; без этого путь шёл прямо сквозь ограду, и бойцы упирались в неё
-            foreach (var fw in w.Features.Walls)
+            void Fence(float fax, float faz, float fbx, float fbz, float pad)
             {
-                if (!fw.Solid) continue;
-                float pad = fw.T / 2 + 0.2f;
-                int ix0 = Math.Max(0, M.Floor((MathF.Min(fw.Ax, fw.Bx) - pad - c + Half) / c) - 1), ix1 = Math.Min(D - 1, M.Floor((MathF.Max(fw.Ax, fw.Bx) + pad + c + Half) / c) + 1);
-                int iz0 = Math.Max(0, M.Floor((MathF.Min(fw.Az, fw.Bz) - pad - c + Half) / c) - 1), iz1 = Math.Min(D - 1, M.Floor((MathF.Max(fw.Az, fw.Bz) + pad + c + Half) / c) + 1);
+                int ix0 = Math.Max(0, M.Floor((MathF.Min(fax, fbx) - pad - c + Half) / c) - 1), ix1 = Math.Min(D - 1, M.Floor((MathF.Max(fax, fbx) + pad + c + Half) / c) + 1);
+                int iz0 = Math.Max(0, M.Floor((MathF.Min(faz, fbz) - pad - c + Half) / c) - 1), iz1 = Math.Min(D - 1, M.Floor((MathF.Max(faz, fbz) + pad + c + Half) / c) + 1);
                 for (int iz = iz0; iz <= iz1; iz++)
                     for (int ix = ix0; ix <= ix1; ix++)
                     {
                         int i = iz * D + ix;
                         var p = Center(i);
-                        if (ix + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z, fw) < pad) Sheer[i] |= 1;
-                        if (iz + 1 < D && SegSeg(p.x, p.z, p.x, p.z + c, fw) < pad) Sheer[i] |= 2;
-                        if (ix + 1 < D && iz + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z + c, fw) < pad) Sheer[i] |= 4;
-                        if (ix > 0 && iz + 1 < D && SegSeg(p.x, p.z, p.x - c, p.z + c, fw) < pad) Sheer[i] |= 8;
+                        if (ix + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z, fax, faz, fbx, fbz) < pad) Sheer[i] |= 1;
+                        if (iz + 1 < D && SegSeg(p.x, p.z, p.x, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 2;
+                        if (ix + 1 < D && iz + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 4;
+                        if (ix > 0 && iz + 1 < D && SegSeg(p.x, p.z, p.x - c, p.z + c, fax, faz, fbx, fbz) < pad) Sheer[i] |= 8;
                     }
             }
+            foreach (var fw in w.Features.Walls)
+                if (fw.Solid) Fence(fw.Ax, fw.Az, fw.Bx, fw.Bz, fw.T / 2 + 0.2f);
+            // перила мостов: сойти можно только с концов настила
+            foreach (var d in w.Decks.List)
+                if (d.Rails && d.Len > 3.5f)
+                    foreach (float sd in new[] { -1f, 1f })
+                    {
+                        float nx = -d.Uz * sd * d.W / 2, nz = d.Ux * sd * d.W / 2;
+                        Fence(d.Ax + d.Ux * 1.5f + nx, d.Az + d.Uz * 1.5f + nz, d.Bx - d.Ux * 1.5f + nx, d.Bz - d.Uz * 1.5f + nz, 0.1f);
+                    }
             int b = 0;
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
@@ -512,14 +539,14 @@ namespace BattleSim.Core
 
         /// <summary>Есть ли на прямой уступ круче, чем пускает шаг бойца (кроме края настила — въезда на мост, лестницу).</summary>
         /// <summary>Расстояние между отрезком (a, b) и осью ограды (0 — пересекаются).</summary>
-        static float SegSeg(float ax, float az, float bx, float bz, FeatureWall f)
+        static float SegSeg(float ax, float az, float bx, float bz, float fax, float faz, float fbx, float fbz)
         {
             static float Cross(float ox, float oz, float px, float pz, float qx, float qz) => (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
-            float d1 = Cross(ax, az, bx, bz, f.Ax, f.Az), d2 = Cross(ax, az, bx, bz, f.Bx, f.Bz);
-            float d3 = Cross(f.Ax, f.Az, f.Bx, f.Bz, ax, az), d4 = Cross(f.Ax, f.Az, f.Bx, f.Bz, bx, bz);
+            float d1 = Cross(ax, az, bx, bz, fax, faz), d2 = Cross(ax, az, bx, bz, fbx, fbz);
+            float d3 = Cross(fax, faz, fbx, fbz, ax, az), d4 = Cross(fax, faz, fbx, fbz, bx, bz);
             if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
-            return MathF.Min(MathF.Min(M.SegDist(f.Ax, f.Az, ax, az, bx, bz), M.SegDist(f.Bx, f.Bz, ax, az, bx, bz)),
-                             MathF.Min(M.SegDist(ax, az, f.Ax, f.Az, f.Bx, f.Bz), M.SegDist(bx, bz, f.Ax, f.Az, f.Bx, f.Bz)));
+            return MathF.Min(MathF.Min(M.SegDist(fax, faz, ax, az, bx, bz), M.SegDist(fbx, fbz, ax, az, bx, bz)),
+                             MathF.Min(M.SegDist(ax, az, fax, faz, fbx, fbz), M.SegDist(bx, bz, fax, faz, fbx, fbz)));
         }
 
         static bool SheerLine(World w, float ax, float az, float bx, float bz)
@@ -532,7 +559,18 @@ namespace BattleSim.Core
             {
                 float x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, h = w.GroundAt(x, z);
                 bool deck = w.OnDeck(x, z);
-                if (MathF.Abs(h - prev) > (deck || prevDeck ? World.DeckStep + step * 0.5f : step * 1.3f + 0.02f)) return true;
+                if (MathF.Abs(h - prev) > step * 1.3f + 0.02f)
+                {
+                    if (!deck && !prevDeck) return true;
+                    // у края настила: находим сам уступ и меряем его — шагом берётся не выше DeckStep (как в Battle.CanMove)
+                    float lo = (k - 1f) / n, hi = (float)k / n, hl = prev, hh = h;
+                    for (int it = 0; it < 7; it++)
+                    {
+                        float mid = (lo + hi) / 2, hm = w.GroundAt(ax + (bx - ax) * mid, az + (bz - az) * mid);
+                        if (MathF.Abs(hm - hl) > MathF.Abs(hh - hm)) { hi = mid; hh = hm; } else { lo = mid; hl = hm; }
+                    }
+                    if (MathF.Abs(hh - hl) > World.DeckStep + (hi - lo) * d * 1.3f) return true;
+                }
                 prev = h; prevDeck = deck;
             }
             return false;

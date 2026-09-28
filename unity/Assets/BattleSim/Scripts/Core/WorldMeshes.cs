@@ -235,14 +235,14 @@ namespace BattleSim.Core
                     int ns = (int)MathF.Ceiling(d.Len / 1.2f);
                     for (int k = 0; k < ns; k++)
                     {
-                        float t = (k + 0.5f) / ns, x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = M.Lerp(d.HA, d.HB, t);
+                        float t = (k + 0.5f) / ns, x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = Decks.HeightOf(d, t, 0);
                         Box(x, y - 0.35f, z, d.W + 0.6f, 0.7f, d.Len / ns + 0.02f, yaw, stone);
                         foreach (float side in new[] { -1f, 1f })
                             Box(x + nx * side * (d.W / 2 + 0.15f), y + 0.45f, z + nz * side * (d.W / 2 + 0.15f), 0.5f, 0.95f, d.Len / ns + 0.02f, yaw, stoneDark);
                     }
                     foreach (float t in new[] { 0.36f, 0.64f })
                     {
-                        float x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = M.Lerp(d.HA, d.HB, t), bottom = w.HeightAt(x, z) - 1;
+                        float x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = Decks.HeightOf(d, t, 0), bottom = w.HeightAt(x, z) - 1;
                         if (y - bottom > 1.2f) Box(x, (y - 0.7f + bottom) / 2, z, d.W + 0.2f, y - 0.7f - bottom, 1.4f, yaw, stoneDark);
                     }
                     continue;
@@ -250,19 +250,24 @@ namespace BattleSim.Core
                 int n = (int)MathF.Ceiling(d.Len / 0.55f);
                 for (int k = 0; k < n; k++)
                 {
-                    float t = (k + 0.5f) / n, x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = M.Lerp(d.HA, d.HB, t);
+                    float t = (k + 0.5f) / n, x = d.Ax + d.Ux * d.Len * t, z = d.Az + d.Uz * d.Len * t, y = Decks.HeightOf(d, t, 0);
                     Box(x, y - 0.08f, z, d.W, 0.16f, d.Len / n - 0.06f, yaw, wood);
                 }
                 foreach (float side in new[] { -1f, 1f })
                 {
                     float ox = nx * side * (d.W / 2 - 0.15f), oz = nz * side * (d.W / 2 - 0.15f);
-                    float mid = (d.HA + d.HB) / 2, pitch = MathF.Atan2(d.HB - d.HA, d.Len);
-                    var rail = Mat4.Translation(d.X + ox, mid + 1.05f, d.Z + oz) * Mat4.RotationY(yaw)
-                        * Mat4.Compose(0, 0, 0, MathF.Sin(-pitch / 2), 0, 0, MathF.Cos(-pitch / 2), 1, 1, 1) * Mat4.Compose(0, 0, 0, 0, 0, 0, 1, 0.12f, 0.12f, d.Len);
-                    bb.Box(rail, new Rgb(0.4f, 0.4f, 0.4f));
+                    // перила — кусками между столбами, по профилю настила
+                    for (float t0 = 0; t0 < d.Len - 0.01f; t0 += 2.2f)
+                    {
+                        float t1 = MathF.Min(d.Len, t0 + 2.2f), y0 = Decks.HeightOf(d, t0 / d.Len, 0), y1 = Decks.HeightOf(d, t1 / d.Len, 0);
+                        float pitch = MathF.Atan2(y1 - y0, t1 - t0), tm = (t0 + t1) / 2, seg = M.Hypot(t1 - t0, y1 - y0);
+                        var rail = Mat4.Translation(d.Ax + d.Ux * tm + ox, (y0 + y1) / 2 + 1.05f, d.Az + d.Uz * tm + oz) * Mat4.RotationY(yaw)
+                            * Mat4.Compose(0, 0, 0, MathF.Sin(-pitch / 2), 0, 0, MathF.Cos(-pitch / 2), 1, 1, 1) * Mat4.Compose(0, 0, 0, 0, 0, 0, 1, 0.12f, 0.12f, seg + 0.05f);
+                        bb.Box(rail, new Rgb(0.4f, 0.4f, 0.4f));
+                    }
                     for (float t = 0; t <= d.Len; t += 2.2f)
                     {
-                        float x = d.Ax + d.Ux * t + ox, z = d.Az + d.Uz * t + oz, y = M.Lerp(d.HA, d.HB, t / d.Len);
+                        float x = d.Ax + d.Ux * t + ox, z = d.Az + d.Uz * t + oz, y = Decks.HeightOf(d, t / d.Len, 0);
                         Box(x, y + 0.55f, z, 0.14f, 1.1f, 0.14f, 0, beam);
                         if (t > 1.5f && t < d.Len - 1.5f && M.Round(t / 2.2f) % 2 == 0)
                         {

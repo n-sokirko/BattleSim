@@ -574,9 +574,12 @@ namespace BattleSim.Core
                         if (i > 0) acc += M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
                     }
                 }
+                // конец тропы к броду закреплён у воды: иначе проход «вперёд» поднимал его до террасы, и тропа насыпала
+                // через ущелье дамбу высотой в террасу вместо спуска к реке
+                int last = p.Ford ? pts.Count - 1 : pts.Count;
                 for (int it = 0; it < 4; it++)
                 {
-                    for (int i = 1; i < pts.Count; i++) { float d = M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i - 1] - d, prof[i - 1] + d); }
+                    for (int i = 1; i < last; i++) { float d = M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i - 1] - d, prof[i - 1] + d); }
                     for (int i = pts.Count - 2; i >= 0; i--) { float d = M.Hypot(pts[i].x - pts[i + 1].x, pts[i].z - pts[i + 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i + 1] - d, prof[i + 1] + d); }
                 }
                 var sm = new float[prof.Length];
@@ -586,6 +589,7 @@ namespace BattleSim.Core
                     for (int k = -3; k <= 3; k++) { int j = i + k; if (j >= 0 && j < prof.Length) { a += prof[j]; c++; } }
                     sm[i] = a / c;
                 }
+                if (p.Ford) sm[sm.Length - 1] = -0.55f;
                 p.Prof = sm;
                 for (int i = 0; i < pts.Count; i++)
                 {
@@ -637,10 +641,16 @@ namespace BattleSim.Core
                 var pb = br.Paths[0].Side < 0 ? br.Paths[1] : br.Paths[0];
                 V2 a = pa.Pts[pa.Pts.Count - 1], b = pb.Pts[pb.Pts.Count - 1];
                 float len = M.Hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
+                float ha = pa.Prof[pa.Prof.Length - 1] + 0.05f, hb = pb.Prof[pb.Prof.Length - 1] + 0.05f, dl = len + 3;
+                // над площадками (1,5 м на тропе и до бровки) настил ровный, вровень с ними — уклон только над ущельем:
+                // иначе сбоку у въезда настил поднимался над землёй на полметра и с него «спрыгивали»
+                int np = Math.Max(4, (int)MathF.Ceiling(dl / 0.5f));
+                var prof = new float[np + 1];
+                for (int i = 0; i <= np; i++) { float al = dl * i / np; prof[i] = M.Lerp(ha, hb, M.Clamp01((al - 3f) / MathF.Max(0.5f, dl - 6f))); }
                 var d = Decks.Add(new Deck
                 {
                     Kind = DeckKind.Bridge, Ax = a.x - ux * 1.5f, Az = a.z - uz * 1.5f, Bx = b.x + ux * 1.5f, Bz = b.z + uz * 1.5f, W = 6f,
-                    HA = pa.Prof[pa.Prof.Length - 1] + 0.05f, HB = pb.Prof[pb.Prof.Length - 1] + 0.05f, Rel = false, Walk = true, Solid = false,
+                    HA = ha, HB = hb, Prof = prof, Rel = false, Walk = true, Solid = false, Rails = true,
                 });
                 Bridges.Add(d);
             }
@@ -730,7 +740,7 @@ namespace BattleSim.Core
             if (Town.CastleBridge != null) spans.Add(Town.CastleBridge);
             foreach (var b in spans)
             {
-                var d = Decks.Add(new Deck { Kind = DeckKind.Bridge, Ax = b.Ax, Az = b.Az, Bx = b.Bx, Bz = b.Bz, W = b.W, HA = HeightAt(b.Ax, b.Az) + 0.08f, HB = HeightAt(b.Bx, b.Bz) + 0.08f, Rel = false, Walk = true, Solid = false, Stone = true });
+                var d = Decks.Add(new Deck { Kind = DeckKind.Bridge, Ax = b.Ax, Az = b.Az, Bx = b.Bx, Bz = b.Bz, W = b.W, HA = HeightAt(b.Ax, b.Az) + 0.08f, HB = HeightAt(b.Bx, b.Bz) + 0.08f, Rel = false, Walk = true, Solid = false, Stone = true, Rails = true });
                 Bridges.Add(d);
             }
         }

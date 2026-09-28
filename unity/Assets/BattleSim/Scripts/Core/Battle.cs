@@ -1339,10 +1339,27 @@ namespace BattleSim.Core
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y, lim = World.Field - 0.5f;
             float nx = M.Clamp(ox + (vx * f + u.Knock.x) * dt, -lim, lim), nz = M.Clamp(oz + (vz * f + u.Knock.z) * dt, -lim, lim);
             // Не заходим в непроходимое, в ствол и в камень, не прыгаем с обрыва или со стены — скользим вдоль
-            if (!Place(u, nx, nz, cls) && !Place(u, nx, oz, cls) && !Place(u, ox, nz, cls)) u.Pos.y = World.GroundAt(ox, oz);
+            if (!Place(u, nx, nz, cls) && !Place(u, nx, oz, cls) && !Place(u, ox, nz, cls) && !Veer(u, nx - ox, nz - oz, cls)) u.Pos.y = World.GroundAt(ox, oz);
             float k = MathF.Exp(-7 * dt);
             u.Knock.x *= k; u.Knock.z *= k;
             u.Phase += dt * u.CurSpeed * (u.T.Mount ? 1.4f : 3.3f);
+        }
+
+        /// <summary>
+        /// Упёрся и вдоль осей не скользит (крутой склон, куда вниз можно только наискось; угол настила) — шагаем,
+        /// отклонившись на 30–90° в ту или другую сторону: на склоне так и спускаются, «змейкой».
+        /// </summary>
+        bool Veer(Unit u, float dx, float dz, int cls)
+        {
+            float l = M.Hypot(dx, dz);
+            if (l < 1e-4f) return false;
+            for (int k = 1; k <= 3; k++)
+                foreach (float sg in new[] { 1f, -1f })
+                {
+                    float a = sg * k * M.PI / 6, c = MathF.Cos(a), s = MathF.Sin(a), f = MathF.Max(0.5f, c);
+                    if (Place(u, u.Pos.x + (dx * c - dz * s) * f, u.Pos.z + (dx * s + dz * c) * f, cls)) return true;
+                }
+            return false;
         }
 
         /// <summary>
@@ -1380,6 +1397,8 @@ namespace BattleSim.Core
               // а боец стоит у края на земле — не на её уровне. Такого выпускаем в соседнюю клетку его уровня, иначе он заперт.
                 if (MathF.Abs(oy - nav.Surf[a]) < 1f || MathF.Abs(g - nav.Surf[b]) > 0.6f) return false;
             }
+            // через перила моста не шагаем — ни с моста, ни на мост
+            if (World.Decks.RailCross(ox, oz, nx, nz)) return false;
             // в омут не шагаем, даже если клетка в целом проходима (край моста, крутая набережная); выбираться — можно
             if (World.Water - g > World.WadeMax && g < oy) return false;
             // уклон не круче ~52° — как у поиска пути; иначе по крутому берегу сползали бы в реку мелкими шагами
@@ -1388,7 +1407,7 @@ namespace BattleSim.Core
             // ступенька круче уклона — только на настиле или на его край (въезд на мост, с лестницы на боевой ход), не выше
             // DeckStep, как и в сетке путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз
             // за шаг, и с поблажкой он сползал по отвесу ущелья
-            return dy <= World.DeckStep && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz));
+            return dy <= World.DeckStep + d * 1.3f && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz));
         }
 
         // ---------------------------------------------------------------- соседи
