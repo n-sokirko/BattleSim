@@ -383,6 +383,25 @@ namespace BattleSim.Core
                     if (ix + 1 < D && iz + 1 < D && SheerLine(w, p.x, p.z, p.x + c, p.z + c)) Sheer[i] |= 4;
                     if (ix > 0 && iz + 1 < D && SheerLine(w, p.x, p.z, p.x - c, p.z + c)) Sheer[i] |= 8;
                 }
+            // сплошные ограды (баррикада за воротами, стенки у мостов): тонкие, клетку целиком не закрывают — но шагнуть
+            // через них нельзя, только в проём; без этого путь шёл прямо сквозь ограду, и бойцы упирались в неё
+            foreach (var fw in w.Features.Walls)
+            {
+                if (!fw.Solid) continue;
+                float pad = fw.T / 2 + 0.2f;
+                int ix0 = Math.Max(0, M.Floor((MathF.Min(fw.Ax, fw.Bx) - pad - c + Half) / c) - 1), ix1 = Math.Min(D - 1, M.Floor((MathF.Max(fw.Ax, fw.Bx) + pad + c + Half) / c) + 1);
+                int iz0 = Math.Max(0, M.Floor((MathF.Min(fw.Az, fw.Bz) - pad - c + Half) / c) - 1), iz1 = Math.Min(D - 1, M.Floor((MathF.Max(fw.Az, fw.Bz) + pad + c + Half) / c) + 1);
+                for (int iz = iz0; iz <= iz1; iz++)
+                    for (int ix = ix0; ix <= ix1; ix++)
+                    {
+                        int i = iz * D + ix;
+                        var p = Center(i);
+                        if (ix + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z, fw) < pad) Sheer[i] |= 1;
+                        if (iz + 1 < D && SegSeg(p.x, p.z, p.x, p.z + c, fw) < pad) Sheer[i] |= 2;
+                        if (ix + 1 < D && iz + 1 < D && SegSeg(p.x, p.z, p.x + c, p.z + c, fw) < pad) Sheer[i] |= 4;
+                        if (ix > 0 && iz + 1 < D && SegSeg(p.x, p.z, p.x - c, p.z + c, fw) < pad) Sheer[i] |= 8;
+                    }
+            }
             int b = 0;
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
@@ -492,6 +511,17 @@ namespace BattleSim.Core
         }
 
         /// <summary>Есть ли на прямой уступ круче, чем пускает шаг бойца (кроме края настила — въезда на мост, лестницу).</summary>
+        /// <summary>Расстояние между отрезком (a, b) и осью ограды (0 — пересекаются).</summary>
+        static float SegSeg(float ax, float az, float bx, float bz, FeatureWall f)
+        {
+            static float Cross(float ox, float oz, float px, float pz, float qx, float qz) => (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
+            float d1 = Cross(ax, az, bx, bz, f.Ax, f.Az), d2 = Cross(ax, az, bx, bz, f.Bx, f.Bz);
+            float d3 = Cross(f.Ax, f.Az, f.Bx, f.Bz, ax, az), d4 = Cross(f.Ax, f.Az, f.Bx, f.Bz, bx, bz);
+            if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
+            return MathF.Min(MathF.Min(M.SegDist(f.Ax, f.Az, ax, az, bx, bz), M.SegDist(f.Bx, f.Bz, ax, az, bx, bz)),
+                             MathF.Min(M.SegDist(ax, az, f.Ax, f.Az, f.Bx, f.Bz), M.SegDist(bx, bz, f.Ax, f.Az, f.Bx, f.Bz)));
+        }
+
         static bool SheerLine(World w, float ax, float az, float bx, float bz)
         {
             float d = M.Hypot(bx - ax, bz - az);

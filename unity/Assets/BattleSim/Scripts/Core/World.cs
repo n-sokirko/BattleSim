@@ -733,16 +733,6 @@ namespace BattleSim.Core
                 var d = Decks.Add(new Deck { Kind = DeckKind.Bridge, Ax = b.Ax, Az = b.Az, Bx = b.Bx, Bz = b.Bz, W = b.W, HA = HeightAt(b.Ax, b.Az) + 0.08f, HB = HeightAt(b.Bx, b.Bz) + 0.08f, Rel = false, Walk = true, Solid = false, Stone = true });
                 Bridges.Add(d);
             }
-            // Всход с боевого хода северной стены на верх донжона
-            var c = Town.Castle;
-            if (c?.KeepRamp != null)
-            { // всход начинается на боевом ходу — с его высоты
-                var kr = c.KeepRamp;
-                float ha = HeightAt(kr.Ax, kr.Az) + c.WallH;
-                foreach (var w in F.Walls)
-                    if (M.SegDist(kr.Ax, kr.Az, w.Ax, w.Az, w.Bx, w.Bz) < w.W / 2 + 0.1f) ha = w.TopAt(M.Hypot(kr.Ax - w.Ax, kr.Az - w.Az));
-                Decks.Add(new Deck { Kind = DeckKind.Ramp, Ax = kr.Ax, Az = kr.Az, Bx = kr.Bx, Bz = kr.Bz, W = kr.W, HA = ha, HB = HeightAt(c.Keep.x, c.Keep.z) + c.KeepH, Rel = false, Walk = true, Solid = true });
-            }
         }
 
         /// <summary>
@@ -788,6 +778,7 @@ namespace BattleSim.Core
             var rampWall = new Dictionary<FortRamp, (FortWall w, int i0, int i1)>();
             foreach (var r in F.Ramps)
             {
+                if (r.Keep) continue;
                 r.YA = HeightAt(r.Ax, r.Az) + 0.15f;
                 r.YB = HeightAt(r.Bx, r.Bz) + r.H;
                 float best = float.PositiveInfinity, rl = M.Hypot(r.Bx - r.Ax, r.Bz - r.Az), flat = MathF.Min(2.5f, rl * 0.25f);
@@ -815,6 +806,16 @@ namespace BattleSim.Core
                     r.YB = level;
                 }
                 foreach (var w in F.Walls) Rise(w.Top, MathF.Max(0.01f, M.Hypot(w.Bx - w.Ax, w.Bz - w.Az)) / (w.Top.Length - 1));
+            }
+            // всходы на донжон: с боевого хода у нижнего конца — до крыши
+            var keep = F.Towers.FirstOrDefault(t => t.Keep);
+            foreach (var r in F.Ramps)
+            {
+                if (!r.Keep || keep == null) continue;
+                r.YA = HeightAt(r.Ax, r.Az) + r.H - 4;
+                foreach (var w in F.Walls)
+                    if (M.SegDist(r.Ax, r.Az, w.Ax, w.Az, w.Bx, w.Bz) < w.W / 2 + 0.1f) r.YA = w.TopAt(M.Hypot(r.Ax - w.Ax, r.Az - w.Az));
+                r.YB = HeightAt(keep.X, keep.Z) + keep.H;
             }
 
             // только вверх: каждая точка не ниже соседей минус уклон — ход без ступеней, стена не ниже задуманного
@@ -897,11 +898,14 @@ namespace BattleSim.Core
             { // река через посад: крутые набережные, у стены — брод
                 var rv = Town.River;
                 double d = M.PolyDist((float)x, (float)z, rv.Pts), hw = rv.W / 2;
-                if (d < hw + 1.4)
+                double fd = M.Hypot((float)x - rv.Ford.x, (float)z - rv.Ford.z);
+                // у брода берег — пологий спуск к воде (~1:2), а не отвесная набережная
+                double bank = hw + 1.4 + 4.5 * M.Smooth(12, 8, fd);
+                if (d < bank)
                 {
-                    double bed = rv.Bed, fd = M.Hypot((float)x - rv.Ford.x, (float)z - rv.Ford.z);
+                    double bed = rv.Bed;
                     if (fd < 11) bed = M.Lerp(-0.5, bed, M.Smooth(7, 11, fd)); // широкий брод перед проломом
-                    field = M.Lerp(field, bed, M.Smooth(hw + 1.4, hw - 0.2, d));
+                    field = M.Lerp(field, bed, M.Smooth(bank, hw - 0.2, d));
                 }
             }
 

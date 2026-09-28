@@ -158,7 +158,7 @@ namespace BattleSim.Core
                 return false;
             }
             // стенка по отрезку: верх — большая из высот по обе стороны, низ — меньшая
-            void Face(float ax, float az, float bx, float bz, float thick, Rgb c, float probe = 2.2f, bool skipClimbs = true)
+            void Face(float ax, float az, float bx, float bz, float thick, Rgb c, float probe = 2.2f, bool skipClimbs = true, bool skipFord = false)
             {
                 float len = M.Hypot(bx - ax, bz - az);
                 if (len < 0.1f) return;
@@ -167,6 +167,7 @@ namespace BattleSim.Core
                 {
                     float l = MathF.Min(2.05f, len - t + 0.05f), x = ax + ux * (t + l / 2), z = az + uz * (t + l / 2);
                     if (skipClimbs && InClimb(x, z, 0.4f)) continue;
+                    if (skipFord && T.River != null && M.Hypot(x - T.River.Ford.x, z - T.River.Ford.z) < 10) continue; // у брода — пологий спуск
                     float h1 = w.HeightAt(x + nx * probe, z + nz * probe), h2 = w.HeightAt(x - nx * probe, z - nz * probe);
                     float top = MathF.Max(h1, h2) + 0.12f, bas = MathF.Min(h1, h2) - 1.2f;
                     if (top - bas < 2.2f) continue; // ровно — стенка не нужна
@@ -211,7 +212,7 @@ namespace BattleSim.Core
                     foreach (float side in new[] { -1f, 1f })
                     {
                         float o = rv.W / 2 + 0.6f;
-                        Face(a.x + nx * o * side, a.z + nz * o * side, b.x + nx * o * side, b.z + nz * o * side, 1.4f, bank, 1.8f, false);
+                        Face(a.x + nx * o * side, a.z + nz * o * side, b.x + nx * o * side, b.z + nz * o * side, 1.4f, bank, 1.8f, false, true);
                     }
                 }
             }
