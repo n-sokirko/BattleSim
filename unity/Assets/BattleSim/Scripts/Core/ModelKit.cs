@@ -452,7 +452,8 @@ namespace BattleSim.Core
         {
             switch (model)
             {
-                case "Knight": return new[] { new[] { 0, 1 }, new[] { 2, 2 } };
+                case "Knight":
+                case "Skeleton": return new[] { new[] { 0, 1 }, new[] { 2, 2 } }; // скелет Нави — атлас Knight
                 case "Barbarian": return new[] { new[] { 0, 1 }, new[] { 1, 1 }, new[] { 2, 2 } };
                 default: return new[] { new[] { 0, 1 }, new[] { 1, 1 }, new[] { 1, 2 } };
             }
@@ -495,7 +496,7 @@ namespace BattleSim.Core
                     }
             }
             if (race.SkinHue >= 0) { Cell(0, 0, race.SkinHue, race.SkinSat, race.SkinLit); Cell(1, 0, race.SkinHue, race.SkinSat, race.SkinLit); }
-            if (race.MetalHue >= 0 && model == "Knight") Cell(3, 0, race.MetalHue, race.MetalSat);
+            if (race.MetalHue >= 0 && (model == "Knight" || model == "Skeleton")) Cell(3, 0, race.MetalHue, race.MetalSat);
         }
 
         /// <summary>Лёгкий оттенок команды на всём солдате — так армии различимы издалека.</summary>

@@ -5,7 +5,7 @@ from mathutils import Vector
 from PIL import Image, ImageDraw
 
 KEEP_RUS = {'1H_Sword', 'Badge_Shield', 'Knight_Helmet', 'Knight_Cape'}
-KEEP = {'Knight': KEEP_RUS, 'Rogue_Hooded': {'Rogue_Cape'}}
+KEEP = {'Knight': KEEP_RUS, 'Rogue_Hooded': {'Rogue_Cape'}, 'Skeleton': {'1H_Sword', 'Round_Shield'}}
 # снаряжение, которое прячется, если не выбрано (как Defs.AllAttachments)
 ATTACH = {'1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
           'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat',

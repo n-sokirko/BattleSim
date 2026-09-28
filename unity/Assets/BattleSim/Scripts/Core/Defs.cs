@@ -168,7 +168,7 @@ namespace BattleSim.Core
             Keep = new[] { "1H_Axe", "Barbarian_Round_Shield", "Orc_Tusks", "Orc_Ears" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Chop" } } };
 
         // ---------------------------------------------------------------- Навь: мертвецы, упыри, колдуны, костяные всадники
-        static readonly UnitDef NavDead = new UnitDef { Key = "dead", Name = "Мертвецы", SquadName = "мертвецы", Model = "Knight", Hp = 75, Armor = 0.15f, Speed = 2.7f, Accel = 9, Radius = 0.56f, Mass = 1,
+        static readonly UnitDef NavDead = new UnitDef { Key = "dead", Name = "Мертвецы", SquadName = "мертвецы", Model = "Skeleton", Hp = 75, Armor = 0.15f, Speed = 2.7f, Accel = 9, Radius = 0.56f, Mass = 1,
             Reach = 0.7f, Dmg = 13, Cd = 1.3f, AtkTime = 0.8f, ArrowBlock = 0.4f, VsCav = 1, Charge = 1, Cols = 5, Rows = 3, Spacing = 1.45f, Fearless = true, ScaleJit = 0.06f,
             Note = "Не бегут, встают снова", Keep = new[] { "1H_Sword", "Round_Shield" },
             Anim = new AnimSet { Idle = "Idle", Run = "Walking_A", Attack = new[] { "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal" }, Cheer = "Cheer" } };
@@ -180,7 +180,7 @@ namespace BattleSim.Core
             Reach = 0.5f, Dmg = 11, Cd = 2.6f, AtkTime = 0.8f, Ranged = true, Magic = true, Raise = true, Range = 24, ArrowBlock = 0, VsCav = 1, Charge = 1, Cols = 4, Rows = 2, Spacing = 1.6f, RoutAt = 22,
             Note = "Поднимают павших", Keep = new[] { "Rogue_Cape" },
             Anim = new AnimSet { Idle = "Spellcasting", Run = "Walking_A", Attack = new[] { "Spellcast_Shoot" }, Aim = "Spellcasting", Reload = "Spellcasting", Melee = "1H_Melee_Attack_Stab", Cheer = "Spellcast_Raise" } };
-        static readonly UnitDef NavRider = new UnitDef { Key = "boneknight", Name = "Костяные всадники", SquadName = "костяные всадники", Model = "Knight", Mount = true, Hp = 190, Armor = 0.28f, Speed = 7.0f, Accel = 5, Radius = 1.1f, Mass = 3.5f,
+        static readonly UnitDef NavRider = new UnitDef { Key = "boneknight", Name = "Костяные всадники", SquadName = "костяные всадники", Model = "Skeleton", Mount = true, Hp = 190, Armor = 0.28f, Speed = 7.0f, Accel = 5, Radius = 1.1f, Mass = 3.5f,
             Reach = 0.9f, Dmg = 22, Cd = 1.3f, AtkTime = 0.7f, ArrowBlock = 0.2f, VsCav = 1, Charge = 2.0f, Cols = 3, Rows = 2, Spacing = 2.7f, Fearless = true, Terror = true,
             Note = "Натиск наводит ужас", Keep = new[] { "2H_Sword", "Knight_Helmet" },
             Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Slice_Horizontal", "1H_Melee_Attack_Slice_Diagonal" } } };
@@ -190,7 +190,7 @@ namespace BattleSim.Core
         static readonly UnitDef NavHerald = new UnitDef { Key = "herald", Name = "Вестник", Model = "Rogue_Hooded", Mount = true, Special = Special.Messenger, Hp = 45, Armor = 0,
             Speed = 11, Accel = 10, Radius = 0.9f, Mass = 2.5f, Reach = 0.5f, Dmg = 0, Cd = 99, AtkTime = 0.5f, ArrowBlock = 0, VsCav = 1, Charge = 1,
             Keep = new[] { "Rogue_Cape" }, Anim = new AnimSet() };
-        static readonly UnitDef NavLord = new UnitDef { Key = "bonelord", Name = "Костяной воевода", Model = "Knight", Mount = true, Special = Special.Captain, Hp = 240, Armor = 0.4f,
+        static readonly UnitDef NavLord = new UnitDef { Key = "bonelord", Name = "Костяной воевода", Model = "Skeleton", Mount = true, Special = Special.Captain, Hp = 240, Armor = 0.4f,
             Speed = 6.5f, Accel = 6, Radius = 1.05f, Mass = 3.5f, Reach = 0.9f, Dmg = 22, Cd = 1.2f, AtkTime = 0.7f, ArrowBlock = 0.35f, VsCav = 1, Charge = 1, Terror = true,
             Keep = new[] { "1H_Sword", "Round_Shield", "Knight_Helmet" }, Anim = new AnimSet { Attack = new[] { "1H_Melee_Attack_Slice_Horizontal" } } };
 
@@ -235,7 +235,7 @@ namespace BattleSim.Core
         static readonly UnitDef RusHero = HeroOf("bogatyr", "Богатырь", "Knight", 1.55f, new[] { "2H_Sword", "Knight_Helmet", "Knight_Cape" }, false);
         static readonly UnitDef OrcHero = With(HeroOf("troll", "Тролль", "Barbarian", 1.9f, new[] { "2H_Axe", "Orc_Tusks", "Orc_Ears" }, true),
             d => { d.Hp = 1100; d.Armor = 0.2f; d.Dmg = 46; d.Cd = 1.5f; d.KnockMul = 4.5f; d.Speed = 3.3f; d.Radius = 1.0f; d.Mass = 7; });
-        static readonly UnitDef NavHero = With(HeroOf("wight", "Умертвие", "Knight", 1.6f, new[] { "2H_Sword", "Knight_Helmet" }, false),
+        static readonly UnitDef NavHero = With(HeroOf("wight", "Умертвие", "Skeleton", 1.6f, new[] { "2H_Sword", "Knight_Helmet" }, false),
             d => { d.Hp = 800; d.Leech = 0.2f; d.Speed = 3.2f; });
         static readonly UnitDef StHero = With(HeroOf("batur", "Богатур", "Barbarian", 1.5f, new[] { "2H_Axe", "Barbarian_Hat", "Barbarian_Cape" }, true),
             d => { d.Hp = 950; d.Speed = 4.2f; });

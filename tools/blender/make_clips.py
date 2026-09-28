@@ -163,7 +163,7 @@ def bow_aim(t):
 KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE)]
 BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
 # всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
-MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS}
+MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS, 'Skeleton': [c for c in KNIGHT if c[0] == 'Rise_Undead']}
 KEEP = {'Rise_Undead': preview.KEEP_DEAD, 'Bow_Shoot': {'Rogue_Cape', 'Bow'}, 'Bow_Aim': {'Rogue_Cape', 'Bow'}}
 only = os.environ.get('ONLY')
 pick = lambda name: not only or name in only.split(',')

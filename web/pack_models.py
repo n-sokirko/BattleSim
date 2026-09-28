@@ -34,9 +34,11 @@ COMBAT_EXTRA = ["Block", "Block_Hit", "Blocking", "Block_Attack", "Hit_A", "Hit_
                 "1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Slice_Horizontal"]
 for k in ("Knight", "Barbarian", "Rogue_Hooded"):
     KEEP_ANIMS[k] = sorted(set(KEEP_ANIMS[k]) | set(COMBAT_EXTRA))
+KEEP_ANIMS["Skeleton"] = KEEP_ANIMS["Knight"]  # скелет Нави — риг и клипы Knight (tools/blender/make_meshes.py)
 
 MODELS = {
     "Knight": "chars/Knight.glb", "Barbarian": "chars/Barbarian.glb", "Rogue_Hooded": "chars/Rogue_Hooded.glb",
+    "Skeleton": "chars/Skeleton.glb",
     "Horse": "horse/Horse.glb", "White_Horse": "horse/White_Horse.glb", "arrow": "weapons/arrow.gltf",
 }
 for n in ["tree_single_A", "tree_single_B", "trees_A_large", "trees_A_medium", "trees_B_large", "trees_B_medium",
