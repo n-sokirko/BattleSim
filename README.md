@@ -49,6 +49,28 @@ python -m http.server 8766
 3. Скопируйте папку `unity/Assets/BattleSim` в `Assets/` проекта.
 4. Скрипт `Editor/BattleSimSetup.cs` сам создаст сцену `BattleSim`, материалы и настроит проект. Нажмите Play.
 
+## CI/CD
+
+GitHub Actions (`.github/workflows/`):
+
+| Что | Когда | Что делает |
+|---|---|---|
+| `CI` | каждый пуш в любую ветку | **Ядро** (`Scripts/Core`) собирается без Unity, но как в Unity: C# 9 и .NET Standard 2.1 (`tests/Core`). **Проверки ядра** (`tests/CoreChecks`): у каждого бойца каждой расы есть модель, снаряжение из `Keep` и клипы; 15 коротких боёв на всех картах — без падений, NaN, скачков за кадр, бойцов внутри препятствий и глубже брода, бой завязывается, застревания в среднем не выше 10%. Итог — таблицей в Summary запуска. **Веб**: `index.html` пересобран из `web/src`, JS без синтаксических ошибок, все модели упакованы в `web/pack`. |
+| `Pages` | после зелёного `CI` на `main` или вручную | Веб-версия на GitHub Pages: https://n-sokirko.github.io/BattleSim/ |
+| `Unity APK` | изменения в `unity/` на `main`, тег `v*` или вручную | APK для Android через [GameCI](https://game.ci) методом `BattleSimBuild.BuildAndroid`; APK — в артефактах запуска, а по тегу `v*` — ещё и в релизе. |
+
+Проверки ядра локально (нужен .NET 8 SDK):
+
+```bash
+dotnet run -c Release --project tests/CoreChecks            # всё (~30 с)
+dotnet run -c Release --project tests/CoreChecks -- models  # только модели
+```
+
+Один раз настроить (пока не сделано, `Pages` и `Unity APK` пропускаются с пометкой, а не падают):
+
+1. **Pages:** Settings → Pages → Build and deployment → Source: **GitHub Actions**. Затем Actions → Pages → Run workflow (или любой пуш в `main`).
+2. **Unity:** войдите в Unity Hub под своей учётной записью с лицензией Personal — появится файл лицензии `Unity_lic.ulf` (Windows: `C:\ProgramData\Unity\`, macOS: `/Library/Application Support/Unity/`, Linux: `~/.local/share/unity3d/Unity/`). В Settings → Secrets and variables → Actions добавьте секреты `UNITY_LICENSE` (всё содержимое файла), `UNITY_EMAIL` и `UNITY_PASSWORD`. Первая сборка идёт 30–60 минут, дальше `Library` берётся из кэша. APK подписан отладочным ключом — ставится на телефон напрямую, для Google Play нужен свой keystore.
+
 ## Модели
 
 Все модели под лицензией CC0 (можно использовать где угодно, указывать автора не обязательно):
