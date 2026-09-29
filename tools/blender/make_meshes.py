@@ -3,6 +3,12 @@
   Bow — степной лук с загнутыми концами у Rogue_Hooded, в левой руке (handslot.l);
   Orc_Tusks, Orc_Ears — клыки из нижней челюсти и острые уши у Barbarian и Rogue_Hooded (на кости head);
     уши берут цвет из клетки кожи атласа — у Орды она зелёная, как и лицо;
+  Rus_Helmet — шишак арбалетчиков Руси (Rogue_Hooded, на кости head): стальной шлем по форме головы со шпилем
+    и навершием, поверх капюшона — капюшон под ним читается как кольчужный капор;
+  Steppe_Hat — степной колпак (Barbarian, head): высокий, заломлен назад, в командном цвете, с меховой опушкой;
+  Necro_Staff — посох колдуна Нави с черепом (Rogue_Hooded, handslot.r), отвесно в позе колдовства;
+  Bow — и у Barbarian: степные лучники теперь коренастые, в колпаках, а не в капюшонах, как у всех;
+  Rogue_Cape — перенесён в клетку атласа (1,2): командный цвет — на плаще и рубахе, капюшон красит фракция;
   Skeleton.glb — скелет для Нави: скелет рига, клипы и снаряжение Knight, а тело — костяк
     (череп с глазницами, рёбра, позвоночник, таз, кости рук и ног, лохмотья командного цвета),
     каждая часть жёстко привязана к своему суставу. Кость — в клетке кожи: Навь красит её в цвет старой кости.
@@ -260,17 +266,6 @@ def make_skeleton():
     print('saved', out, 'костяк:', len(idx) // 3, 'треугольников')
 
 
-def aim_handslot_world(glb_path):
-    """Мир handslot.l (glTF, пространство узла Rig) в позе Bow_Aim — через те же функции, что и клип."""
-    os.environ['ONLY'] = 'none'
-    g = runpy.run_path(os.path.join(here, 'make_clips.py'))
-    G = g['bow_aim'].__globals__
-    G['load']('Rogue_Hooded', glb_path)
-    G['bow_aim'](0.0)
-    rig = G['rig']
-    return rig.pose_world()[rig.g.by_name['handslot.l']]
-
-
 def add_mesh_node(g, name, parent, trs, geom, material):
     pos, nrm, uv, idx = geom
     acc = lambda a, typ: g._add_accessor(a, typ)
@@ -306,11 +301,122 @@ def add_head_parts(model):
     print('saved', src, 'Orc_Tusks/Orc_Ears')
 
 
-def main():
-    make_skeleton()
-    for model in ('Barbarian', 'Rogue_Hooded'): add_head_parts(model)
-    src = os.path.abspath(os.path.join(CHARS, 'Rogue_Hooded.glb'))
-    hs = aim_handslot_world(src)
+# ---------------------------------------------------------------- снаряжение фракций: у каждой свой силуэт
+def cell(cx, cy, fv=0.5):
+    """UV внутри клетки атласа 8×4 (fv — доля высоты клетки сверху: у клеток вертикальный градиент)."""
+    return ((cx + 0.5) / 8, (cy + fv) / 4)
+
+
+def head_mesh(g):
+    head = [n for n in g.nodes if n.get('mesh') is not None and n.get('name', '').endswith(('_Head', '_Head_Hooded'))][0]
+    P = np.concatenate([g.acc(p['attributes']['POSITION']) for p in g.j['meshes'][head['mesh']]['primitives']])
+    return head, P
+
+
+def shell(P, cx, cz, yb, apex, uv, tris, grow=1.06, n_ang=12, n_lev=6, n_top=4, bulge=0.8):
+    """Оболочка по форме головы: кольца от yb до макушки повторяют голову с зазором (grow) по секторам углов,
+    выше макушки сходятся к вершине apex (шпиль шлема, верх колпака; вершина может быть сдвинута назад).
+    bulge < 1 — выпуклый купол к вершине, 1 — прямой конус. Треугольники — в tris; возвращает радиус основания."""
+    ang = np.arctan2(P[:, 2] - cz, P[:, 0] - cx); rad = np.hypot(P[:, 0] - cx, P[:, 2] - cz)
+    y1 = P[:, 1].max(); h = y1 - P[:, 1].min()
+    ytop = y1 - 0.04 * h
+    R = []
+    for li in range(n_lev + 1):
+        y = yb + (ytop - yb) * li / n_lev
+        slab = np.abs(P[:, 1] - y) < max(0.06 * h, (ytop - yb) / n_lev)
+        rr = []
+        for k in range(n_ang):
+            a0 = -np.pi + 2 * np.pi * k / n_ang
+            sec = slab & (np.abs((ang - a0 + np.pi) % (2 * np.pi) - np.pi) < np.pi / n_ang * 1.5)
+            rr.append(rad[sec].max() if sec.any() else 0.0)
+        R.append(rr)
+    R = np.array(R)
+    R = np.maximum.accumulate(R[::-1], axis=0)[::-1]            # ниже — не уже, чем выше: без «талии»
+    R = np.maximum(R, R.max() * 0.35) * grow
+    ax, ay, az = apex
+    circle = lambda j: (np.cos(-np.pi + 2 * np.pi * j / n_ang), np.sin(-np.pi + 2 * np.pi * j / n_ang))
+    pts = [[np.array([cx + circle(j)[0] * R[li, j], yb + (ytop - yb) * li / n_lev, cz + circle(j)[1] * R[li, j]]) for j in range(n_ang)]
+           for li in range(n_lev + 1)]
+    for ti in range(1, n_top):   # над макушкой — к вершине
+        f = ti / n_top; k = (1 - f) ** bulge
+        ox, oz, y = cx + (ax - cx) * f, cz + (az - cz) * f, ytop + (ay - ytop) * f
+        pts.append([np.array([ox + circle(j)[0] * R[-1, j] * k, y, oz + circle(j)[1] * R[-1, j] * k]) for j in range(n_ang)])
+    for li in range(len(pts) - 1):
+        for j in range(n_ang):
+            a0, a1 = pts[li][j], pts[li][(j + 1) % n_ang]; b0, b1 = pts[li + 1][j], pts[li + 1][(j + 1) % n_ang]
+            tris.append((a0, b1, a1, uv)); tris.append((a0, b0, b1, uv))
+    top = np.array(apex)
+    for j in range(n_ang):
+        tris.append((pts[-1][j], top, pts[-1][(j + 1) % n_ang], uv))
+    return float(R[0].max())
+
+
+def head_frame(P):
+    y0, y1 = P[:, 1].min(), P[:, 1].max()
+    return y0, y1, y1 - y0, (P[:, 0].min() + P[:, 0].max()) / 2, (P[:, 2].min() + P[:, 2].max()) / 2
+
+
+def rus_helmet(g):
+    """Шишак: стальной шлем по голове, сверху сходится в шпиль с навершием, тёмный обруч по низу —
+    поверх капюшона (капюшон под ним читается как кольчужный капор)."""
+    _, P = head_mesh(g)
+    y0, y1, h, cx, cz = head_frame(P)
+    yb = y0 + 0.62 * h
+    apex = (cx, y1 + 0.45 * h, cz)
+    t = []
+    r = shell(P, cx, cz, yb, apex, cell(3, 0, 0.3), t, grow=1.06, bulge=0.75)
+    rod(t, (cx, yb - 0.04 * h, cz), (cx, yb + 0.07 * h, cz), r * 1.02, cell(4, 0), sides=12)          # обруч
+    rod(t, (cx, apex[1] - 0.04 * h, cz), (cx, apex[1] + 0.1 * h, cz), 0.03 * h, cell(3, 0, 0.3), sides=5)  # навершие
+    sphere(t, (cx, apex[1] + 0.12 * h, cz), 0.045 * h, cell(4, 0), seg=6, rings=4)
+    return to_arrays(t)
+
+
+def steppe_hat(g):
+    """Степной колпак: по голове, кверху сужается и заламывается назад, с толстой меховой опушкой; сам колпак —
+    в командном цвете."""
+    _, P = head_mesh(g)
+    y0, y1, h, cx, cz = head_frame(P)
+    yb = y0 + 0.64 * h
+    apex = (cx, y1 + 0.55 * h, cz - 0.28 * h)
+    t = []
+    r = shell(P, cx, cz, yb, apex, cell(1, 1, 0.35), t, grow=1.06, bulge=0.9)
+    rod(t, (cx, yb - 0.1 * h, cz), (cx, yb + 0.1 * h, cz), r * 1.12, cell(7, 0, 0.45), sides=12)          # меховая опушка
+    sphere(t, apex, 0.07 * h, cell(7, 0, 0.45), seg=6, rings=4)                                         # кисть
+    return to_arrays(t)
+
+
+def necro_staff():
+    """Посох колдуна Нави в своих осях: Y — вдоль посоха, хват в нуле; сверху — череп с глазницами и рога-сучья."""
+    W, B, D = cell(6, 1, 0.6), cell(0, 2, 0.3), cell(2, 0)
+    t = []
+    pts = [(0.0, -0.78, 0.0), (0.01, -0.3, 0.005), (-0.012, 0.25, 0.0), (0.008, 0.72, -0.01), (0.0, 0.86, 0.0)]
+    for a, b in zip(pts, pts[1:]): rod(t, a, b, 0.028, W, sides=6)
+    for y in (-0.05, 0.08): rod(t, (0, y, 0), (0, y + 0.07, 0), 0.036, cell(5, 1), sides=6)                 # обмотка у хвата
+    for sx in (1, -1): cone(t, (sx * 0.02, 0.82, 0), (sx * 0.9, 1, 0.1), 0.02, 0.2, W, sides=4)            # сучья-рога
+    sk = np.array((0, 0.98, 0.0))
+    sphere(t, sk, (0.1, 0.095, 0.1), B, seg=8, rings=6)
+    for sx in (1, -1): sphere(t, sk + np.array([sx * 0.038, 0.0, 0.08]), 0.026, D, seg=5, rings=3)       # глазницы
+    box(t, sk + np.array([0, -0.08, 0.035]), (0.1, 0.045, 0.1), B)                                        # челюсть
+    return to_arrays(t)
+
+
+def pose_bone_world(model, glb_path, fn_name, bone, t=0.0):
+    """Мир кости (glTF, пространство узла Rig) в позе функции fn_name из make_clips (или в клипе KayKit, если это имя клипа)."""
+    os.environ['ONLY'] = 'none'
+    g = runpy.run_path(os.path.join(here, 'make_clips.py'))
+    G = g['bow_aim'].__globals__
+    G['load'](model, glb_path)
+    rig = G['rig']
+    if fn_name in g: g[fn_name](t)
+    else:
+        import posekit as pk
+        base = pk.capture(rig, fn_name, t); pk.detach(rig); pk.apply_basis(rig, base)
+    return rig.pose_world()[rig.g.by_name[bone]]
+
+
+def attach_bow(model):
+    src = os.path.abspath(os.path.join(CHARS, model + '.glb'))
+    hs = pose_bone_world(model, src, 'bow_aim', 'handslot.l')
     # желаемая ориентация лука в мире: вертикально (Y), к цели (+Z), верх чуть к правой руке (наклон 12°)
     cant = math.radians(-12)
     want = np.eye(4)
@@ -318,10 +424,67 @@ def main():
     want[:3, 3] = hs[:3, 3]
     local = np.linalg.inv(hs) @ want
     g = glbkit.Glb(src)
-    mat = g.j['meshes'][g.nodes[g.by_name['2H_Crossbow']]['mesh']]['primitives'][0]['material']
-    add_mesh_node(g, 'Bow', 'handslot.l', glbkit.decompose(local), bow_geometry(), mat)
+    weapon = '2H_Crossbow' if '2H_Crossbow' in g.by_name else '1H_Axe'
+    mat = g.j['meshes'][g.nodes[g.by_name[weapon]]['mesh']]['primitives'][0]['material']
+    if model == 'Barbarian':  # атлас Барбариана: дерево и обмотка — в других клетках, чем у Rogue
+        pos, nrm, uv, idx = bow_geometry()
+        uv = np.where(np.isclose(uv[:, :1], UV_WOOD[0]), np.array(cell(6, 0, 0.5)), np.where(np.isclose(uv[:, :1], UV_GRIP[0]), np.array(cell(5, 1)), np.array(cell(0, 2, 0.2))))
+        geom = (pos, nrm, uv, idx)
+    else:
+        geom = bow_geometry()
+    add_mesh_node(g, 'Bow', 'handslot.l', glbkit.decompose(local), geom, mat)
     g.save(src)
-    print('saved', src, 'Bow:', len(bow_geometry()[3]) // 3, 'треугольников')
+    print('saved', src, 'Bow:', len(geom[3]) // 3, 'треугольников')
+
+
+def attach_head(model, name, geom_fn):
+    src = os.path.abspath(os.path.join(CHARS, model + '.glb'))
+    g = glbkit.Glb(src)
+    rw = rest_world(g)
+    local = np.linalg.inv(rw[g.by_name['head']])
+    head, _ = head_mesh(g)
+    mat = g.j['meshes'][head['mesh']]['primitives'][0].get('material', 0)
+    geom = geom_fn(g)
+    add_mesh_node(g, name, 'head', glbkit.decompose(local), geom, mat)
+    g.save(src)
+    print('saved', src, name, len(geom[3]) // 3, 'треугольников')
+
+
+def attach_staff():
+    src = os.path.abspath(os.path.join(CHARS, 'Rogue_Hooded.glb'))
+    hs = pose_bone_world('Rogue_Hooded', src, 'Spellcasting', 'handslot.r', 0.3)
+    want = np.eye(4); want[:3, 3] = hs[:3, 3]           # в позе колдовства посох стоит отвесно, хват — в ладони
+    local = np.linalg.inv(hs) @ want
+    g = glbkit.Glb(src)
+    mat = g.j['meshes'][g.nodes[g.by_name['2H_Crossbow']]['mesh']]['primitives'][0]['material']
+    geom = necro_staff()
+    add_mesh_node(g, 'Necro_Staff', 'handslot.r', glbkit.decompose(local), geom, mat)
+    g.save(src)
+    print('saved', src, 'Necro_Staff', len(geom[3]) // 3, 'треугольников')
+
+
+def cape_to_team_cell():
+    """Плащ Rogue — в свою клетку атласа (1,2): командный цвет на плаще и рубахе, а капюшон (1,1) красит фракция."""
+    src = os.path.abspath(os.path.join(CHARS, 'Rogue_Hooded.glb'))
+    g = glbkit.Glb(src)
+    for p in g.j['meshes'][g.nodes[g.by_name['Rogue_Cape']]['mesh']]['primitives']:
+        uv = g.acc(p['attributes']['TEXCOORD_0']).copy()
+        if (uv[:, 1] >= 0.5).all(): continue       # уже перенесён
+        uv[:, 1] += 0.25
+        p['attributes']['TEXCOORD_0'] = g._add_accessor(uv, 'VEC2')
+    g.save(src)
+    print('saved', src, 'Rogue_Cape -> клетка (1,2)')
+
+
+def main():
+    make_skeleton()
+    for model in ('Barbarian', 'Rogue_Hooded'): add_head_parts(model)
+    attach_bow('Rogue_Hooded')
+    attach_bow('Barbarian')          # степные лучники — коренастые, в колпаках, а не в капюшонах
+    attach_head('Rogue_Hooded', 'Rus_Helmet', rus_helmet)
+    attach_head('Barbarian', 'Steppe_Hat', steppe_hat)
+    attach_staff()
+    cape_to_team_cell()
 
 
 if __name__ == '__main__':
