@@ -157,6 +157,21 @@ namespace BattleSim
             yield return new WaitForSeconds(0.8f);
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0overview.png"));
             yield return new WaitForSeconds(0.6f);
+            if (World.Town != null)
+            { // крепость вблизи: лестница на стену, башня, донжон
+                var fort = World.Town.Fort;
+                var shotsAt = new System.Collections.Generic.List<(float x, float z, float yaw, float pitch, float dist, string name)>();
+                if (fort.Ramps.Count > 0) { var r0 = fort.Ramps[fort.Ramps.Count / 2]; shotsAt.Add(((r0.Ax + r0.Bx) / 2, (r0.Az + r0.Bz) / 2, 0.8f, 30 * M.DEG, 22, "castle_ramp")); }
+                foreach (var tw in fort.Towers) if (!tw.Keep && tw.S >= 4.5f) { shotsAt.Add((tw.X, tw.Z, 2.4f, 22 * M.DEG, 26, "castle_tower")); break; }
+                foreach (var tw in fort.Towers) if (tw.Keep) { shotsAt.Add((tw.X, tw.Z, 3.6f, 26 * M.DEG, 40, "castle_keep")); break; }
+                foreach (var v in shotsAt)
+                {
+                    Rig.LookAt(v.x, v.z, v.yaw, v.pitch, v.dist, true);
+                    yield return new WaitForSeconds(0.8f);
+                    ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{tag}_{v.name}.png"));
+                    yield return new WaitForSeconds(0.4f);
+                }
+            }
             StartBattle();
             Speed = 2;
             Perf.Clear();

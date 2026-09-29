@@ -45,6 +45,37 @@ namespace BattleSim.Core
         public void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) =>
             Box(Mat4.Translation(x, y, z) * Mat4.RotationY(yaw) * Mat4.Compose(0, 0, 0, 0, 0, 0, 1, sx, sy, sz), c);
 
+        /// <summary>Призма (цилиндр из sides граней) от y0 до y0+h: низ радиуса r0, верх — r1 (0 — конус).</summary>
+        public void Prism(float cx, float y0, float cz, float r0, float r1, float h, int sides, Rgb c)
+        {
+            float y1 = y0 + h, slope = (r0 - r1) / MathF.Max(0.01f, h);
+            for (int i = 0; i < sides; i++)
+            {
+                float a0 = i * M.PI * 2 / sides, a1 = (i + 1) * M.PI * 2 / sides, am = (a0 + a1) / 2;
+                float nx = MathF.Cos(am), nz = MathF.Sin(am), nl = M.Hypot(1, slope);
+                int b = pos.Count / 3;
+                void V(float x, float y, float z) { pos.Add(x); pos.Add(y); pos.Add(z); nrm.Add(nx / nl); nrm.Add(slope / nl); nrm.Add(nz / nl); col.Add(c.r); col.Add(c.g); col.Add(c.b); }
+                V(cx + MathF.Cos(a0) * r0, y0, cz + MathF.Sin(a0) * r0);
+                V(cx + MathF.Cos(a1) * r0, y0, cz + MathF.Sin(a1) * r0);
+                V(cx + MathF.Cos(a1) * r1, y1, cz + MathF.Sin(a1) * r1);
+                V(cx + MathF.Cos(a0) * r1, y1, cz + MathF.Sin(a0) * r1);
+                idx.Add(b); idx.Add(b + 2); idx.Add(b + 1);
+                idx.Add(b); idx.Add(b + 3); idx.Add(b + 2);
+            }
+            if (r1 > 0.01f)
+            { // крышка сверху
+                int b = pos.Count / 3;
+                pos.Add(cx); pos.Add(y1); pos.Add(cz); nrm.Add(0); nrm.Add(1); nrm.Add(0); col.Add(c.r); col.Add(c.g); col.Add(c.b);
+                for (int i = 0; i <= sides; i++)
+                {
+                    float a = i * M.PI * 2 / sides;
+                    pos.Add(cx + MathF.Cos(a) * r1); pos.Add(y1); pos.Add(cz + MathF.Sin(a) * r1);
+                    nrm.Add(0); nrm.Add(1); nrm.Add(0); col.Add(c.r); col.Add(c.g); col.Add(c.b);
+                }
+                for (int i = 0; i < sides; i++) { idx.Add(b); idx.Add(b + 2 + i); idx.Add(b + 1 + i); }
+            }
+        }
+
         public MeshData Build() => new MeshData { Pos = pos.ToArray(), Nrm = nrm.ToArray(), Col = col.ToArray(), Idx = idx.ToArray() };
     }
 
@@ -78,65 +109,126 @@ namespace BattleSim.Core
             return m;
         }
 
-        /// <summary>Каменная кладка: стены с зубцами, башни, лестницы и арки ворот — один меш.</summary>
+        /// <summary>Пятна тона кладки: плавно по месту (по 3–4 м), а не случайный оттенок каждого блока — без «полосатости».</summary>
+        static float Tone(float x, float z)
+        {
+            int ix = (int)MathF.Floor(x / 3.5f), iz = (int)MathF.Floor(z / 3.5f);
+            uint h = (uint)(ix * 73856093) ^ (uint)(iz * 19349663);
+            h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
+            return 0.955f + 0.09f * (h & 1023) / 1023f;
+        }
+
+        /// <summary>
+        /// Крепость: светлый камень на тёмном цоколе, по верху стен — плита боевого хода и парапет с зубцами,
+        /// у башен — угловые башенки с остроконечными крышами, лестницы — ровные ступени с каменными бортами.
+        /// Все высоты — из тех же профилей, по которым ходят бойцы (FortWall.Top, FortRamp.TopAt).
+        /// </summary>
         public static MeshData Fortress(World w)
         {
             if (w.Town == null) return null;
             var F = w.Town.Fort;
             var bb = new BoxBuilder();
             var R = new Rng(4242);
-            Rgb stone = Rgb.Hex(0x857d70), dark = Rgb.Hex(0x6c655b);
-            void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * M.Lerp(0.88f, 1.08f, R.F()));
+            Rgb stone = Rgb.Hex(0x9fa3a6), plinth = Rgb.Hex(0x74787b), cap = Rgb.Hex(0xb9bdbf), tower = Rgb.Hex(0x959a9d); // холодный серый: на закате не «персиковый»
+            Rgb roof = Rgb.Hex(0xb04a3a), roofDark = Rgb.Hex(0x8e3a2e), wood = Rgb.Hex(0x6b4a2e), gateDark = Rgb.Hex(0x57524b);
+            void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * Tone(x, z));
             foreach (var wl in F.Walls)
             {
                 float len = M.Hypot(wl.Bx - wl.Ax, wl.Bz - wl.Az), ux = (wl.Bx - wl.Ax) / len, uz = (wl.Bz - wl.Az) / len, yaw = MathF.Atan2(ux, uz) - M.PI / 2;
                 // верх — профиль боевого хода (тот же, по которому ходят), кусками по 1 м, чтобы всходы к башням были ровными
                 float Top(float t) => wl.Top != null ? wl.TopAt(t) : w.HeightAt(wl.Ax + ux * t, wl.Az + uz * t) + wl.H;
+                float ox = wl.Out.x, oz = wl.Out.z;
                 for (float t = 0; t < len; t += 1)
                 {
                     float l = MathF.Min(1.03f, len - t + 0.03f), x = wl.Ax + ux * (t + l / 2), z = wl.Az + uz * (t + l / 2), g = w.HeightAt(x, z);
-                    float bas = MathF.Min(g, MathF.Min(w.HeightAt(x + wl.Out.x * wl.W / 2, z + wl.Out.z * wl.W / 2), w.HeightAt(x - wl.Out.x * wl.W / 2, z - wl.Out.z * wl.W / 2))) - 1.5f, top = Top(t + l / 2);
-                    Box(x, (bas + top) / 2, z, l, top - bas, wl.W, yaw, stone);
+                    float bas = MathF.Min(g, MathF.Min(w.HeightAt(x + ox * wl.W / 2, z + oz * wl.W / 2), w.HeightAt(x - ox * wl.W / 2, z - oz * wl.W / 2))) - 1.5f, top = Top(t + l / 2);
+                    Box(x, (bas + top - 0.14f) / 2, z, l, top - 0.14f - bas, wl.W, yaw, stone);                  // тело стены
+                    float pl = MathF.Min(top - 1.2f, g + 1.3f);
+                    if (pl > bas + 0.3f) Box(x, (bas + pl) / 2, z, l, pl - bas, wl.W + 0.5f, yaw, plinth);       // цоколь шире и темнее
+                    Box(x, top - 0.07f, z, l, 0.14f, wl.W, yaw, cap);                                            // плита боевого хода
+                    // парапет по внешнему краю — сплошной, зубцы на нём
+                    Box(x + ox * (wl.W / 2 - 0.2f), top + 0.25f, z + oz * (wl.W / 2 - 0.2f), l, 0.5f, 0.4f, yaw, stone);
+                    // пояс-карниз снаружи под боевым ходом
+                    Box(x + ox * (wl.W / 2 + 0.08f), top - 0.55f, z + oz * (wl.W / 2 + 0.08f), l, 0.22f, 0.3f, yaw, cap);
                 }
                 for (float t = 0.7f; t < len - 0.3f; t += 1.45f)
                 {
-                    float x = wl.Ax + ux * t + wl.Out.x * (wl.W / 2 - 0.28f), z = wl.Az + uz * t + wl.Out.z * (wl.W / 2 - 0.28f);
-                    Box(x, Top(t) + 0.55f, z, 0.75f, 1.1f, 0.55f, yaw, stone);
+                    float x = wl.Ax + ux * t + ox * (wl.W / 2 - 0.2f), z = wl.Az + uz * t + oz * (wl.W / 2 - 0.2f);
+                    Box(x, Top(t) + 0.8f, z, 0.72f, 0.6f, 0.4f, yaw, stone);
                 }
             }
             foreach (var t in F.Towers)
             {
                 float g = w.HeightAt(t.X, t.Z), bas = MathF.Min(g, MathF.Min(w.HeightAt(t.X + t.S / 2, t.Z + t.S / 2), w.HeightAt(t.X - t.S / 2, t.Z - t.S / 2))) - 1.5f, top = g + t.H;
-                Box(t.X, (bas + top) / 2, t.Z, t.S, top - bas, t.S, 0, dark);
-                if (t.Keep)
-                { // донжон: пояс и угловая башенка с дозорной площадкой
-                    Box(t.X, g + t.H * 0.55f, t.Z, t.S + 0.4f, 0.5f, t.S + 0.4f, 0, stone);
-                    float cx = t.X + t.S / 2 - 1.6f, cz = t.Z - t.S / 2 + 1.6f;
-                    Box(cx, top + 2.2f, cz, 3.2f, 4.4f, 3.2f, 0, dark);
-                    Box(cx, top + 4.6f, cz, 3.8f, 0.4f, 3.8f, 0, stone);
-                }
-                Box(t.X, top - 0.25f, t.Z, t.S + 0.5f, 0.5f, t.S + 0.5f, 0, stone);
+                Box(t.X, (bas + top) / 2, t.Z, t.S, top - bas, t.S, 0, tower);
+                Box(t.X, (bas + g + 1.4f) / 2, t.Z, t.S + 0.6f, g + 1.4f - bas, t.S + 0.6f, 0, plinth);     // цоколь
+                Box(t.X, top - 0.8f, t.Z, t.S + 0.35f, 0.25f, t.S + 0.35f, 0, cap);                         // пояс под верхом
+                Box(t.X, top - 0.07f, t.Z, t.S + 0.5f, 0.14f, t.S + 0.5f, 0, cap);                          // площадка
+                // парапет кольцом и зубцы
                 foreach (var (ex, ez) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                {
+                    float px = t.X + ex * (t.S / 2 + 0.05f), pz = t.Z + ez * (t.S / 2 + 0.05f);
+                    Box(px, top + 0.25f, pz, ez != 0 ? t.S + 0.5f : 0.4f, 0.5f, ex != 0 ? t.S + 0.5f : 0.4f, 0, tower);
                     for (int k = -2; k <= 2; k++)
                     {
                         float off = k * (t.S / 5);
-                        Box(t.X + ex * (t.S / 2) + ez * off, top + 0.55f, t.Z + ez * (t.S / 2) + ex * off, ez != 0 ? 0.7f : 0.5f, 1.1f, ex != 0 ? 0.7f : 0.5f, 0, stone);
+                        Box(px + ez * off, top + 0.8f, pz + ex * off, ez != 0 ? 0.7f : 0.42f, 0.6f, ex != 0 ? 0.7f : 0.42f, 0, tower);
                     }
+                }
+                if (t.Keep)
+                { // донжон: пояс посередине и башенка под высокой остроконечной крышей
+                    Box(t.X, g + t.H * 0.55f, t.Z, t.S + 0.4f, 0.4f, t.S + 0.4f, 0, cap);
+                    float cx = t.X + t.S / 2 - 1.6f, cz = t.Z - t.S / 2 + 1.6f;
+                    bb.Prism(cx, top, cz, 1.7f, 1.7f, 4.2f, 8, tower * Tone(cx, cz));
+                    bb.Prism(cx, top + 4.2f, cz, 2.1f, 0, 3.6f, 8, roof);
+                }
+                else if (t.S >= 5f)
+                { // башенки-бартизаны только на внешних углах (от центра города наружу), под конусами крыш — силуэт замка
+                    float r = MathF.Min(0.95f, t.S * 0.16f), dl = M.Hypot(t.X, t.Z);
+                    float dx = dl > 1 ? t.X / dl : 0, dz = dl > 1 ? t.Z / dl : 1;
+                    foreach (var (sx, sz) in new[] { (1, 1), (-1, 1), (1, -1), (-1, -1) })
+                    {
+                        if ((sx * dx + sz * dz) / 1.414f < 0.35f) continue;
+                        float bx = t.X + sx * (t.S / 2 + r * 0.35f), bz = t.Z + sz * (t.S / 2 + r * 0.35f);
+                        bb.Prism(bx, top - 2.2f, bz, r * 0.55f, r, 0.9f, 8, cap);                             // кронштейн
+                        bb.Prism(bx, top - 1.3f, bz, r, r, 2.9f, 8, tower * Tone(bx, bz));
+                        bb.Prism(bx, top + 1.6f, bz, r + 0.25f, 0, 1.9f, 8, (sx + sz) % 4 == 0 ? roof : roofDark);
+                    }
+                }
             }
             foreach (var r in F.Ramps)
             {
                 float len = M.Hypot(r.Bx - r.Ax, r.Bz - r.Az), ux = (r.Bx - r.Ax) / len, uz = (r.Bz - r.Az) / len, yaw = MathF.Atan2(ux, uz) - M.PI / 2;
+                float nx = -uz, nz = ux;
                 int n = (int)MathF.Ceiling(len / 0.45f);
                 for (int k = 0; k < n; k++)
                 {
                     float t = (k + 0.5f) / n, x = r.Ax + ux * len * t, z = r.Az + uz * len * t, g = w.HeightAt(x, z), top = r.TopAt(t);
-                    Box(x, (top + g - 0.6f) / 2, z, len / n + 0.02f, top - g + 0.6f, r.W, yaw, stone);
+                    // ступени ровного светлого камня, чуть темнее через одну — видно, что это лестница
+                    Box(x, (top + g - 0.6f) / 2, z, len / n + 0.02f, top - g + 0.6f, r.W, yaw, (k & 1) == 0 ? cap : cap * 0.93f);
+                    // каменные борта по обе стороны — невысокий парапет вдоль марша (на верхней площадке их нет:
+                    // она вровень с боевым ходом, с неё сходят вбок)
+                    if (len * t > len - MathF.Min(2.5f, len * 0.25f) - 0.3f) continue;
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        float bx = x + nx * side * (r.W / 2 + 0.22f), bz = z + nz * side * (r.W / 2 + 0.22f), bg = w.HeightAt(bx, bz);
+                        Box(bx, (top + 0.55f + bg - 0.6f) / 2, bz, len / n + 0.02f, top + 0.55f - bg + 0.6f, 0.44f, yaw, stone);
+                    }
                 }
             }
             foreach (var a in F.Arches)
             {
                 float g = w.HeightAt(a.X, a.Z), yaw = MathF.Atan2(a.Ux, a.Uz) - M.PI / 2;
-                Box(a.X, g + a.H - 0.9f, a.Z, a.Citadel ? 7.2f : 8.6f, 1.8f, a.W, yaw, dark); // арка над воротами
+                float span = a.Citadel ? 7.2f : 8.6f;
+                Box(a.X, g + a.H - 0.9f, a.Z, span, 1.8f, a.W, yaw, gateDark);              // арка над воротами
+                Box(a.X, g + a.H - 1.9f, a.Z, span - 0.6f, 0.25f, a.W + 0.3f, yaw, cap);   // замковый пояс
+                // створки ворот распахнуты к стенам проёма (дерево), проход свободен
+                float px = MathF.Cos(yaw), pz = -MathF.Sin(yaw);
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    float gx = a.X + px * side * (span / 2 - 0.25f), gz = a.Z + pz * side * (span / 2 - 0.25f);
+                    Box(gx, g + (a.H - 1.8f) / 2, gz, 0.22f, a.H - 1.8f, a.W * 0.8f, yaw, wood);
+                }
             }
             Terraces(w, bb, R);
             return bb.Count > 0 ? bb.Build() : null;
@@ -149,8 +241,8 @@ namespace BattleSim.Core
         static void Terraces(World w, BoxBuilder bb, Rng R)
         {
             var T = w.Town;
-            Rgb wall = Rgb.Hex(0x8a8174), bank = Rgb.Hex(0x766f65), cap = Rgb.Hex(0x9d958a);
-            void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * M.Lerp(0.88f, 1.08f, R.F()));
+            Rgb wall = Rgb.Hex(0x93979a), bank = Rgb.Hex(0x7c8083), cap = Rgb.Hex(0xb0b4b6);
+            void Box(float x, float y, float z, float sx, float sy, float sz, float yaw, Rgb c) => bb.Box(x, y, z, sx, sy, sz, yaw, c * Tone(x, z));
             bool InClimb(float x, float z, float pad)
             {
                 foreach (var cl in T.Climbs)
