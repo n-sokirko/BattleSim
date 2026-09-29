@@ -8,6 +8,14 @@ namespace BattleSim.EditorTools
     {
         const string ScenePath = "Assets/BattleSim/BattleSim.unity";
 
+        /// <summary>Куда класть сборку: -customBuildPath из командной строки (так его передаёт GameCI в CI) или путь по умолчанию.</summary>
+        static string OutPath(string fallback)
+        {
+            var args = System.Environment.GetCommandLineArgs();
+            int i = System.Array.IndexOf(args, "-customBuildPath");
+            return i >= 0 && i + 1 < args.Length && args[i + 1].Length > 0 && !args[i + 1].StartsWith("-") ? args[i + 1] : fallback;
+        }
+
         [MenuItem("BattleSim/Собрать для Windows", priority = 20)]
         public static void BuildWindows()
         {
@@ -15,7 +23,7 @@ namespace BattleSim.EditorTools
             var r = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
-                locationPathName = "Builds/Windows/Secha.exe",
+                locationPathName = OutPath("Builds/Windows/Secha.exe"),
                 target = BuildTarget.StandaloneWindows64,
                 options = BuildOptions.None,
             });
@@ -33,7 +41,7 @@ namespace BattleSim.EditorTools
             var r = BuildPipeline.BuildPlayer(new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
-                locationPathName = "Builds/Android/Secha.apk",
+                locationPathName = OutPath("Builds/Android/Secha.apk"),
                 target = BuildTarget.Android,
                 options = BuildOptions.None,
             });

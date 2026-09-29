@@ -1,0 +1,92 @@
+# Сборка APK для Android в Unity (GameCI): при изменениях в unity/ на main, по тегу v* (с релизом) или вручную.
+# Нужна лицензия Unity в секретах репозитория: UNITY_LICENSE (содержимое Unity_lic.ulf), UNITY_EMAIL, UNITY_PASSWORD.
+# Пока секретов нет, сборка пропускается с пометкой, а не падает.
+name: Unity APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'unity/**'
+      - '.github/workflows/unity.yml'
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: unity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  license:
+    name: Лицензия Unity есть?
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -n "$UNITY_LICENSE" ] && [ -n "$UNITY_EMAIL" ] && [ -n "$UNITY_PASSWORD" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Нет секретов UNITY_LICENSE, UNITY_EMAIL, UNITY_PASSWORD — сборка APK пропущена (см. README, раздел CI/CD)."
+          fi
+
+  android:
+    name: APK для Android
+    needs: license
+    if: needs.license.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write # релиз по тегу
+    steps:
+      # образ Unity с Android SDK — больше 10 ГБ: освобождаем место от ненужного на раннере
+      - name: Место на диске
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: unity/Library
+          key: Library-Android-${{ hashFiles('unity/Assets/**', 'unity/Packages/**', 'unity/ProjectSettings/**') }}
+          restore-keys: |
+            Library-Android-
+
+      # сборка нашим методом (шейдеры в сборку, ARM64, IL2CPP); путь к APK он берёт из -customBuildPath
+      - uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: unity
+          targetPlatform: Android
+          buildMethod: BattleSim.EditorTools.BattleSimBuild.BuildAndroid
+          buildName: Secha
+          versioning: None
+          androidExportType: androidPackage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Secha-apk-${{ github.sha }}
+          path: build/Android/Secha.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Релиз с APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/Android/Secha.apk --repo "$GITHUB_REPOSITORY" --title "Сеча $GITHUB_REF_NAME" --generate-notes

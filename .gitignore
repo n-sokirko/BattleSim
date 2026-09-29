@@ -3,6 +3,10 @@ web/local.html
 web/publish_files.json
 __pycache__/
 
+# Проверки ядра (.NET): сборка
+tests/**/bin/
+tests/**/obj/
+
 # Unity (когда проект появится в unity/)
 unity/[Ll]ibrary/
 unity/[Tt]emp/
