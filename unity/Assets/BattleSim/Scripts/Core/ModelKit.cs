@@ -325,11 +325,18 @@ namespace BattleSim.Core
             var model = new SkinnedModel { Doc = doc, Mesh = merged, BoneNodes = skin.Joints, BoneInv = boneInv, Bind = refBind, Height = targetHeight };
             for (int i = 0, v = 0; i < parts.Count; v += parts[i].VertexCount, i++) model.Parts.Add((names[i], kinds[i], v, parts[i].VertexCount));
             model.Probe = GroundProbe(merged, model.Parts);
-            // Масштаб: заданный рост, ступни на нуле — по позе покоя с поправкой пропорций
-            Skin(model, pose).Bounds(out var mn, out var mx);
-            float k = targetHeight / (mx.y - mn.y);
-            model.Root = Mat4.Translation(0, -mn.y * k, 0) * Mat4.Scale(k);
-            model.Min = new V3(mn.x * k, 0, mn.z * k); model.Max = new V3(mx.x * k, (mx.y - mn.y) * k, mx.z * k);
+            // Масштаб: заданный рост, ступни на нуле — по позе покоя с поправкой пропорций. Рост — по телу, без шлемов
+            // и шапок: высокий степной колпак или шишак не должен делать бойца ниже соседей
+            var rest = Skin(model, pose);
+            rest.Bounds(out var mn, out var mx);
+            float by0 = float.PositiveInfinity, by1 = float.NegativeInfinity;
+            foreach (var (_, kind, start, count) in model.Parts)
+                if (kind == 0)
+                    for (int v = start; v < start + count; v++) { float y = rest.Pos[v * 3 + 1]; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+            if (by1 <= by0) { by0 = mn.y; by1 = mx.y; }
+            float k = targetHeight / (by1 - by0);
+            model.Root = Mat4.Translation(0, -by0 * k, 0) * Mat4.Scale(k);
+            model.Min = new V3(mn.x * k, (mn.y - by0) * k, mn.z * k); model.Max = new V3(mx.x * k, (mx.y - by0) * k, mx.z * k);
             return model;
         }
 
@@ -632,7 +639,8 @@ namespace BattleSim.Core
                 case "Knight":
                 case "Skeleton": return new[] { new[] { 0, 1 }, new[] { 2, 2 } }; // скелет Нави — атлас Knight
                 case "Barbarian": return new[] { new[] { 0, 1 }, new[] { 1, 1 }, new[] { 2, 2 } };
-                default: return new[] { new[] { 0, 1 }, new[] { 1, 1 }, new[] { 1, 2 } };
+                // Rogue: рубаха (0,1) и плащ (1,2, перенесён в make_meshes.py) — командные; капюшон (1,1) красит фракция
+                default: return new[] { new[] { 0, 1 }, new[] { 1, 2 } };
             }
         }
 
@@ -674,6 +682,7 @@ namespace BattleSim.Core
             }
             if (race.SkinHue >= 0) { Cell(0, 0, race.SkinHue, race.SkinSat, race.SkinLit); Cell(1, 0, race.SkinHue, race.SkinSat, race.SkinLit); }
             if (race.MetalHue >= 0 && (model == "Knight" || model == "Skeleton")) Cell(3, 0, race.MetalHue, race.MetalSat);
+            if (race.HoodHue >= 0 && model == "Rogue_Hooded") Cell(1, 1, race.HoodHue, race.HoodSat, race.HoodLit);
         }
 
         /// <summary>Лёгкий оттенок команды на всём солдате — так армии различимы издалека.</summary>

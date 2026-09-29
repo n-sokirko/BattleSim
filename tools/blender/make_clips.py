@@ -198,8 +198,9 @@ KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk
           ('Ride', ride, RIDE)]
 BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
 # всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
-MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS, 'Skeleton': [c for c in KNIGHT if c[0] == 'Rise_Undead']}
-KEEP = {'Rise_Undead': preview.KEEP_DEAD, 'Bow_Shoot': {'Rogue_Cape', 'Bow'}, 'Bow_Aim': {'Rogue_Cape', 'Bow'}}
+# степные лучники — на модели Barbarian (колпак, без капюшона): им тоже лук
+MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS, 'Barbarian': BOW_CLIPS, 'Skeleton': [c for c in KNIGHT if c[0] == 'Rise_Undead']}
+KEEP = {'Rise_Undead': preview.KEEP_DEAD, 'Bow_Shoot': {'Rogue_Cape', 'Bow', 'Steppe_Hat'}, 'Bow_Aim': {'Rogue_Cape', 'Bow', 'Steppe_Hat'}}
 only = os.environ.get('ONLY')
 pick = lambda name: not only or name in only.split(',')
 

@@ -10,7 +10,7 @@ KEEP = {'Knight': KEEP_RUS, 'Rogue_Hooded': {'Rogue_Cape'}, 'Skeleton': {'1H_Swo
 ATTACH = {'1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '1H_Sword', '2H_Sword',
           'Knight_Helmet', 'Knight_Cape', '1H_Axe_Offhand', 'Barbarian_Round_Shield', '1H_Axe', '2H_Axe', 'Mug', 'Barbarian_Hat',
           'Barbarian_Cape', 'Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable', 'Rogue_Cape', 'Bow',
-          'Orc_Tusks', 'Orc_Ears'}
+          'Orc_Tusks', 'Orc_Ears', 'Rus_Helmet', 'Steppe_Hat', 'Necro_Staff'}
 KEEP_DEAD = {'1H_Sword', 'Round_Shield'}
 BODY = {'Knight_ArmLeft', 'Knight_ArmRight', 'Knight_Body', 'Knight_Head', 'Knight_LegLeft', 'Knight_LegRight'}
 
@@ -84,13 +84,14 @@ def stack(paths, out):
 # ---------------------------------------------------------------- цвета как в игре (ModelKit.RecolorRace / RecolorCells / TeamTint)
 import numpy as np
 
-RACES = {  # SkinHue, SkinSat, SkinLit, MetalHue, MetalSat (Defs.cs)
-    'rus': None, 'orcs': (100, 0.55, 0.62, 30, 0.08), 'nav': (80, 0.07, 0.82, 25, 0.3), 'steppe': (24, 0.45, 0.85, 38, 0.45)}
+RACES = {  # SkinHue, SkinSat, SkinLit, MetalHue, MetalSat, HoodHue, HoodSat, HoodLit (Defs.cs; -1 — не менять)
+    'rus': (-1, 0, 1, -1, 0, 215, 0.08, 0.95), 'orcs': (100, 0.55, 0.62, 30, 0.08, 28, 0.4, 0.6),
+    'nav': (80, 0.07, 0.82, 25, 0.3, 272, 0.28, 0.42), 'steppe': (24, 0.45, 0.85, 38, 0.45, 36, 0.55, 0.9)}
 TEAMS = [(214, 0.62), (2, 0.66)]
 
 
 def team_cells(model):
-    return {'Knight': [(0, 1), (2, 2)], 'Skeleton': [(0, 1), (2, 2)], 'Barbarian': [(0, 1), (1, 1), (2, 2)]}.get(model, [(0, 1), (1, 1), (1, 2)])
+    return {'Knight': [(0, 1), (2, 2)], 'Skeleton': [(0, 1), (2, 2)], 'Barbarian': [(0, 1), (1, 1), (2, 2)]}.get(model, [(0, 1), (1, 2)])
 
 
 def _hsl(rgb):
@@ -117,9 +118,11 @@ def game_texture(png_bytes_path, model, race, team, out_png):
         s, l = _hsl(blk); im[cy * ch:(cy + 1) * ch, cx * cw:(cx + 1) * cw] = fn(s, l)
     rp = RACES.get(race)
     if rp:
-        hue, sat, lit, mh, ms = rp
-        for cx in (0, 1): cell(cx, 0, lambda s, l: _from_hsl(np.full_like(l, hue / 360), np.full_like(l, sat), l * lit))
-        if model in ('Knight', 'Skeleton'): cell(3, 0, lambda s, l: _from_hsl(np.full_like(l, mh / 360), np.full_like(l, ms), l))
+        hue, sat, lit, mh, ms, hh, hs, hl = rp
+        if hue >= 0:
+            for cx in (0, 1): cell(cx, 0, lambda s, l: _from_hsl(np.full_like(l, hue / 360), np.full_like(l, sat), l * lit))
+        if mh >= 0 and model in ('Knight', 'Skeleton'): cell(3, 0, lambda s, l: _from_hsl(np.full_like(l, mh / 360), np.full_like(l, ms), l))
+        if hh >= 0 and model == 'Rogue_Hooded': cell(1, 1, lambda s, l: _from_hsl(np.full_like(l, hh / 360), np.full_like(l, hs), l * hl))
     th, ts = TEAMS[team]
     for cx, cy in team_cells(model):
         cell(cx, cy, lambda s, l: _from_hsl(np.full_like(l, th / 360), np.maximum(s, ts), np.clip(l * 0.95 + 0.03, 0.08, 0.8)))
