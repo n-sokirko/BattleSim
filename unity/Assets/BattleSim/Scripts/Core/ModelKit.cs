@@ -492,6 +492,59 @@ namespace BattleSim.Core
         }
 
         /// <summary>Мировая позиция узла в позе клипа (например, бёдра всадника в посадке).</summary>
+        /// <summary>
+        /// Всадник мельче пешего: у кукольных пропорций (большая голова, длинный корпус) сидя он высотой почти в коня,
+        /// а с этим множителем — как на картинках: над седлом корпус и голова, конь под ним крупный.
+        /// </summary>
+        public const float RiderScale = 0.9f;
+
+        /// <summary>
+        /// Седло коня: над серединой спины (чуть позади середины туловища, где сидит всадник) — верх спины в позе Idle
+        /// плюс потник с седлом. Раньше бралось 0,8 высоты коня с поднятой головой — на 20 см выше спины, всадник висел.
+        /// </summary>
+        public static V3 SaddleOf(SkinnedModel horse, GltfDoc doc)
+        {
+            var pose = new Pose(doc) { Root = horse.Root };
+            pose.Reset();
+            var idle = doc.Anim("Idle");
+            if (idle != null) pose.Apply(doc, idle, 0, null);
+            pose.Compute();
+            var m = Skin(horse, pose);
+            float z = (horse.Min.z + horse.Max.z) / 2 - 0.1f, top = float.NegativeInfinity;
+            for (int v = 0; v < m.VertexCount; v++)
+            {
+                float vz = m.Pos[v * 3 + 2];
+                if (vz > z - 0.45f && vz < z + 0.05f && MathF.Abs(m.Pos[v * 3]) < 0.15f) top = MathF.Max(top, m.Pos[v * 3 + 1]);
+            }
+            return new V3(0, (float.IsNegativeInfinity(top) ? horse.Max.y * 0.8f : top) + 0.06f, z);
+        }
+
+        /// <summary>
+        /// Высота сиденья всадника в клипе посадки: низ таза (самые низкие точки тела у середины, под бёдрами).
+        /// Ею он садится на седло — а не суставом бёдер, который на 10–15 см выше.
+        /// </summary>
+        public static float SeatHeight(SkinnedModel m, ClipLayer layer)
+        {
+            var pose = new Pose(m.Doc) { Root = m.Root };
+            pose.Reset();
+            if (layer != null) pose.Apply(layer.Src, layer.Anim, 0, layer.Filter);
+            pose.Compute();
+            var hips = m.Doc.Find("hips");
+            var h = hips == null ? new V3(0, 0, 0) : pose.World[hips.Index].Point(0, 0, 0);
+            var mesh = Skin(m, pose);
+            float seat = h.y;
+            foreach (var (name, kind, start, count) in m.Parts)
+            {
+                if (kind != 0) continue;
+                for (int v = start; v < start + count; v++)
+                {
+                    float x = mesh.Pos[v * 3], y = mesh.Pos[v * 3 + 1], z = mesh.Pos[v * 3 + 2];
+                    if (MathF.Abs(x - h.x) < 0.09f && MathF.Abs(z - h.z) < 0.15f && y < h.y && y > h.y - 0.3f) seat = MathF.Min(seat, y);
+                }
+            }
+            return seat;
+        }
+
         public static V3 NodeWorld(SkinnedModel m, string node, ClipLayer layer, float time)
         {
             var pose = new Pose(m.Doc) { Root = m.Root };

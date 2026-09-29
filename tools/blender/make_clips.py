@@ -1,7 +1,8 @@
 """
 Свои клипы для модели Knight (KayKit), сделанные в Blender:
   Shield_Wall_Idle, Shield_Wall_Walk — стена щитов мечников Руси (низкая стойка, щит закрывает лицо);
-  Rise_Undead — мертвец Нави встаёт: рука с мечом из земли, рывками, как кукла на нитях, голова набок.
+  Rise_Undead — мертвец Нави встаёт: рука с мечом из земли, рывками, как кукла на нитях, голова набок;
+  Ride — посадка в седле для всадников (низ тела): бёдра обхватывают спину коня, ступни в стременах.
 Поза собирается из клипов KayKit (Blocking, Walking_A, Lie_StandUp, Idle) с правками поверх и IK ног,
 снимается в локальные TRS узлов и дописывается в исходный GLB — меши, скелет и прочие клипы не меняются.
 
@@ -12,7 +13,7 @@
 import os, sys, math
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 import rigio, preview, posekit as pk
 
 MODELS_DIR = os.path.join(here, '..', '..', 'unity', 'Assets', 'BattleSim', 'Resources', 'Models')
@@ -168,7 +169,33 @@ def bow_aim(t):
     bow_head(6)
 
 
-KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE)]
+def ride(t):
+    """Посадка в седле (низ тела всадника; верх игра берёт из других клипов). Из Sit_Chair_Idle — таз и корпус,
+    но бёдра не вперёд, как на стуле, а вниз и в стороны — обхватывают спину коня; голени вниз, ступни в стременах
+    чуть позади колен, носки врозь. Лёгкое покачивание в такт шагу коня."""
+    ik.enable(False)
+    base = pk.capture(rig, 'Sit_Chair_Idle', 0.0)
+    pk.detach(rig); pk.apply_basis(rig, base)
+    aw = rig.arm.matrix_world
+    pbs = rig.arm.pose.bones
+    sway = math.sin(2 * math.pi * t / RIDE)
+    pk.move(rig, 'hips', (0, 0, 0.01 * sway))
+    for s, side in (('l', 1), ('r', -1)):
+        hip = aw @ pbs['upperleg.' + s].head
+        foot_rot = (aw @ pbs['foot.' + s].matrix).to_quaternion()
+        foot = hip + Vector((side * RIDE_SPREAD, 0.10, -RIDE_DROP))
+        ik.t[s].matrix_world = Matrix.Translation(foot)
+        ik.p[s].matrix_world = Matrix.Translation(hip + Vector((side * 0.45, -0.6, -0.1)))
+        toes_out = Matrix.Rotation(math.radians(side * 12), 4, Z)
+        ik.f[s].matrix_world = Matrix.Translation(foot) @ toes_out @ foot_rot.to_matrix().to_4x4()
+    ik.enable(True)
+
+
+RIDE = 1.0667
+RIDE_SPREAD, RIDE_DROP = 0.16, 0.36    # ступня: наружу от тазобедренного и ниже его (м)
+
+KNIGHT = [('Shield_Wall_Idle', shield_wall_idle, 2 * 1.0667), ('Shield_Wall_Walk', shield_wall_walk, 1.0667), ('Rise_Undead', rise_undead, RISE),
+          ('Ride', ride, RIDE)]
 BOW_CLIPS = [('Bow_Shoot', bow_shoot, BOW), ('Bow_Aim', bow_aim, 1.0667)]
 # всадники берут верх тела для атак из Knight (ModelLibrary.MakeRider) — поэтому лук и там
 MODELS = {'Knight': KNIGHT + BOW_CLIPS, 'Rogue_Hooded': BOW_CLIPS, 'Skeleton': [c for c in KNIGHT if c[0] == 'Rise_Undead']}

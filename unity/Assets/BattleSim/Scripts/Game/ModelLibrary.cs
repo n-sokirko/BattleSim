@@ -152,9 +152,10 @@ namespace BattleSim
             steps.Add(("Кони", () => { for (int h = 0; h < 2; h++) MakeHorse(h); }));
             steps.Add(("Посадка всадника", () =>
             {
+                // всадник садится на седло низом таза (а не суставом бёдер) — в клипе посадки
                 var knight = Doc("Knight");
-                var rider = ModelKit.PrepareCharacter(knight, Defs.Types[3].Keep, 1.75f);
-                RiderHipsY = ModelKit.NodeWorld(rider, "hips", new ClipLayer { Src = knight, Anim = knight.Anim("Sit_Chair_Idle"), Filter = s => !ModelKit.UpperBones.IsMatch(s) }, 0).y;
+                var rider = ModelKit.PrepareCharacter(knight, Defs.Types[3].Keep, 1.75f * ModelKit.RiderScale);
+                RiderHipsY = ModelKit.SeatHeight(rider, new ClipLayer { Src = knight, Anim = RideClip(knight), Filter = s => !ModelKit.UpperBones.IsMatch(s) });
             }));
             steps.Add(("Лес и камни", MakeNature));
             steps.Add(("Город", MakeCity));
@@ -226,13 +227,16 @@ namespace BattleSim
             return new CrowdModel(model, defs, TeamMats(t.Model, ImageOf(doc, model.Mesh), t.Race));
         }
 
+        /// <summary>Низ тела всадника: посадка в седле (свой клип Ride из Blender), без него — «сидя на стуле».</summary>
+        static GAnim RideClip(GltfDoc knight) => knight.Anim("Ride") ?? knight.Anim("Sit_Chair_Idle");
+
         CrowdModel MakeRider(UnitDef t, float height)
         {
             var doc = Doc(t.Model);
             var knight = Doc("Knight");
-            var model = ModelKit.PrepareCharacter(doc, t.Keep, height);
+            var model = ModelKit.PrepareCharacter(doc, t.Keep, height * ModelKit.RiderScale);
             System.Func<string, bool> upper = s => ModelKit.UpperBones.IsMatch(s), lower = s => !ModelKit.UpperBones.IsMatch(s);
-            var sit = new ClipLayer { Src = knight, Anim = knight.Anim("Sit_Chair_Idle"), Filter = lower };
+            var sit = new ClipLayer { Src = knight, Anim = RideClip(knight), Filter = lower };
             var defs = new List<ClipDef> { new ClipDef { Name = "ride", Layers = { new ClipLayer { Src = knight, Anim = knight.Anim("Idle"), Filter = upper }, sit } } };
             var atk = t.Anim.Attack.Length > 0 ? t.Anim.Attack : Defs.Types[3].Anim.Attack;
             for (int i = 0; i < atk.Length; i++)
@@ -250,7 +254,7 @@ namespace BattleSim
             var mat = NewLit(null, Color.white, "horse" + i);
             mat.SetFloat("_Spec", 0.08f);
             Horse[i] = new CrowdModel(model, defs, new[] { mat });
-            Saddle[i] = new V3(0, model.Max.y * 0.8f, (model.Min.z + model.Max.z) / 2 - 0.1f);
+            Saddle[i] = ModelKit.SaddleOf(model, doc); // по спине коня, а не 0,8 его высоты с головой
         }
 
         StaticModel Static(string name, Material mat)
