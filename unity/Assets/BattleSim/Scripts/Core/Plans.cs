@@ -6,105 +6,83 @@ namespace BattleSim.Core
 {
     // ------------------------------------------------------------------ горы
 
-    public sealed class MountainPath
+    /// <summary>Гора: скальное ядро (не пройти) и пологое предгорье вокруг; или холм — пологий целиком.</summary>
+    public sealed class Peak
     {
-        public List<V2> Ctrl;
-        public float W, Side;
-        /// <summary>Тропа к броду: спускается к самой реке, а не к мосту.</summary>
-        public bool Ford;
-        public MountainBridge Bridge;
-        public List<V2> Pts;
-        public float[] Prof;
+        public float X, Z, R, H, Foot, Seed;
+        /// <summary>Холм: пологий, на вершину можно подняться (высота для стрелков и полководцев).</summary>
+        public bool Hill;
+        /// <summary>Доля радиуса, где начинается скальное ядро.</summary>
+        public const float Core = 0.55f;
+        public float CoreR => R * Core;
     }
 
-    public sealed class MountainBridge
+    /// <summary>Проход между горами: ось от южного устья к северному и ширина дна.</summary>
+    public sealed class Pass
     {
         public V2 A, B;
-        public List<MountainPath> Paths = new List<MountainPath>();
+        public float W;
     }
 
     /// <summary>
-    /// Горный перевал: армии стоят в долинах у краёв, между ними — массив террасами
-    /// с обрывами, посередине — ущелье с рекой. Через массив вьются серпантины к мостам.
+    /// Горы: поперёк поля — цепь скальных вершин, между ними узкие ущелья-проходы (6–12 м по дну);
+    /// впереди и позади цепи — отдельные вершины и пологие холмы (высоты для стрелков). На сами скалы
+    /// не забраться, предгорья и холмы проходимы: бой идёт в проходах и на склонах.
     /// </summary>
     public sealed class MountainPlan
     {
-        public float GorgeW;
-        public V2[] GorgePts;
-        public List<MountainBridge> Bridges = new List<MountainBridge>();
-        public List<MountainPath> Paths = new List<MountainPath>();
-        /// <summary>Броды: здесь река мелкая, к воде спускаются тропы.</summary>
-        public List<V2> Fords = new List<V2>();
-        float z0, amp, ph, fr;
-
-        public float Gz(float x) => z0 + MathF.Sin(x * fr + ph) * amp;
+        public readonly List<Peak> Peaks = new List<Peak>();
+        public readonly List<Pass> Passes = new List<Pass>();
 
         public static MountainPlan Make(Rng R, float F)
         {
             var m = new MountainPlan();
-            float gw = M.Lerp(12, 16, R.F());
-            m.z0 = M.Lerp(-5, 5, R.F()); m.amp = M.Lerp(4, 8, R.F()); m.ph = R.F() * 6; m.fr = M.Lerp(0.035f, 0.06f, R.F());
-            m.GorgeW = gw;
-            m.GorgePts = new V2[41];
-            for (int i = 0; i < 41; i++) { float x = -F * 1.3f + i * F * 2.6f / 40; m.GorgePts[i] = new V2(x, m.Gz(x)); }
-            int nb = F > 100 ? 3 : 2 + (R.Next() < 0.5 ? 1 : 0);
-            for (int k = 0; k < nb; k++)
+            // цепь: слева направо, между соседними ядрами — проход заданной ширины
+            float x = -F * 1.05f;
+            Peak prev = null;
+            while (x < F * 1.05f)
             {
-                float bx = (k - (nb - 1) / 2f) * (F * 1.3f / (nb - 1)) + M.Lerp(-6, 6, R.F());
-                float rim = gw / 2 + 1.5f, zc = m.Gz(bx), tilt = M.Lerp(-3, 3, R.F());
-                var a = new V2(bx - tilt, zc - rim);
-                var b = new V2(bx + tilt, zc + rim);
-                var br = new MountainBridge { A = a, B = b };
-                m.Bridges.Add(br);
-                float bl = M.Hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / bl, uz = (b.z - a.z) / bl;
-                foreach (var (side, end) in new[] { (-1f, a), (1f, b) })
+                float r = M.Lerp(20, 30, R.F()) * MathF.Min(1.3f, F / 100);
+                var p = new Peak { R = r, H = M.Lerp(18, 30, R.F()), Foot = M.Lerp(3.5f, 6, R.F()), Seed = R.F() * 100 };
+                float gap = M.Lerp(7, 12, R.F());
+                p.X = prev == null ? x : prev.X + prev.CoreR + gap + p.CoreR;
+                p.Z = M.Lerp(-0.1f, 0.1f, R.F()) * F;
+                if (prev != null)
                 {
-                    var start = new V2(M.Clamp(end.x + M.Lerp(-18, 18, R.F()), -F + 8, F - 8), side * F * 0.66f);
-                    // последние 12 м — прямо по оси моста: отряд входит на настил в лоб, а не вдоль обрыва
-                    var pre = new V2(end.x + side * ux * 12, end.z + side * uz * 12);
-                    int n = 4 + (int)(R.Next() * 3);
-                    var ctrl = new List<V2> { start };
-                    for (int j = 1; j < n; j++)
-                    {
-                        float t = (float)j / n, zig = (j % 2 == 1 ? 1 : -1) * M.Lerp(9, 17, R.F()) * MathF.Sin(M.PI * t);
-                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, pre.x, t) + zig, -F + 6, F - 6), M.Lerp(start.z, pre.z, t)));
-                    }
-                    ctrl.Add(pre);
-                    ctrl.Add(new V2(end.x + side * ux * 5, end.z + side * uz * 5));
-                    ctrl.Add(end);
-                    var p = new MountainPath { Ctrl = ctrl, W = 6f, Side = side, Bridge = br };
-                    m.Paths.Add(p);
-                    br.Paths.Add(p);
+                    // ось прохода — через середину промежутка между ядрами, поперёк цепи
+                    float mx = prev.X + prev.CoreR + gap / 2, mz = (prev.Z + p.Z) / 2, L = MathF.Max(prev.R, p.R) + 8;
+                    m.Passes.Add(new Pass { A = new V2(mx, mz - L), B = new V2(mx, mz + L), W = gap });
                 }
+                m.Peaks.Add(p);
+                prev = p;
+                x = p.X + p.CoreR;
             }
-            // Броды — между мостами, где их нет: спуск к воде с обеих сторон
-            var xs = m.Bridges.Select(b => b.A.x).OrderBy(x => x).ToList();
-            var gaps = new List<float>();
-            float prev = -F * 0.85f;
-            foreach (var x in xs.Concat(new[] { F * 0.85f })) { if (x - prev > 34) gaps.Add((prev + x) / 2); prev = x; }
-            int nf = Math.Min(gaps.Count, F > 100 ? 3 : 2);
-            foreach (var fx0 in gaps.OrderBy(_ => R.Next()).Take(nf))
+            // ущелья у самой кромки поля бесполезны (туда не дойти) — оставляем только внутренние
+            m.Passes.RemoveAll(q => MathF.Abs(q.A.x) > F - 10);
+            // одиночные вершины перед цепью и за ней — не на линии проходов, чтобы не затыкать устья
+            int lone = F > 100 ? 4 : 2;
+            for (int k = 0, tries = 0; k < lone && tries < 60; tries++)
             {
-                float fx = fx0 + M.Lerp(-5, 5, R.F()), fzc = m.Gz(fx);
-                var ford = new V2(fx, fzc);
-                m.Fords.Add(ford);
-                foreach (float side in new[] { -1f, 1f })
-                {
-                    var start = new V2(M.Clamp(fx + M.Lerp(-16, 16, R.F()), -F + 8, F - 8), side * F * 0.66f);
-                    // к воде — прямо поперёк ущелья: спуск в его стенку не косой
-                    var pre = new V2(fx, fzc + side * (m.GorgeW / 2 + 12));
-                    int n = 3 + (int)(R.Next() * 3);
-                    var ctrl = new List<V2> { start };
-                    for (int j = 1; j < n; j++)
-                    {
-                        float t = (float)j / n, zig = (j % 2 == 1 ? 1 : -1) * M.Lerp(8, 15, R.F()) * MathF.Sin(M.PI * t);
-                        ctrl.Add(new V2(M.Clamp(M.Lerp(start.x, pre.x, t) + zig, -F + 6, F - 6), M.Lerp(start.z, pre.z, t)));
-                    }
-                    ctrl.Add(pre);
-                    ctrl.Add(new V2(fx, fzc + side * (m.GorgeW / 2 + 4)));
-                    ctrl.Add(ford);
-                    m.Paths.Add(new MountainPath { Ctrl = ctrl, W = 7f, Side = side, Ford = true });
-                }
+                float side = k % 2 == 0 ? -1 : 1;
+                var p = new Peak { R = M.Lerp(14, 20, R.F()), H = M.Lerp(12, 20, R.F()), Foot = M.Lerp(2.5f, 4, R.F()), Seed = R.F() * 100 };
+                p.X = M.Lerp(-F * 0.8f, F * 0.8f, R.F()); p.Z = side * M.Lerp(0.34f, 0.46f, R.F()) * F;
+                bool ok = true;
+                foreach (var q in m.Passes) if (MathF.Abs(q.A.x - p.X) < p.CoreR + q.W + 10) ok = false;
+                foreach (var q in m.Peaks) if (M.Hypot(q.X - p.X, q.Z - p.Z) < q.R + p.R * 0.8f) ok = false;
+                if (!ok) continue;
+                m.Peaks.Add(p); k++;
+            }
+            // пологие холмы у армий — на них встают стрелки и полководцы
+            int hills = F > 100 ? 6 : 4;
+            for (int k = 0, tries = 0; k < hills && tries < 80; tries++)
+            {
+                float side = k % 2 == 0 ? -1 : 1;
+                var p = new Peak { Hill = true, R = M.Lerp(16, 26, R.F()), H = M.Lerp(4, 8, R.F()), Seed = R.F() * 100 };
+                p.X = M.Lerp(-F * 0.85f, F * 0.85f, R.F()); p.Z = side * M.Lerp(0.3f, 0.55f, R.F()) * F;
+                bool ok = true;
+                foreach (var q in m.Peaks) if (M.Hypot(q.X - p.X, q.Z - p.Z) < (q.Hill ? q.R : q.CoreR) + p.R * 0.6f) ok = false;
+                if (!ok) continue;
+                m.Peaks.Add(p); k++;
             }
             return m;
         }
