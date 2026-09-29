@@ -105,14 +105,20 @@ namespace BattleSim
             int bi = b.Count / Batch, i = b.Count % Batch;
             if (bi >= b.M.Count) { b.M.Add(new Matrix4x4[Batch]); b.A.Add(new Vector4[Batch]); b.C.Add(new Vector4[Batch]); }
             b.M[bi][i] = m;
-            b.A[bi][i] = new Vector4(rowA, rowB, blend, 0);
+            // строка за пределами текстуры читается нулями — боец схлопнулся бы в точку и исчез
+            int last = Mathf.Max(0, Baked.Rows - 1);
+            b.A[bi][i] = new Vector4(Mathf.Clamp(rowA, 0, last), Mathf.Clamp(rowB, 0, last), blend, 0);
             b.C[bi][i] = new Vector4(color.r, color.g, color.b, color.a);
             b.Count++;
         }
 
         /// <summary>Рисуем пачки; тени — только у ближних уровней (дальние тени не видны, а стоят как вторая армия).</summary>
+        /// <summary>Сколько раз при отрисовке в материале оказалась чужая текстура анимаций (должно быть 0).</summary>
+        public static int WrongBake;
+
         public void End(bool shadows)
         {
+            foreach (var m in Mats) if (m.GetTexture("_BakeTex") != BakeTex) WrongBake++;
             for (int t = 0; t < Mats.Length; t++)
                 for (int l = 0; l < Lods; l++)
                 {

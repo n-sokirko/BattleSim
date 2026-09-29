@@ -224,7 +224,7 @@ namespace BattleSim
             }
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_log.txt"),
                 $"fps {1f / Mathf.Max(0.001f, Time.smoothDeltaTime):F0}; alive {Battle.Alive[0]}/{Battle.Alive[1]}; units {Battle.Units.Count}\n" +
-                $"perf: {Perf}\n" + $"нет модели: {(NoModel.Count > 0 ? string.Join(", ", NoModel) : "—")}\n" +
+                $"perf: {Perf}\n" + $"нет модели: {(NoModel.Count > 0 ? string.Join(", ", NoModel) : "—")}; чужая текстура анимаций: {CrowdModel.WrongBake}\n" +
                 $"звуки: {(Sound != null ? string.Join(", ", System.Linq.Enumerable.Select(Sound.Played, kv => kv.Key + " " + kv.Value)) : "—")}\n" +
                 string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")) +
                 (directed ? "\nрежиссёр:\n" + string.Join("\n", Director.History) : ""));

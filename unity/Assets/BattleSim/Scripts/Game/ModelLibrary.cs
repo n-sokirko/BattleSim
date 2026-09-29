@@ -168,22 +168,34 @@ namespace BattleSim
             progress(1, "Готово");
         }
 
-        readonly Dictionary<string, Material[]> teamMats = new Dictionary<string, Material[]>();
+        readonly Dictionary<string, Texture2D[]> teamTex = new Dictionary<string, Texture2D[]>();
 
+        /// <summary>
+        /// Материалы армий для одной модели толпы. Текстуры (перекраска под расу и армию) общие для всех видов
+        /// бойцов на этой модели, а материалы — СВОИ у каждой модели толпы: в материал пишется её текстура
+        /// запечённых анимаций (_BakeTex). Общий материал на пехоту, всадников и богатыря означал, что все
+        /// брали кадры из текстуры последней созданной модели — чужие позы, а бойцы «пропадали».
+        /// </summary>
         Material[] TeamMats(string model, string png, RaceDef race = null)
         {
             string key = model + "|" + (race?.Key ?? "");
-            if (teamMats.TryGetValue(key, out var cached)) return cached;
+            if (!teamTex.TryGetValue(key, out var tex))
+            {
+                tex = new Texture2D[2];
+                var rgba0 = Rgba(png, out int w, out int h);
+                ModelKit.RecolorRace(rgba0, w, h, model, race);
+                for (int team = 0; team < 2; team++)
+                {
+                    var rgba = (byte[])rgba0.Clone();
+                    ModelKit.RecolorCells(rgba, w, h, ModelKit.TeamCells(model), Defs.Teams[team]);
+                    tex[team] = TexFromRgba(rgba, w, h, model + "_team" + team);
+                }
+                teamTex[key] = tex;
+            }
             var mats = new Material[2];
-            teamMats[key] = mats;
-            var rgba0 = Rgba(png, out int w, out int h);
-            ModelKit.RecolorRace(rgba0, w, h, model, race);
             for (int team = 0; team < 2; team++)
             {
-                var rgba = (byte[])rgba0.Clone();
-                ModelKit.RecolorCells(rgba, w, h, ModelKit.TeamCells(model), Defs.Teams[team]);
-                var tex = TexFromRgba(rgba, w, h, model + "_team" + team);
-                mats[team] = NewLit(tex, Conv.Col(ModelKit.TeamTint(Defs.Teams[team])), model + team);
+                mats[team] = NewLit(tex[team], Conv.Col(ModelKit.TeamTint(Defs.Teams[team])), model + team);
                 mats[team].SetFloat("_Spec", 0.12f);
             }
             return mats;
