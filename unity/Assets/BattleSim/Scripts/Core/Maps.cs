@@ -553,7 +553,7 @@ namespace BattleSim.Core
         {
             float d = M.Hypot(bx - ax, bz - az);
             int n = Math.Max(2, (int)MathF.Ceiling(d / 0.3f));
-            float step = d / n, prev = w.GroundAt(ax, az);
+            float step = d / n, prev = w.GroundAt(ax, az), px = ax, pz = az;
             bool prevDeck = w.OnDeck(ax, az);
             for (int k = 1; k <= n; k++)
             {
@@ -562,16 +562,10 @@ namespace BattleSim.Core
                 if (MathF.Abs(h - prev) > step * 1.3f + 0.02f)
                 {
                     if (!deck && !prevDeck) return true;
-                    // у края настила: находим сам уступ и меряем его — шагом берётся не выше DeckStep (как в Battle.CanMove)
-                    float lo = (k - 1f) / n, hi = (float)k / n, hl = prev, hh = h;
-                    for (int it = 0; it < 7; it++)
-                    {
-                        float mid = (lo + hi) / 2, hm = w.GroundAt(ax + (bx - ax) * mid, az + (bz - az) * mid);
-                        if (MathF.Abs(hm - hl) > MathF.Abs(hh - hm)) { hi = mid; hh = hm; } else { lo = mid; hl = hm; }
-                    }
-                    if (MathF.Abs(hh - hl) > World.DeckStep + (hi - lo) * d * 1.3f) return true;
+                    // у края настила: шагом берётся уступ не выше DeckStep (как в Battle.CanMove)
+                    if (w.Ledge(px, pz, x, z)) return true;
                 }
-                prev = h; prevDeck = deck;
+                prev = h; prevDeck = deck; px = x; pz = z;
             }
             return false;
         }

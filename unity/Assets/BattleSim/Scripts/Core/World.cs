@@ -372,6 +372,22 @@ namespace BattleSim.Core
         public bool OnDeck(float x, float z) { float g = HeightAt(x, z); return Decks.Surface(x, z, g) > g + 0.01f; }
 
         /// <summary>
+        /// Уступ у края настила на отрезке a→b выше DeckStep? Сам уступ находится делением пополам и меряется без уклона
+        /// по обе стороны. Так меряют и сетка путей (Nav.SheerLine), и шаг бойца (Battle.CanMove): иначе у конца моста над
+        /// крутым берегом скачущий всадник сходил вбок на 0,6 м, хотя путь туда не ведёт.
+        /// </summary>
+        public bool Ledge(float ax, float az, float bx, float bz)
+        {
+            float d = M.Hypot(bx - ax, bz - az), lo = 0, hi = 1, hl = GroundAt(ax, az), hh = GroundAt(bx, bz);
+            for (int it = 0; it < 7; it++)
+            {
+                float mid = (lo + hi) / 2, hm = GroundAt(ax + (bx - ax) * mid, az + (bz - az) * mid);
+                if (MathF.Abs(hm - hl) > MathF.Abs(hh - hm)) { hi = mid; hh = hm; } else { lo = mid; hl = hm; }
+            }
+            return MathF.Abs(hh - hl) > DeckStep + (hi - lo) * d * 1.3f;
+        }
+
+        /// <summary>
         /// Омут в самой точке (настил моста — не вода). Клетка сетки путей — полтора метра: у края моста
         /// или крутой набережной её центр проходим, а край — уже над руслом.
         /// </summary>
