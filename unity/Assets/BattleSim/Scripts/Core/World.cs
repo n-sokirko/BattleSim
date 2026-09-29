@@ -168,7 +168,7 @@ namespace BattleSim.Core
         }
 
         /// <summary>Где армии выстраиваются перед боем (расстояние от центра до первой линии).</summary>
-        public float SpawnZ => Town != null ? Town.CZ + 17 : Mtn != null ? Field * 0.68f : Field * (Big ? 0.3f : 0.28f);
+        public float SpawnZ => Town != null ? Town.CZ + 17 : Mtn != null ? Field * 0.62f : Field * (Big ? 0.3f : 0.28f);
 
         /// <summary>Высота, на которой стоит солдат: земля или настил (мост, боевой ход стены, лестница).</summary>
         public float GroundAt(float x, float z)
@@ -225,7 +225,7 @@ namespace BattleSim.Core
             }
 
             if (type == MapType.City) { if (Town != null) f.Walls.AddRange(Town.Walls); return f; }
-            if (type == MapType.Mountains) return f; // рельеф строит MountainPlan: террасы, ущелье, серпантины
+            if (type == MapType.Mountains) return f; // рельеф строит MountainPlan: вершины, проходы-ущелья, холмы
 
             if (type == MapType.Swamp)
             {
@@ -523,174 +523,31 @@ namespace BattleSim.Core
         void CarveMountains(Rng R)
         {
             var Mt = Mtn;
-            int V = Res + 1, n = V * V;
-            var best = new float[n];
-            for (int i = 0; i < n; i++) best[i] = 1e9f;
-            var bestH = new float[n];
-            var bestFord = new bool[n];
-            PathMask = new float[n];
-            float w = 6f, R0 = w / 2 + 3.5f;
-            var raw = new Dictionary<MountainPath, float[]>();
-            foreach (var p in Mt.Paths)
+            int V = Res + 1;
+            PathMask = new float[V * V];
+            // по дну ущелий — утоптанная тропа: там не растут деревья и не лежат валуны, в проходе не застрять
+            foreach (var ps in Mt.Passes)
             {
-                var pts = p.Pts = Spline.Catmull(p.Ctrl, 1);
-                var prof = new float[pts.Count];
-                for (int i = 0; i < pts.Count; i++) prof[i] = HeightAt(pts[i].x, pts[i].z);
-                // к броду тропа спускается до самой воды: дно реки там — по колено
-                if (p.Ford) for (int i = 0; i < pts.Count; i++) prof[i] = MathF.Max(prof[i], -0.55f);
-                if (p.Ford) prof[prof.Length - 1] = -0.55f;
-                else
-                { // площадка перед мостом: у края ущелья рельеф уже опущен к реке — держим высоту террасы за ним, настил ляжет вровень
-                    int k0 = pts.Count - 1;
-                    while (k0 > 0 && M.PolyDist(pts[k0].x, pts[k0].z, Mt.GorgePts) < Mt.GorgeW / 2 + 4.5f) k0--;
-                    for (int i = k0 + 1; i < pts.Count; i++) prof[i] = prof[k0];
-                }
-                raw[p] = prof;
-            }
-            // мост не круче 1:4 — иначе концы площадок подрезаем и подсыпаем навстречу друг другу
-            foreach (var br in Mt.Bridges)
-            {
-                if (br.Paths.Count != 2) continue;
-                float[] fa = raw[br.Paths[0]], fb = raw[br.Paths[1]];
-                V2 ea = br.Paths[0].Pts[br.Paths[0].Pts.Count - 1], eb = br.Paths[1].Pts[br.Paths[1].Pts.Count - 1];
-                float ha = fa[fa.Length - 1], hb = fb[fb.Length - 1], lim = M.Hypot(eb.x - ea.x, eb.z - ea.z) * 0.25f, mid = (ha + hb) / 2;
-                if (MathF.Abs(ha - hb) <= lim) continue;
-                float na = mid + M.Sign(ha - hb) * lim / 2, nb = mid - M.Sign(ha - hb) * lim / 2;
-                for (int i = 0; i < fa.Length; i++) if (fa[i] == ha) fa[i] = na;
-                for (int i = 0; i < fb.Length; i++) if (fb[i] == hb) fb[i] = nb;
-            }
-            foreach (var p in Mt.Paths)
-            {
-                var pts = p.Pts;
-                var prof = raw[p];
-                // у моста тропа шире: отряд собирается перед настилом, не толкаясь на краю обрыва
-                var wide = new float[pts.Count];
-                if (!p.Ford)
-                {
-                    float acc = 0;
-                    for (int i = pts.Count - 1; i >= 0 && acc < 14; i--)
-                    {
-                        wide[i] = 1.5f * M.Smooth(14, 9, acc);
-                        if (i > 0) acc += M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
-                    }
-                }
-                // конец тропы к броду закреплён у воды: иначе проход «вперёд» поднимал его до террасы, и тропа насыпала
-                // через ущелье дамбу высотой в террасу вместо спуска к реке
-                int last = p.Ford ? pts.Count - 1 : pts.Count;
-                for (int it = 0; it < 4; it++)
-                {
-                    for (int i = 1; i < last; i++) { float d = M.Hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i - 1] - d, prof[i - 1] + d); }
-                    for (int i = pts.Count - 2; i >= 0; i--) { float d = M.Hypot(pts[i].x - pts[i + 1].x, pts[i].z - pts[i + 1].z) * 0.3f; prof[i] = M.Clamp(prof[i], prof[i + 1] - d, prof[i + 1] + d); }
-                }
-                var sm = new float[prof.Length];
-                for (int i = 0; i < prof.Length; i++)
-                {
-                    float a = 0; int c = 0;
-                    for (int k = -3; k <= 3; k++) { int j = i + k; if (j >= 0 && j < prof.Length) { a += prof[j]; c++; } }
-                    sm[i] = a / c;
-                }
-                if (p.Ford) sm[sm.Length - 1] = -0.55f;
-                p.Prof = sm;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    float px = pts[i].x, pz = pts[i].z, r = R0 + wide[i];
-                    int ix0 = Math.Max(0, M.Floor((px - r + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((px + r + Half) / Cell));
-                    int iz0 = Math.Max(0, M.Floor((pz - r + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((pz + r + Half) / Cell));
-                    for (int iz = iz0; iz <= iz1; iz++)
-                        for (int ix = ix0; ix <= ix1; ix++)
-                        {
-                            int k = iz * V + ix;
-                            float d = M.Hypot(ix * Cell - Half - px, iz * Cell - Half - pz) - wide[i];
-                            if (d < best[k]) { best[k] = d; bestH[k] = sm[i]; bestFord[k] = p.Ford; }
-                        }
-                }
-            }
-            for (int k = 0; k < n; k++)
-            {
-                if (best[k] >= R0) continue;
-                // само ущелье не засыпаем: под мостом — река, а не брод
-                float cx = (k % V) * Cell - Half, cz = (k / V) * Cell - Half;
-                if (!bestFord[k] && M.PolyDist(cx, cz, Mt.GorgePts) < Mt.GorgeW / 2 + 0.5f) continue;
-                H[k] = M.Lerp(H[k], bestH[k], M.Smooth(R0, w / 2, best[k]));
-                PathMask[k] = M.Smooth(w / 2 + 0.8f, w / 2 - 0.6f, best[k]);
-            }
-            // Мосты через ущелье: настил от конца одной тропы до конца другой
-            Bridges = new List<Deck>();
-            // брод через всё ущелье: дно поднимаем полосой поперёк реки
-            foreach (var f in Mt.Fords)
-            {
-                float hw = Mt.GorgeW / 2 + 3, fw = 4.5f;
-                int ix0 = Math.Max(0, M.Floor((f.x - fw - 4 + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((f.x + fw + 4 + Half) / Cell));
-                int iz0 = Math.Max(0, M.Floor((f.z - hw - 4 + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((f.z + hw + 4 + Half) / Cell));
+                float hw = ps.W / 2 + 1;
+                float x0 = MathF.Min(ps.A.x, ps.B.x) - hw, x1 = MathF.Max(ps.A.x, ps.B.x) + hw, z0 = MathF.Min(ps.A.z, ps.B.z) - hw, z1 = MathF.Max(ps.A.z, ps.B.z) + hw;
+                int ix0 = Math.Max(0, M.Floor((x0 + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((x1 + Half) / Cell));
+                int iz0 = Math.Max(0, M.Floor((z0 + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((z1 + Half) / Cell));
                 for (int iz = iz0; iz <= iz1; iz++)
                     for (int ix = ix0; ix <= ix1; ix++)
                     {
-                        float x = ix * Cell - Half, z = iz * Cell - Half;
-                        float ax = MathF.Abs(x - f.x), az = MathF.Abs(z - Mt.Gz(x));
-                        if (az > hw) continue;
+                        float d = M.SegDist(ix * Cell - Half, iz * Cell - Half, ps.A.x, ps.A.z, ps.B.x, ps.B.z);
                         int k = iz * V + ix;
-                        float kx = M.Smooth(fw + 3, fw, ax);
-                        if (kx <= 0) continue;
-                        H[k] = MathF.Max(H[k], M.Lerp(H[k], -0.55f, kx));
-                        PathMask[k] = MathF.Max(PathMask[k], kx * 0.8f);
+                        PathMask[k] = MathF.Max(PathMask[k], M.Smooth(hw, hw - 2.5f, d) * 0.85f);
                     }
             }
-            foreach (var br in Mt.Bridges)
-            {
-                var pa = br.Paths[0].Side < 0 ? br.Paths[0] : br.Paths[1];
-                var pb = br.Paths[0].Side < 0 ? br.Paths[1] : br.Paths[0];
-                V2 a = pa.Pts[pa.Pts.Count - 1], b = pb.Pts[pb.Pts.Count - 1];
-                float len = M.Hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
-                float ha = pa.Prof[pa.Prof.Length - 1] + 0.05f, hb = pb.Prof[pb.Prof.Length - 1] + 0.05f, dl = len + 3;
-                // над площадками (1,5 м на тропе и до бровки) настил ровный, вровень с ними — уклон только над ущельем:
-                // иначе сбоку у въезда настил поднимался над землёй на полметра и с него «спрыгивали»
-                int np = Math.Max(4, (int)MathF.Ceiling(dl / 0.5f));
-                var prof = new float[np + 1];
-                for (int i = 0; i <= np; i++) { float al = dl * i / np; prof[i] = M.Lerp(ha, hb, M.Clamp01((al - 3f) / MathF.Max(0.5f, dl - 6f))); }
-                var d = Decks.Add(new Deck
-                {
-                    Kind = DeckKind.Bridge, Ax = a.x - ux * 1.5f, Az = a.z - uz * 1.5f, Bx = b.x + ux * 1.5f, Bz = b.z + uz * 1.5f, W = 6f,
-                    HA = ha, HB = hb, Prof = prof, Rel = false, Walk = true, Solid = false, Rails = true,
-                });
-                Bridges.Add(d);
-            }
-            // под настилом земля не выше него: иначе у бровки ущелья настил уходит под землю и выныривает ступенькой
-            foreach (var d in Bridges)
-            {
-                float r = d.Len / 2 + d.W;
-                int ix0 = Math.Max(0, M.Floor((d.X - r + Half) / Cell)), ix1 = Math.Min(Res, (int)MathF.Ceiling((d.X + r + Half) / Cell));
-                int iz0 = Math.Max(0, M.Floor((d.Z - r + Half) / Cell)), iz1 = Math.Min(Res, (int)MathF.Ceiling((d.Z + r + Half) / Cell));
-                for (int iz = iz0; iz <= iz1; iz++)
-                    for (int ix = ix0; ix <= ix1; ix++)
-                    {
-                        if (!Decks.Locate(d, ix * Cell - Half, iz * Cell - Half, out float t, out _)) continue;
-                        int k = iz * V + ix;
-                        H[k] = MathF.Min(H[k], Decks.HeightOf(d, t, 0) - 0.04f);
-                    }
-            }
-            // Сторожевые башни над переправами и стенки поперёк троп
+            // дозорные башни — на вершинах пары холмов
             Watchtowers = new List<Watchtower>();
-            foreach (var p in Mt.Paths)
+            int towers = 0;
+            foreach (var pk in Mt.Peaks)
             {
-                V2 end = p.Pts[p.Pts.Count - 1];
-                float hEnd = p.Prof[p.Prof.Length - 1];
-                for (int tries = 0; tries < 30; tries++)
-                {
-                    float a = R.F() * M.PI * 2, r = M.Lerp(9, 20, R.F()), x = end.x + MathF.Cos(a) * r, z = end.z + MathF.Sin(a) * r * 0.6f - p.Side * 6;
-                    if (M.Sign(z - Mt.Gz(x)) != p.Side || MathF.Abs(z - Mt.Gz(x)) < Mt.GorgeW / 2 + 5) continue;
-                    float y = HeightAt(x, z);
-                    if (MaskAt(x, z) > 0.05f || y < hEnd - 1 || SlopeAt(x, z) > 0.08f) continue;
-                    Watchtowers.Add(new Watchtower { X = x, Z = z, Y = y });
-                    break;
-                }
-                // стенка с проходом поперёк тропы — рубеж обороны у моста
-                int i = Math.Max(0, p.Pts.Count - 9);
-                V2 q = p.Pts[i], q2 = p.Pts[Math.Max(0, i - 2)];
-                float dx = q.x - q2.x, dz = q.z - q2.z, l = M.Hypot(dx, dz);
-                if (l == 0) l = 1;
-                float nx = -dz / l, nz = dx / l;
-                Features.Walls.Add(new FeatureWall { Ax = q.x + nx * 2.2f, Az = q.z + nz * 2.2f, Bx = q.x + nx * 7.5f, Bz = q.z + nz * 7.5f, H = 1.35f, T = 0.6f });
-                Features.Walls.Add(new FeatureWall { Ax = q.x - nx * 2.2f, Az = q.z - nz * 2.2f, Bx = q.x - nx * 7.5f, Bz = q.z - nz * 7.5f, H = 1.35f, T = 0.6f });
+                if (!pk.Hill || towers >= 2 || R.Next() < 0.4) continue;
+                Watchtowers.Add(new Watchtower { X = pk.X, Z = pk.Z, Y = HeightAt(pk.X, pk.Z) });
+                towers++;
             }
         }
 
@@ -866,20 +723,34 @@ namespace BattleSim.Core
             }
             else if (Type == MapType.Mountains)
             {
-                // Долины у армий, между ними — массив террасами с обрывами, посередине ущелье с рекой
-                var Mt = Mtn;
-                double zz = Math.Abs(z), m = M.Smooth(FIELD * 0.62, FIELD * 0.4, zz);
-                field = 3 + hills * 2.5 + detail * 0.4;
-                if (m > 0)
+                // Горы: долина, над ней скальные вершины с пологими предгорьями и холмы; дно проходов между
+                // вершинами выровнено — там всегда можно пройти
+                double valley = 3 + hills * 1.6 + detail * 0.35;
+                field = valley;
+                foreach (var pk in Mtn.Peaks)
                 {
-                    double mh = 8 + n.Ridged(x * 0.017 + omx, z * 0.017 + omz, 4) * 13 + hills * 3;
-                    double q = mh / 5, fl = Math.Floor(q), fr = q - fl;
-                    double soft = M.Smooth(0.42, 0.66, n.N01(x * 0.03 + olx, z * 0.03 + olz)); // где-то уступ пологий — естественный подъём
-                    mh = (fl + M.Smooth(M.Lerp(0.74, 0.25, soft), M.Lerp(0.92, 0.99, soft), fr)) * 5;
-                    field = M.Lerp(field, mh + detail * 0.5, m);
+                    double dx = x - pk.X, dz = z - pk.Z, dr = Math.Sqrt(dx * dx + dz * dz);
+                    if (dr > pk.R * 1.15) continue;
+                    double ang = Math.Atan2(dz, dx);
+                    // неровный край: гора не циркульная
+                    double d = dr / pk.R * (1 + 0.14 * (n.N01(Math.Cos(ang) * 1.3 + pk.Seed, Math.Sin(ang) * 1.3 + pk.Seed) - 0.5) * 2);
+                    if (d >= 1) continue;
+                    double h;
+                    if (pk.Hill) h = pk.H * Math.Pow(Math.Cos(d * Math.PI / 2), 2);
+                    else if (d > Peak.Core) h = pk.Foot * M.Smooth(1, Peak.Core, d);
+                    else
+                    { // скальное ядро: от подножия круто вверх, гребни и уступы шумом
+                        double t = (Peak.Core - d) / Peak.Core;
+                        double crag = 0.72 + 0.4 * n.Ridged(x * 0.045 + pk.Seed, z * 0.045 + pk.Seed, 3);
+                        h = pk.Foot + (pk.H - pk.Foot) * Math.Pow(t, 0.75) * crag;
+                    }
+                    field = Math.Max(field, valley + h);
                 }
-                double dg = M.PolyDist((float)x, (float)z, Mt.GorgePts), hw = Mt.GorgeW / 2.0;
-                if (dg < hw + 3) field = M.Lerp(field, -3.5, M.Smooth(hw + 3, hw - 1, dg));
+                foreach (var ps in Mtn.Passes)
+                {
+                    double dp = M.SegDist((float)x, (float)z, ps.A.x, ps.A.z, ps.B.x, ps.B.z), hw = ps.W / 2;
+                    if (dp < hw + 3) field = M.Lerp(field, Math.Min(field, valley + 0.6), M.Smooth(hw + 3, hw - 0.5, dp));
+                }
             }
             else field = 2.6 + hills * 3.2 + detail * 0.35;
 
