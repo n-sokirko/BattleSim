@@ -9,6 +9,9 @@ namespace BattleSim.Core
     {
         public bool Rect;
         public float X, Z, Hx, Hz, C, S, R, Top, Ground;
+        /// <summary>С каким радиусом вставлено в сетку (чтобы убрать) и чей это предмет окружения (или null — камень).</summary>
+        public float Rad;
+        public EnvObj Env;
     }
 
     public sealed class Obstacles
@@ -19,16 +22,22 @@ namespace BattleSim.Core
         public Obstacles(float field) { Grid = new SpatialGrid<Obstacle>(field); }
 
         /// <summary>Прямоугольник (дом): центр, полуразмеры, поворот, высота крыши над землёй.</summary>
-        public void AddRect(float x, float z, float hx, float hz, float ang, float top, float ground)
+        public Obstacle AddRect(float x, float z, float hx, float hz, float ang, float top, float ground)
         {
-            var o = new Obstacle { Rect = true, X = x, Z = z, Hx = hx, Hz = hz, C = MathF.Cos(ang), S = MathF.Sin(ang), Top = top, Ground = ground };
-            Grid.Insert(o, x, z, M.Hypot(hx, hz));
+            var o = new Obstacle { Rect = true, X = x, Z = z, Hx = hx, Hz = hz, C = MathF.Cos(ang), S = MathF.Sin(ang), Top = top, Ground = ground, Rad = M.Hypot(hx, hz) };
+            Grid.Insert(o, x, z, o.Rad);
+            return o;
         }
 
-        public void AddCircle(float x, float z, float r, float top, float ground)
+        public Obstacle AddCircle(float x, float z, float r, float top, float ground)
         {
-            Grid.Insert(new Obstacle { Rect = false, X = x, Z = z, R = r, Top = top, Ground = ground }, x, z, r);
+            var o = new Obstacle { Rect = false, X = x, Z = z, R = r, Top = top, Ground = ground, Rad = r };
+            Grid.Insert(o, x, z, r);
+            return o;
         }
+
+        /// <summary>Убрать препятствие (дом рухнул, ограду проломили).</summary>
+        public void Remove(Obstacle o) => Grid.Remove(o, o.X, o.Z, o.Rad);
 
         /// <summary>Точка внутри препятствия (с запасом pad)? Возвращает препятствие или null.</summary>
         public Obstacle Hit(float x, float z, float pad = 0f, float y = float.NaN)
@@ -349,10 +358,36 @@ namespace BattleSim.Core
 
         void Build(World w)
         {
+            BuildArea(w, 0, 0, Dim - 1, Dim - 1);
+            CountBarriers();
+        }
+
+        /// <summary>Сколько раз сетка менялась после постройки (дом рухнул, ограду проломили) — пути, найденные раньше, могли устареть.</summary>
+        public int Version;
+
+        /// <summary>
+        /// Пересчитать клетки в прямоугольнике мира (рухнул дом, проломили ограду): проходимость, укрытия, отвесы
+        /// и связные области. Остальная сетка не трогается — полный пересчёт стоит десятки миллисекунд.
+        /// </summary>
+        public void Refresh(World w, float x0, float z0, float x1, float z1)
+        {
+            float c = CellSize;
+            int ix0 = Math.Max(0, M.Floor((x0 + Half) / c) - 1), ix1 = Math.Min(Dim - 1, M.Floor((x1 + Half) / c) + 1);
+            int iz0 = Math.Max(0, M.Floor((z0 + Half) / c) - 1), iz1 = Math.Min(Dim - 1, M.Floor((z1 + Half) / c) + 1);
+            if (ix0 > ix1 || iz0 > iz1) return;
+            BuildArea(w, ix0, iz0, ix1, iz1);
+            CountBarriers();
+            Region = new[] { Label(0), Label(1) };
+            Version++;
+        }
+
+        /// <summary>Клетки [ix0..ix1] × [iz0..iz1]; отвесы — и у соседей по краю: ребро к клетке хранит клетка слева/снизу.</summary>
+        void BuildArea(World w, int ix0, int iz0, int ix1, int iz1)
+        {
             int D = Dim;
             float c = CellSize;
-            for (int iz = 0; iz < D; iz++)
-                for (int ix = 0; ix < D; ix++)
+            for (int iz = iz0; iz <= iz1; iz++)
+                for (int ix = ix0; ix <= ix1; ix++)
                 {
                     int i = iz * D + ix;
                     float x = -Half + (ix + 0.5f) * c, z = -Half + (iz + 0.5f) * c;
@@ -372,6 +407,7 @@ namespace BattleSim.Core
                         else if (f > 0.3f) { si *= 0.92f; sc *= 0.75f; }
                         if (w.ReedsAt(x, z)) hide = 1;                               // камыш
                         if (w.Decks.SolidTop(x, z, g) > g + 1) si = sc = 0;          // сплошная кладка без хода
+                        if (w.Env != null && w.Env.RubbleAt(x, z)) { si *= 0.6f; sc *= 0.35f; hide = 1; } // руины дома: завал
                     }
                     var ob = w.Obs.Hit(x, z, 0.4f);
                     if (ob != null && (ob.Rect || ob.R > 1)) si = sc = 0;           // дом, колодец, башня
@@ -379,10 +415,11 @@ namespace BattleSim.Core
                     Conceal[i] = hide; Canopy[i] = canopy;
                 }
             // крутизна склона в клетке (по земле; настил ровный) — к цене пути
-            for (int iz = 0; iz < D; iz++)
-                for (int ix = 0; ix < D; ix++)
+            for (int iz = iz0; iz <= iz1; iz++)
+                for (int ix = ix0; ix <= ix1; ix++)
                 {
                     int i = iz * D + ix;
+                    SlopeCost[i] = 0;
                     if (Speed[0][i] == 0 && Speed[1][i] == 0) continue;
                     var p = Center(i);
                     if (w.OnDeck(p.x, p.z)) continue;
@@ -391,10 +428,12 @@ namespace BattleSim.Core
                     SlopeCost[i] = MathF.Max(0, M.Hypot(gx, gz) - 0.35f) * 2.5f;
                 }
             // отвесы между центрами соседних клеток: профиль рельефа (с настилами) с шагом ~0,3 м, как правило шага бойца
-            for (int iz = 0; iz < D; iz++)
-                for (int ix = 0; ix < D; ix++)
+            int sx0 = Math.Max(0, ix0 - 1), sx1 = Math.Min(D - 1, ix1 + 1), sz0 = Math.Max(0, iz0 - 1), sz1 = Math.Min(D - 1, iz1 + 1);
+            for (int iz = sz0; iz <= sz1; iz++)
+                for (int ix = sx0; ix <= sx1; ix++)
                 {
                     int i = iz * D + ix;
+                    Sheer[i] = 0;
                     if (Speed[0][i] == 0 && Speed[1][i] == 0) continue;
                     var p = Center(i);
                     if (ix + 1 < D && SheerLine(w, p.x, p.z, p.x + c, p.z)) Sheer[i] |= 1;
@@ -406,10 +445,10 @@ namespace BattleSim.Core
             // через них нельзя, только в проём; без этого путь шёл прямо сквозь ограду, и бойцы упирались в неё
             void Fence(float fax, float faz, float fbx, float fbz, float pad)
             {
-                int ix0 = Math.Max(0, M.Floor((MathF.Min(fax, fbx) - pad - c + Half) / c) - 1), ix1 = Math.Min(D - 1, M.Floor((MathF.Max(fax, fbx) + pad + c + Half) / c) + 1);
-                int iz0 = Math.Max(0, M.Floor((MathF.Min(faz, fbz) - pad - c + Half) / c) - 1), iz1 = Math.Min(D - 1, M.Floor((MathF.Max(faz, fbz) + pad + c + Half) / c) + 1);
-                for (int iz = iz0; iz <= iz1; iz++)
-                    for (int ix = ix0; ix <= ix1; ix++)
+                int fx0 = Math.Max(sx0, M.Floor((MathF.Min(fax, fbx) - pad - c + Half) / c) - 1), fx1 = Math.Min(sx1, M.Floor((MathF.Max(fax, fbx) + pad + c + Half) / c) + 1);
+                int fz0 = Math.Max(sz0, M.Floor((MathF.Min(faz, fbz) - pad - c + Half) / c) - 1), fz1 = Math.Min(sz1, M.Floor((MathF.Max(faz, fbz) + pad + c + Half) / c) + 1);
+                for (int iz = fz0; iz <= fz1; iz++)
+                    for (int ix = fx0; ix <= fx1; ix++)
                     {
                         int i = iz * D + ix;
                         var p = Center(i);
@@ -420,7 +459,7 @@ namespace BattleSim.Core
                     }
             }
             foreach (var fw in w.Features.Walls)
-                if (fw.Solid) Fence(fw.Ax, fw.Az, fw.Bx, fw.Bz, fw.T / 2 + 0.2f);
+                if (fw.Solid && !fw.Broken) Fence(fw.Ax, fw.Az, fw.Bx, fw.Bz, fw.T / 2 + 0.2f);
             // перила мостов: сойти можно только с концов настила
             foreach (var d in w.Decks.List)
                 if (d.Rails && d.Len > 3.5f)
@@ -429,7 +468,11 @@ namespace BattleSim.Core
                         float nx = -d.Uz * sd * d.W / 2, nz = d.Ux * sd * d.W / 2;
                         Fence(d.Ax + d.Ux * 1.5f + nx, d.Az + d.Uz * 1.5f + nz, d.Bx - d.Ux * 1.5f + nx, d.Bz - d.Uz * 1.5f + nz, 0.1f);
                     }
-            int b = 0;
+        }
+
+        void CountBarriers()
+        {
+            int D = Dim, b = 0;
             for (int iz = 0; iz < D; iz++)
                 for (int ix = 0; ix < D; ix++)
                 {

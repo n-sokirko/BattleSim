@@ -11,8 +11,9 @@ using BattleSim.Core;
 /// <summary>
 /// Проверки ядра без Unity (запускаются в CI и локально):
 ///   models  — у каждого бойца каждой расы есть модель, снаряжение из Keep и клипы; все модели читаются;
+///   env     — окружение: дом, ограда, ящик ломаются, мир это замечает (пути, видимость, укрытия);
 ///   battles — короткие бои на всех пяти картах: без исключений, NaN, скачков, бойцов внутри препятствий, и бой идёт.
-/// dotnet run -c Release --project tests/CoreChecks [-- models|battles]
+/// dotnet run -c Release --project tests/CoreChecks [-- models|env|battles]
 /// </summary>
 static class Program
 {
@@ -31,6 +32,7 @@ static class Program
         bool all = args.Length == 0;
         var sw = Stopwatch.StartNew();
         if (all || args.Contains("models")) Models.Run();
+        if (all || args.Contains("env")) EnvChecks.Run(Fail, CityDefs);
         if (all || args.Contains("battles")) Battles.Run();
         Console.WriteLine();
         Console.WriteLine($"Время: {sw.Elapsed.TotalSeconds:F0} с");
@@ -62,6 +64,22 @@ static class Program
         sb.AppendLine(Failures.Count == 0 ? "**Все проверки ядра пройдены.**" : $"**Не пройдено: {Failures.Count}**");
         foreach (var f in Failures) sb.AppendLine("- " + f.Split('\n')[0]);
         File.AppendAllText(path, sb.ToString());
+    }
+
+    static List<CityDef> cityDefs;
+
+    /// <summary>Размеры городских построек — из их моделей (как в игре).</summary>
+    public static List<CityDef> CityDefs()
+    {
+        if (cityDefs != null) return cityDefs;
+        cityDefs = new List<CityDef>();
+        foreach (var (kind, name) in CityPlan.Models)
+        {
+            var doc = GltfDoc.Parse(File.ReadAllBytes(Path.Combine(ModelsDir, "city_" + name + ".bytes")));
+            ModelKit.MergeStatic(doc, out float w, out float d, out float h);
+            cityDefs.Add(new CityDef { Kind = kind, Name = name, W = w, D = d, H = h, Index = cityDefs.Count });
+        }
+        return cityDefs;
     }
 
     static GltfDoc Load(string name) => GltfDoc.Parse(File.ReadAllBytes(Path.Combine(ModelsDir, name + ".bytes")));

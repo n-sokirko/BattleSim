@@ -1576,6 +1576,8 @@ namespace BattleSim.Core
                         Damage(e, dmg * fall * own, nx * k, nz * k, false, null);
                         if (e.Squad != null) e.Squad.Morale -= 1.5f * own;
                     }
+            // и окружению: ящики и бочки в щепки, баррикады в пролом, дом после нескольких бомб оседает
+            World.Env?.Blast(p, r * 1.2f, dmg * 5, this);
         }
 
         void Separate()

@@ -90,7 +90,7 @@ static class BattleRun
         }
         int lost = fallen.Count;
         Console.WriteLine(FormattableString.Invariant(
-            $"RESULT units={b.Units.Count} lost={lost} stuck%={100.0 * stuck / Math.Max(1, stuckSamples):F2} jumps={jumps} inObs={inObs} deep={deep} nan={nan} samples={samples}"));
+            $"RESULT units={b.Units.Count} lost={lost} stuck%={100.0 * stuck / Math.Max(1, stuckSamples):F2} jumps={jumps} inObs={inObs} deep={deep} nan={nan} samples={samples} ruined={world.Env.Ruined}"));
         foreach (var n in notes) Console.WriteLine("  " + n);
         return 0;
     }
