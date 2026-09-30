@@ -39,6 +39,9 @@ namespace BattleSim.Core
         /// <summary>Убрать препятствие (дом рухнул, ограду проломили).</summary>
         public void Remove(Obstacle o) => Grid.Remove(o, o.X, o.Z, o.Rad);
 
+        /// <summary>Вернуть убранное препятствие (реванш на той же карте).</summary>
+        public void Restore(Obstacle o) => Grid.Insert(o, o.X, o.Z, o.Rad);
+
         /// <summary>Точка внутри препятствия (с запасом pad)? Возвращает препятствие или null.</summary>
         public Obstacle Hit(float x, float z, float pad = 0f, float y = float.NaN)
         {
@@ -57,6 +60,26 @@ namespace BattleSim.Core
                 else if (dx * dx + dz * dz < (o.R + pad) * (o.R + pad)) return o;
             }
             return null;
+        }
+
+        /// <summary>Есть ли тут дом, колодец, башня или ограда (а не только бочка или ствол), с запасом pad — для сетки путей.</summary>
+        public bool Solid(float x, float z, float pad)
+        {
+            var L = Grid.Near(x, z);
+            if (L == null) return false;
+            for (int i = 0; i < L.Count; i++)
+            {
+                var o = L[i];
+                if (!o.Rect && o.R <= 1) continue;
+                float dx = x - o.X, dz = z - o.Z;
+                if (o.Rect)
+                {
+                    float lx = dx * o.C + dz * o.S, lz = -dx * o.S + dz * o.C;
+                    if (MathF.Abs(lx) < o.Hx + pad && MathF.Abs(lz) < o.Hz + pad) return true;
+                }
+                else if (dx * dx + dz * dz < (o.R + pad) * (o.R + pad)) return true;
+            }
+            return false;
         }
 
         /// <summary>Выталкивает круг радиуса r из препятствий (солдат скользит вдоль стены).</summary>
@@ -409,8 +432,7 @@ namespace BattleSim.Core
                         if (w.Decks.SolidTop(x, z, g) > g + 1) si = sc = 0;          // сплошная кладка без хода
                         if (w.Env != null && w.Env.RubbleAt(x, z)) { si *= 0.6f; sc *= 0.35f; hide = 1; } // руины дома: завал
                     }
-                    var ob = w.Obs.Hit(x, z, 0.4f);
-                    if (ob != null && (ob.Rect || ob.R > 1)) si = sc = 0;           // дом, колодец, башня
+                    if (w.Obs.Solid(x, z, 0.4f)) si = sc = 0;                      // дом, колодец, башня (а не бочка у его стены)
                     Speed[0][i] = si; Speed[1][i] = sc;
                     Conceal[i] = hide; Canopy[i] = canopy;
                 }

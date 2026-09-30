@@ -375,38 +375,74 @@ namespace BattleSim.Core
         /// <summary>Каменные ограды, завалы и баррикады: камни рядами, верх местами осыпался.</summary>
         public static MeshData DryWalls(World w)
         {
-            var R = new Rng(991);
-            var stones = new List<(float x, float y, float z, float yaw, float sx, float sy, float sz, float c)>();
-            foreach (var wl in w.Features.Walls)
+            var bb = new BoxBuilder();
+            for (int i = 0; i < w.Features.Walls.Count; i++) DryWall(bb, w, w.Features.Walls[i], i);
+            return bb.Count > 0 ? bb.Build() : null;
+        }
+
+        /// <summary>
+        /// Одна ограда (index — её номер: у каждой своё зерно, и пролом одной не перекладывает камни в других).
+        /// Камень — рядами, верх местами осыпался; деревянная баррикада — колья и доски. Проломленная — осыпь
+        /// камней по обе стороны или разбросанные доски.
+        /// </summary>
+        public static void DryWall(BoxBuilder bb, World w, FeatureWall wl, int index)
+        {
+            float len = M.Hypot(wl.Bx - wl.Ax, wl.Bz - wl.Az);
+            if (len < 0.3f) return;
+            var R = new Rng(991 + index * 7919);
+            float dx = (wl.Bx - wl.Ax) / len, dz = (wl.Bz - wl.Az) / len, yaw = MathF.Atan2(dx, dz), nx = -dz, nz = dx;
+            void Stone(float x, float y, float z, float yw, float sx, float sy, float sz, Rgb c, float tilt)
             {
-                float len = M.Hypot(wl.Bx - wl.Ax, wl.Bz - wl.Az);
-                if (len < 0.3f) continue;
-                float dx = (wl.Bx - wl.Ax) / len, dz = (wl.Bz - wl.Az) / len, yaw = MathF.Atan2(dx, dz);
-                int courses = wl.H > 1.2f ? 3 : 2;
-                for (int course = 0; course < courses; course++)
-                {
-                    float sy = course == 2 ? 0.3f : 0.52f, y0 = course == 0 ? 0.26f : course == 1 ? 0.78f : 1.2f;
-                    for (float s = (course % 2) * 0.35f; s < len; s += M.Lerp(0.62f, 0.8f, R.F()))
+                var rot = Mat4.Compose(0, 0, 0, MathF.Sin(tilt / 2), 0, 0, MathF.Cos(tilt / 2), 1, 1, 1) * Mat4.RotationY(yw + M.PI / 2);
+                bb.Box(Mat4.Translation(x, y, z) * rot * Mat4.Compose(0, 0, 0, 0, 0, 0, 1, sx, sy, sz), c);
+            }
+            if (wl.Wood)
+            {
+                Rgb wood = Rgb.Hex(0x6b4a2e), dark = Rgb.Hex(0x4e3521);
+                if (wl.Broken)
+                { // доски вповалку
+                    for (float s = 0.2f; s < len; s += M.Lerp(0.5f, 0.9f, R.F()))
                     {
-                        if (course == courses - 1 && R.Next() < 0.35) continue; // верх ограды местами осыпался
-                        float x = wl.Ax + dx * s, z = wl.Az + dz * s;
-                        float yw = yaw + M.Lerp(-0.12f, 0.12f, R.F()), sx = M.Lerp(0.62f, 0.82f, R.F()), sz = wl.T * M.Lerp(0.9f, 1.1f, R.F()), c = M.Lerp(0.78f, 1.05f, R.F());
-                        stones.Add((x, w.HeightAt(x, z) + y0, z, yw, sx, sy, sz, c));
+                        float side = M.Lerp(-1.2f, 1.2f, R.F()), x = wl.Ax + dx * s + nx * side, z = wl.Az + dz * s + nz * side;
+                        Stone(x, w.HeightAt(x, z) + 0.06f, z, yaw + M.Lerp(-1.2f, 1.2f, R.F()), M.Lerp(0.8f, 1.6f, R.F()), 0.08f, 0.22f, (R.Next() < 0.5 ? wood : dark) * M.Lerp(0.8f, 1.05f, R.F()), M.Lerp(-0.2f, 0.2f, R.F()));
                     }
+                    return;
+                }
+                // колья через полметра и две доски поперёк
+                for (float s = 0.1f; s < len; s += 0.5f)
+                {
+                    float x = wl.Ax + dx * s, z = wl.Az + dz * s, h = wl.H * M.Lerp(0.9f, 1.15f, R.F());
+                    Stone(x, w.HeightAt(x, z) + h / 2, z, yaw, 0.14f, h, 0.14f, dark * M.Lerp(0.85f, 1.05f, R.F()), M.Lerp(-0.08f, 0.08f, R.F()));
+                }
+                for (int k = 0; k < 2; k++)
+                {
+                    float y0 = wl.H * (k == 0 ? 0.35f : 0.8f), mx = (wl.Ax + wl.Bx) / 2, mz = (wl.Az + wl.Bz) / 2;
+                    Stone(mx + nx * 0.1f, w.HeightAt(mx, mz) + y0, mz + nz * 0.1f, yaw, len, 0.22f, 0.06f, wood * M.Lerp(0.85f, 1.05f, R.F()), 0);
+                }
+                return;
+            }
+            var baseC = Rgb.Hex(0x8c8479);
+            if (wl.Broken)
+            { // пролом: камни осыпались по обе стороны, наполовину в земле
+                for (float s = 0; s < len; s += M.Lerp(0.35f, 0.55f, R.F()))
+                {
+                    float side = M.Lerp(-1.3f, 1.3f, R.F()), x = wl.Ax + dx * s + nx * side, z = wl.Az + dz * s + nz * side;
+                    Stone(x, w.HeightAt(x, z) + 0.08f, z, yaw + M.Lerp(-0.8f, 0.8f, R.F()), M.Lerp(0.45f, 0.75f, R.F()), 0.36f, wl.T * M.Lerp(0.8f, 1.1f, R.F()), baseC * M.Lerp(0.72f, 1f, R.F()), M.Lerp(-0.4f, 0.4f, R.F()));
+                }
+                return;
+            }
+            int courses = wl.H > 1.2f ? 3 : 2;
+            for (int course = 0; course < courses; course++)
+            {
+                float sy = course == 2 ? 0.3f : 0.52f, y0 = course == 0 ? 0.26f : course == 1 ? 0.78f : 1.2f;
+                for (float s = (course % 2) * 0.35f; s < len; s += M.Lerp(0.62f, 0.8f, R.F()))
+                {
+                    if (course == courses - 1 && R.Next() < 0.35) continue; // верх ограды местами осыпался
+                    float x = wl.Ax + dx * s, z = wl.Az + dz * s;
+                    float yw = yaw + M.Lerp(-0.12f, 0.12f, R.F()), sx = M.Lerp(0.62f, 0.82f, R.F()), sz = wl.T * M.Lerp(0.9f, 1.1f, R.F()), c = M.Lerp(0.78f, 1.05f, R.F());
+                    Stone(x, w.HeightAt(x, z) + y0, z, yw, sx, sy, sz, baseC * c, M.Lerp(-0.05f, 0.05f, R.F()));
                 }
             }
-            if (stones.Count == 0) return null;
-            var bb = new BoxBuilder();
-            var baseC = Rgb.Hex(0x8c8479);
-            foreach (var st in stones)
-            {
-                float ex = M.Lerp(-0.05f, 0.05f, R.F()), ez = M.Lerp(-0.05f, 0.05f, R.F());
-                var rot = Mat4.Compose(0, 0, 0, MathF.Sin(ex / 2), 0, 0, MathF.Cos(ex / 2), 1, 1, 1)
-                        * Mat4.RotationY(st.yaw + M.PI / 2)
-                        * Mat4.Compose(0, 0, 0, 0, 0, MathF.Sin(ez / 2), MathF.Cos(ez / 2), 1, 1, 1);
-                bb.Box(Mat4.Translation(st.x, st.y, st.z) * rot * Mat4.Compose(0, 0, 0, 0, 0, 0, 1, st.sx, st.sy, st.sz), baseC * st.c);
-            }
-            return bb.Build();
         }
 
         /// <summary>Пучок травы: 5 изогнутых травинок с двух сторон (нормаль вверх).</summary>

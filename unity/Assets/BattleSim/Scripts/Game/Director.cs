@@ -179,6 +179,7 @@ namespace BattleSim
                     case FxKind.Hit:
                     case FxKind.Block: AddHeat(e.Pos.x, e.Pos.z, 0.4f); break;
                     case FxKind.Kill: AddHeat(e.Pos.x, e.Pos.z, 3f); break;
+                    case FxKind.Collapse: AddHeat(e.Pos.x, e.Pos.z, 12f); break; // рухнул дом — есть на что посмотреть
                     case FxKind.Charge: OnTrample(e); break;
                     case FxKind.Duel: OnHero(e, true); break;
                     case FxKind.Hero: OnHero(e, false); break;

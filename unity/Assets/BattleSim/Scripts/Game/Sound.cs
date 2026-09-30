@@ -97,6 +97,9 @@ namespace BattleSim
                         case FxKind.Splash: Play("splash", p, cam, 0.5f, 0.1f, pitch); break;
                         case FxKind.BoltGround: Play("thunk", p, cam, 0.3f, 0.05f, pitch); break;
                         case FxKind.Down: Play("thud", p, cam, 0.5f, 0.1f, pitch * 0.75f); break;
+                        case FxKind.Crumble: Play("thud", p, cam, 0.55f, 0.3f, pitch * 0.6f); break;
+                        case FxKind.Collapse: Play("boom", p, cam, 0.9f, 1.5f, pitch * 0.5f); Play("thud", p, cam, 0.9f, 1.5f, pitch * 0.45f); break;
+                        case FxKind.Shatter: Play("thunk", p, cam, 0.6f, 0.15f, pitch * 0.8f); Play("thud", p, cam, 0.4f, 0.15f, pitch * 1.2f); break;
                     }
                 }
                 // стрелы и болты: свист при вылете (не каждый — залп и так слышен)

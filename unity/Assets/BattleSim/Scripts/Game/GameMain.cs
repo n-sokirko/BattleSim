@@ -503,6 +503,7 @@ namespace BattleSim
                         case FxKind.Hero: Rig.Shake(0.5f, e.Pos); break;
                         case FxKind.Roar: Rig.Shake(0.35f, e.Pos); break;
                         case FxKind.Charge: Rig.Shake(0.06f, e.Pos); break;
+                        case FxKind.Collapse: Rig.Shake(0.3f, e.Pos); break;
                     }
             if (fx != null)
             {
@@ -512,6 +513,7 @@ namespace BattleSim
             }
             Battle.Fx.Clear();
             UpdateBanners();
+            view.Sync();
             view.Draw();
         }
 

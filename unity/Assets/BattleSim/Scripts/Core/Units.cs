@@ -195,6 +195,9 @@ namespace BattleSim.Core
         public int PathI;
         // застрял и не может дойти до цели — на время забываем этот отряд
         public float StuckT, IgnoreT;
+        /// <summary>Упёрся в то, что ломается (ящик, баррикада): сколько уже стоит (BlockT), когда можно ударить конём снова (BashT) и что рубит.</summary>
+        public float BlockT, BashT;
+        public EnvObj EnvTarget;
         public Squad IgnoreSquad;
         // место в строю: шеренга, смещение вбок и назад от точки отряда
         public int Row = -1;

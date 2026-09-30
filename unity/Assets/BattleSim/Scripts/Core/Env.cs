@@ -28,12 +28,16 @@ namespace BattleSim.Core
         /// <summary>Прочность; MaxHp 0 — не ломается (развалины, колодец-сруб из камня на площади и т. п.).</summary>
         public float Hp, MaxHp;
         public Obstacle Obs;
+        /// <summary>Препятствие целого предмета — чтобы вернуть его на реванш.</summary>
+        public Obstacle Home;
         public Building Building;
         public Prop Prop;
         public FeatureWall Wall;
         public ForestTree Tree;
         /// <summary>Растёт при каждом видимом изменении (повреждён, рухнул) — Unity-слой перестраивает свой меш.</summary>
         public int Version;
+        /// <summary>Чем ударили последний раз (от этого — как рушится: взрыв разбрасывает, огонь оставляет головешки).</summary>
+        public Harm LastHarm;
 
         public bool Breakable => MaxHp > 0 && State != EnvState.Ruined;
         /// <summary>Радиус описанного круга.</summary>
@@ -77,6 +81,7 @@ namespace BattleSim.Core
         {
             o.Id = All.Count;
             o.Hp = o.MaxHp;
+            o.Home = o.Obs;
             All.Add(o);
             grid.Insert(o, o.X, o.Z, o.Bound);
             return o;
@@ -105,6 +110,7 @@ namespace BattleSim.Core
         {
             if (o.Kind == EnvKind.Tree) return h == Harm.Fire ? 1 : h == Harm.Blast ? 0.1f : 0;
             if (o.Mat == EnvMat.Stone) return h == Harm.Blast ? 0.35f : h == Harm.Blade ? 0.05f : 0;
+            if (o.Kind == EnvKind.Wall && h == Harm.Charge) return 0.5f; // баррикада держит коня вдвое лучше ящика
             return 1;
         }
 
@@ -116,6 +122,7 @@ namespace BattleSim.Core
             if (dmg <= 0) return false;
             float before = o.Hp;
             o.Hp -= dmg;
+            o.LastHarm = h;
             if (o.Hp <= 0) { Ruin(o, b); return true; }
             if (o.State == EnvState.Intact && o.Hp < o.MaxHp * 0.5f)
             {
@@ -145,6 +152,34 @@ namespace BattleSim.Core
         {
             o.Version++;
             if (!Changed.Contains(o)) Changed.Add(o);
+        }
+
+        /// <summary>Реванш на той же карте: всё целое, как до боя.</summary>
+        public void Restore()
+        {
+            bool any = false;
+            foreach (var o in All)
+            {
+                if (o.State == EnvState.Intact && o.Hp == o.MaxHp) continue;
+                bool was = o.State == EnvState.Ruined;
+                o.Hp = o.MaxHp;
+                o.State = EnvState.Intact;
+                if (was)
+                {
+                    if (o.Obs == null && o.Home != null) { w.Obs.Restore(o.Home); o.Obs = o.Home; }
+                    if (o.Wall != null)
+                    {
+                        var wl = o.Wall;
+                        wl.Broken = false;
+                        w.WallGrid.Insert(wl, (wl.Ax + wl.Bx) / 2, (wl.Az + wl.Bz) / 2, M.Hypot(wl.Bx - wl.Ax, wl.Bz - wl.Az) / 2 + wl.T);
+                    }
+                    any = true;
+                }
+                Touch(o);
+            }
+            rubble.Clear();
+            Ruined = 0;
+            if (any) w.Nav.Refresh(w, -w.Field - 2, -w.Field - 2, w.Field + 2, w.Field + 2);
         }
 
         /// <summary>Предмет рухнул: убираем препятствие, пересчитываем пути и видимость вокруг.</summary>

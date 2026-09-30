@@ -72,6 +72,14 @@ static class EnvChecks
             var fresh = new NavGrid(w);
             string d = Diff(w.Nav, fresh);
             if (d != null) fail($"{at}: сетка путей после разрушений не совпадает с построенной заново: {d}");
+            // реванш: всё как до боя
+            w.Env.Restore();
+            var clean = Make(MapType.City, seed, cityDefs());
+            d = Diff(w.Nav, clean.Nav);
+            if (d != null) fail($"{at}: после восстановления сетка путей не как у нетронутого мира: {d}");
+            if (w.Obs.List.Count != clean.Obs.List.Count || w.WallGrid.All.Count != clean.WallGrid.All.Count || w.Env.All.Any(o => o.State != EnvState.Intact || o.Hp != o.MaxHp))
+                fail($"{at}: после восстановления не всё целое");
+            n++;
         }
         Console.WriteLine($"  проверок разрушения: {n}");
     }

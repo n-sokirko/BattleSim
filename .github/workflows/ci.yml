@@ -28,7 +28,11 @@ jobs:
       - name: Сборка ядра как в Unity
         run: dotnet build tests/Core -c Release -nologo
 
-      # модели бойцов, снаряжение и клипы; 15 боёв на всех картах (итог — в Summary запуска)
+      # Scripts/Game против эталонных сборок UnityEngine (без самого Unity): ошибки компиляции — до сборки в редакторе
+      - name: Скрипты Unity компилируются
+        run: dotnet build tests/UnityScripts -c Release -nologo
+
+      # модели бойцов, снаряжение и клипы; окружение ломается как надо; 15 боёв на всех картах (итог — в Summary запуска)
       - name: Проверки ядра
         run: dotnet run -c Release --project tests/CoreChecks
 

@@ -91,6 +91,8 @@ static class BattleRun
         int lost = fallen.Count;
         Console.WriteLine(FormattableString.Invariant(
             $"RESULT units={b.Units.Count} lost={lost} stuck%={100.0 * stuck / Math.Max(1, stuckSamples):F2} jumps={jumps} inObs={inObs} deep={deep} nan={nan} samples={samples} ruined={world.Env.Ruined}"));
+        var broken = world.Env.All.Where(o => o.State == EnvState.Ruined).GroupBy(o => $"{o.Kind}/{o.LastHarm}").Select(g => $"{g.Key}×{g.Count()}").ToArray();
+        if (broken.Length > 0) notes.Add("разрушено: " + string.Join(", ", broken));
         foreach (var n in notes) Console.WriteLine("  " + n);
         return 0;
     }

@@ -146,6 +146,7 @@ namespace BattleSim.Core
 
         public void ResetToPlan()
         {
+            World.Env?.Restore(); // реванш на той же карте: дома стоят, ограды целы
             ClearUnits();
             var map = new Dictionary<string, Squad>();
             Plan = Plan.Where(p => World.InField(p.X, p.Z, 1) && World.Walkable(p.X, p.Z, 0.4f)).ToList();
@@ -1166,6 +1167,18 @@ namespace BattleSim.Core
 
         void ResolveHit(Unit u)
         {
+            if (u.EnvTarget != null)
+            { // рубим баррикаду или ящик, в который упёрлись
+                var o = u.EnvTarget;
+                u.EnvTarget = null;
+                if (!u.Shot && o.Breakable && o.Dist(u.Pos.x, u.Pos.z) < u.T.Radius + u.T.Reach + 0.4f)
+                {
+                    Emit(FxKind.Hit, new V3((u.Pos.x + o.X) / 2, u.Pos.y + 0.9f, (u.Pos.z + o.Z) / 2), o.X - u.Pos.x, o.Z - u.Pos.z, u.Team);
+                    World.Env.Hurt(o, (u.T.Ranged ? 8 : u.T.Dmg) * 2, Harm.Blade, this);
+                }
+                u.BlockT = 0;
+                return;
+            }
             var tg = u.Target;
             if (tg == null || !tg.Alive) return;
             if (u.Shot)
@@ -1338,11 +1351,48 @@ namespace BattleSim.Core
             u.Pace += (u.CurSpeed - u.Pace) * (1 - MathF.Exp(-dt / 0.4f));
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y, lim = World.Field - 0.5f;
             float nx = M.Clamp(ox + (vx * f + u.Knock.x) * dt, -lim, lim), nz = M.Clamp(oz + (vz * f + u.Knock.z) * dt, -lim, lim);
+            if (sp > 0.5f) Bash(u, nx, nz, oy, u.CurSpeed, dt);
             // Не заходим в непроходимое, в ствол и в камень, не прыгаем с обрыва или со стены — скользим вдоль
             if (!Place(u, nx, nz, cls) && !Place(u, nx, oz, cls) && !Place(u, ox, nz, cls) && !Veer(u, nx - ox, nz - oz, cls)) u.Pos.y = World.GroundAt(ox, oz);
             float k = MathF.Exp(-7 * dt);
             u.Knock.x *= k; u.Knock.z *= k;
             u.Phase += dt * u.CurSpeed * (u.T.Mount ? 1.4f : 3.3f);
+        }
+
+        /// <summary>
+        /// Шаг упирается в то, что ломается (ящик, бочка, телега, деревянная баррикада). Конь на скаку разносит его
+        /// с разгона; пехотинец, который идёт в атаку или гонится за врагом, постоит секунду и начнёт рубить.
+        /// Стоящие в обороне свою баррикаду не трогают.
+        /// </summary>
+        void Bash(Unit u, float nx, float nz, float oy, float speed, float dt)
+        {
+            var ob = World.Obs.Hit(nx, nz, u.T.Radius * 0.75f, oy);
+            var o = ob?.Env;
+            if (o == null || !o.Breakable || o.Mat != EnvMat.Wood || o.Kind == EnvKind.Tree || o.Kind == EnvKind.House) { u.BlockT = 0; return; }
+            if (u.T.Mount)
+            {
+                if (speed < u.T.Speed * 0.5f || Time < u.BashT) return;
+                if (o.Kind == EnvKind.Wall)
+                { // баррикаду конь берёт только в лоб; вдоль неё, протискиваясь в проём, — просто задевает
+                    float vl = M.Hypot(u.Vel.x, u.Vel.z), wn = MathF.Abs(-MathF.Sin(o.Rot) * u.Vel.x + MathF.Cos(o.Rot) * u.Vel.z);
+                    if (vl < 1e-3f || wn < 0.7f * vl) return;
+                }
+                u.BashT = Time + 0.5f;
+                if (World.Env.Hurt(o, u.T.Mass * speed * 9, Harm.Charge, this)) { u.Vel.x *= 0.75f; u.Vel.z *= 0.75f; }
+                else { u.Vel.x *= 0.4f; u.Vel.z *= 0.4f; } // не разнёс — осадил коня
+                Emit(FxKind.Charge, new V3(nx, oy, nz), u.Vel.x, u.Vel.z, u.Team);
+                return;
+            }
+            var mode = u.Squad?.Order.Mode;
+            bool pushing = u.Target != null || mode == Mode.Advance || mode == Mode.Charge;
+            if (!pushing || u.Engaged || u.DownT > 0) { u.BlockT = 0; return; }
+            // протискивается в проём, задевая баррикаду боком, — не рубит; встал и стоит — рубит
+            if (u.CurSpeed > 0.5f) { u.BlockT = MathF.Max(0, u.BlockT - dt); return; }
+            u.BlockT += dt;
+            if (u.BlockT < 2 || u.AtkT >= 0 || u.Cooldown > 0) return;
+            u.Face(o.X - u.Pos.x, o.Z - u.Pos.z, 1);
+            u.EnvTarget = o;
+            StartAttack(u, false);
         }
 
         /// <summary>

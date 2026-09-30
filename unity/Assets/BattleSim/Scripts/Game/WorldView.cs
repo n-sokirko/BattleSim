@@ -44,8 +44,8 @@ namespace BattleSim
             BuildTerrain(w, s, lowEnd);
             BuildWater(w, s);
             var white = Own(ModelLibrary.NewLit(null, Color.white, "vertexColors"));
-            var walls = WorldMeshes.DryWalls(w);
-            if (walls != null) Add("Walls", Own(Conv.ToMesh(walls, "walls")), white);
+            world = w; library = lib; wallMat = white;
+            BuildEnv();
             var fort = WorldMeshes.Fortress(w);
             if (fort != null) Add("Fortress", Own(Conv.ToMesh(fort, "fortress")), white);
             var bridges = WorldMeshes.Bridges(w);
@@ -144,18 +144,7 @@ namespace BattleSim
                     Add("Flowers", Own(Conv.ToMesh(WorldMeshes.Scatter(flower, w.FlowerList, i, Mathf.Min(2000, w.FlowerList.Count - i)), "flowers")), grassMat, false);
             }
 
-            // Город: все дома и мелочи — в один меш с общей текстурой
-            if (w.Town != null)
-            {
-                var parts = new List<MeshData>();
-                foreach (var b in w.Town.Buildings) parts.Add(WorldMeshes.Placed(lib.City[b.Def.Name].Data, b.X, b.Y, b.Z, b.Rot, b.S));
-                foreach (var p in w.Town.Props) parts.Add(WorldMeshes.Placed(lib.City[p.Def.Name].Data, p.X, p.Y, p.Z, p.Rot, p.S));
-                for (int i = 0; i < parts.Count; i += 40)
-                {
-                    var chunk = MeshData.Merge(parts.GetRange(i, Mathf.Min(40, parts.Count - i)));
-                    Add("Town", Own(Conv.ToMesh(chunk, "town")), lib.CityMat);
-                }
-            }
+            // Город (дома и мелочи) — в BuildEnv: они ломаются, меши кусков перестраиваются
 
             // Замки армий, мельница, сторожевые башни
             foreach (var l in w.Landmarks)
@@ -171,6 +160,96 @@ namespace BattleSim
         public void Draw()
         {
             foreach (var s in sets) s.Draw();
+        }
+
+        // ------------------------------------------------------------ окружение, которое меняется в бою (Core/Env.cs)
+
+        /// <summary>Кусок слитого меша: дома и мелочи города (по 40) или ограды (по 16). Рухнуло что-то из него — перестраиваем кусок.</summary>
+        sealed class EnvChunk
+        {
+            public GameObject Go;
+            public Mesh Mesh;
+            public bool Walls;
+            public readonly List<Building> Houses = new List<Building>();
+            public readonly List<Prop> Props = new List<Prop>();
+            public readonly List<int> WallIdx = new List<int>();
+        }
+
+        World world;
+        ModelLibrary library;
+        Material wallMat;
+        readonly List<EnvChunk> envChunks = new List<EnvChunk>();
+        readonly Dictionary<EnvObj, EnvChunk> chunkOf = new Dictionary<EnvObj, EnvChunk>();
+        readonly HashSet<EnvChunk> dirty = new HashSet<EnvChunk>();
+
+        void BuildEnv()
+        {
+            envChunks.Clear(); chunkOf.Clear(); dirty.Clear();
+            var walls = world.Features.Walls;
+            for (int i = 0; i < walls.Count; i += 16)
+            {
+                var ch = new EnvChunk { Walls = true };
+                for (int k = i; k < Mathf.Min(i + 16, walls.Count); k++)
+                {
+                    ch.WallIdx.Add(k);
+                    if (walls[k].Env != null) chunkOf[walls[k].Env] = ch;
+                }
+                envChunks.Add(ch);
+            }
+            if (world.Town != null)
+            {
+                EnvChunk ch = null;
+                int n = 0;
+                void Next() { if (ch == null || n++ % 40 == 0) envChunks.Add(ch = new EnvChunk()); }
+                foreach (var b in world.Town.Buildings) { Next(); ch.Houses.Add(b); if (b.Env != null) chunkOf[b.Env] = ch; }
+                foreach (var p in world.Town.Props) { Next(); ch.Props.Add(p); if (p.Env != null) chunkOf[p.Env] = ch; }
+            }
+            foreach (var ch in envChunks) Rebuild(ch);
+        }
+
+        void Rebuild(EnvChunk ch)
+        {
+            MeshData data;
+            if (ch.Walls)
+            {
+                var bb = new BoxBuilder();
+                foreach (int k in ch.WallIdx) WorldMeshes.DryWall(bb, world, world.Features.Walls[k], k);
+                data = bb.Count > 0 ? bb.Build() : null;
+            }
+            else
+            {
+                var parts = new List<MeshData>();
+                foreach (var b in ch.Houses)
+                {
+                    if (b.Env == null || b.Env.State != EnvState.Ruined) { parts.Add(WorldMeshes.Placed(library.City[b.Def.Name].Data, b.X, b.Y, b.Z, b.Rot, b.S)); continue; }
+                    // рухнул: на его месте — развалины из того же набора, длинной стороной вдоль дома и в его пятне
+                    var ruin = library.City["destroyed"];
+                    bool turn = (b.Hx < b.Hz) != (ruin.W < ruin.D);
+                    float rw = Mathf.Max(0.1f, turn ? ruin.D : ruin.W), rd = Mathf.Max(0.1f, turn ? ruin.W : ruin.D);
+                    float k = Mathf.Min(b.Hx * 2 / rw, b.Hz * 2 / rd);
+                    parts.Add(WorldMeshes.Placed(ruin.Data, b.X, b.Y, b.Z, b.Rot + (turn ? Mathf.PI / 2 : 0), k));
+                }
+                foreach (var p in ch.Props)
+                    if (p.Env == null || p.Env.State != EnvState.Ruined) parts.Add(WorldMeshes.Placed(library.City[p.Def.Name].Data, p.X, p.Y, p.Z, p.Rot, p.S));
+                data = parts.Count > 0 ? MeshData.Merge(parts) : null;
+            }
+            if (ch.Mesh != null) { owned.Remove(ch.Mesh); Object.Destroy(ch.Mesh); ch.Mesh = null; }
+            if (data == null) { if (ch.Go != null) ch.Go.SetActive(false); return; }
+            ch.Mesh = Own(Conv.ToMesh(data, ch.Walls ? "walls" : "town"));
+            if (ch.Go == null) ch.Go = Add(ch.Walls ? "Walls" : "Town", ch.Mesh, ch.Walls ? wallMat : library.CityMat);
+            else { ch.Go.GetComponent<MeshFilter>().sharedMesh = ch.Mesh; ch.Go.SetActive(true); }
+        }
+
+        /// <summary>Что рухнуло или разбито с прошлого кадра — перестраиваем куски, где оно лежит (раз в кадр, не чаще).</summary>
+        public void Sync()
+        {
+            var env = world?.Env;
+            if (env == null || env.Changed.Count == 0) return;
+            foreach (var o in env.Changed)
+                if (chunkOf.TryGetValue(o, out var ch)) dirty.Add(ch);
+            env.Changed.Clear();
+            foreach (var ch in dirty) Rebuild(ch);
+            dirty.Clear();
         }
     }
 }
