@@ -110,15 +110,25 @@ namespace BattleSim
 
         void BuildDecor(World w, Style s, ModelLibrary lib)
         {
-            // Деревья и камни — инстансингом
+            // Деревья и камни — инстансингом; деревья леса горят — сгоревшие рисуются отдельным набором, обугленными
             var treeMat = lib.TreeMaterial(s.Leaf);
+            var burntMat = Own(new Material(treeMat) { name = "trees_burnt" });
+            burntMat.SetColor("_BaseColor", new Color(0.16f, 0.14f, 0.13f));
+            var envOf = new Dictionary<(float, float), EnvObj>();
+            foreach (var t in w.Trees) if (t.Env != null) envOf[(t.X, t.Z)] = t.Env;
+            treeKinds = new TreeKind[World.TreeKinds];
             for (int k = 0; k < World.TreeKinds; k++)
             {
                 var model = lib.Trees[k];
-                var set = new InstancedSet(model.Mesh, treeMat, true);
-                float norm = World.TreeHeights[k] / model.Height;
-                foreach (var p in w.TreeLists[k]) set.Add(Matrix4x4.TRS(Conv.U(p.X, p.Y, p.Z), Conv.Yaw(p.Rot), Vector3.one * (norm * p.Scale)));
-                if (set.Count > 0) sets.Add(set);
+                var tk = treeKinds[k] = new TreeKind { Live = new InstancedSet(model.Mesh, treeMat, true), Burnt = new InstancedSet(model.Mesh, burntMat, true), Norm = World.TreeHeights[k] / model.Height };
+                foreach (var p in w.TreeLists[k])
+                {
+                    envOf.TryGetValue((p.X, p.Z), out var e);
+                    tk.Items.Add((p, e));
+                    if (e != null) treeKindOf[e] = k;
+                }
+                RebuildTrees(tk);
+                sets.Add(tk.Live); sets.Add(tk.Burnt);
             }
             for (int k = 0; k < World.RockKinds; k++)
             {
@@ -175,6 +185,31 @@ namespace BattleSim
             public readonly List<int> WallIdx = new List<int>();
         }
 
+        /// <summary>Деревья одного вида: живые и сгоревшие — два набора инстансов; при пожаре перестраиваются.</summary>
+        sealed class TreeKind
+        {
+            public InstancedSet Live, Burnt;
+            public float Norm;
+            public readonly List<(Placement p, EnvObj env)> Items = new List<(Placement, EnvObj)>();
+        }
+
+        TreeKind[] treeKinds;
+        readonly Dictionary<EnvObj, int> treeKindOf = new Dictionary<EnvObj, int>();
+        readonly HashSet<int> dirtyTrees = new HashSet<int>();
+
+        static void RebuildTrees(TreeKind tk)
+        {
+            tk.Live.Clear(); tk.Burnt.Clear();
+            foreach (var (p, e) in tk.Items)
+            {
+                bool burnt = e != null && (e.Burnt || e.State == EnvState.Ruined);
+                float k = tk.Norm * p.Scale;
+                // выгоревшее дерево ниже и тоньше: крона осыпалась
+                var m = Matrix4x4.TRS(Conv.U(p.X, p.Y, p.Z), Conv.Yaw(p.Rot), burnt ? new Vector3(0.85f * k, 0.9f * k, 0.85f * k) : Vector3.one * k);
+                if (burnt) tk.Burnt.Add(m); else tk.Live.Add(m);
+            }
+        }
+
         World world;
         ModelLibrary library;
         Material wallMat;
@@ -184,7 +219,7 @@ namespace BattleSim
 
         void BuildEnv()
         {
-            envChunks.Clear(); chunkOf.Clear(); dirty.Clear();
+            envChunks.Clear(); chunkOf.Clear(); dirty.Clear(); treeKindOf.Clear(); dirtyTrees.Clear();
             var walls = world.Features.Walls;
             for (int i = 0; i < walls.Count; i += 16)
             {
@@ -246,10 +281,15 @@ namespace BattleSim
             var env = world?.Env;
             if (env == null || env.Changed.Count == 0) return;
             foreach (var o in env.Changed)
+            {
                 if (chunkOf.TryGetValue(o, out var ch)) dirty.Add(ch);
+                if (treeKindOf.TryGetValue(o, out int k)) dirtyTrees.Add(k);
+            }
             env.Changed.Clear();
             foreach (var ch in dirty) Rebuild(ch);
             dirty.Clear();
+            foreach (int k in dirtyTrees) RebuildTrees(treeKinds[k]);
+            dirtyTrees.Clear();
         }
     }
 }

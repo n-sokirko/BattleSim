@@ -521,6 +521,8 @@ namespace BattleSim.Core
                 if (houses && Obs.Blocks(x, z, y)) return false;
                 if (forest && y < g + 7 && Nav.CanopyAt(x, z) && (canopy += step) > 7) return false;
             }
+            // дым пожара: над горящим домом не видно
+            if (Env != null && Env.Burning.Count > 0 && Env.Smoke(ax, ay, az, bx, by, bz) >= 1) return false;
             return true;
         }
 

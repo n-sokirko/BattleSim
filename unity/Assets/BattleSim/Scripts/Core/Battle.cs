@@ -568,6 +568,11 @@ namespace BattleSim.Core
                 Lap(6);
             }
             Bolts.Tick(dt);
+            if (Fighting && dt > 0 && World.Env != null && World.Env.Burning.Count > 0)
+            {
+                World.Env.Tick(dt, this);
+                BurnUnits(dt);
+            }
             Lap(7);
 
             for (int i = Units.Count - 1; i >= 0; i--)
@@ -1357,6 +1362,29 @@ namespace BattleSim.Core
             float k = MathF.Exp(-7 * dt);
             u.Knock.x *= k; u.Knock.z *= k;
             u.Phase += dt * u.CurSpeed * (u.T.Mount ? 1.4f : 3.3f);
+        }
+
+        float burnT;
+
+        /// <summary>Кто стоит в огне или вплотную к пламени — обжигается (раз в четверть секунды) и отшатывается прочь.</summary>
+        void BurnUnits(float dt)
+        {
+            if ((burnT -= dt) > 0) return;
+            burnT = 0.25f;
+            foreach (var o in World.Env.Burning)
+            {
+                if (o.Fire < 0.2f) continue;
+                foreach (var u in Units)
+                {
+                    if (!u.Alive || MathF.Abs(u.Pos.y - o.Y) > 3 || M.Hypot(u.Pos.x - o.X, u.Pos.z - o.Z) > o.Bound + 2) continue;
+                    float d = o.Dist(u.Pos.x, u.Pos.z);
+                    if (d > 1 + u.T.Radius) continue;
+                    float nx = u.Pos.x - o.X, nz = u.Pos.z - o.Z, l = M.Hypot(nx, nz);
+                    if (l > 1e-3f) { nx /= l; nz /= l; }
+                    Damage(u, 12 * o.Fire * 0.25f * (d <= 0 ? 1.5f : 1), nx * 1.5f, nz * 1.5f, false, null);
+                    if (u.Squad != null && !u.T.Fearless) u.Squad.Morale -= 0.3f * o.Fire;
+                }
+            }
         }
 
         /// <summary>

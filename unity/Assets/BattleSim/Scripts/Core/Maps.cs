@@ -359,6 +359,10 @@ namespace BattleSim.Core
         /// дорогу — серпантин, подъём-улицу, — а не прямую через щель в уступе, где отряд застревает давкой.
         /// </summary>
         readonly float[] SlopeCost;
+        /// <summary>Жар пожара в клетке (0..1): к цене пути, и прямой путь через огонь не считается свободным — горящее обходят.</summary>
+        public readonly float[] Heat;
+        readonly List<int> heated = new List<int>();
+        int baseBarriers;
 
         readonly Search main;
 
@@ -374,6 +378,7 @@ namespace BattleSim.Core
             Canopy = new byte[n];
             Sheer = new byte[n];
             SlopeCost = new float[n];
+            Heat = new float[n];
             Build(w);
             main = new Search(n);
             Region = new[] { Label(0), Label(1) };
@@ -504,7 +509,33 @@ namespace BattleSim.Core
                     if (ix + 1 < D && !Step(i, i + 1, false)) b++;
                     if (iz + 1 < D && !Step(i, i + D, false)) b++;
                 }
-            Barriers = b;
+            baseBarriers = b;
+            Barriers = b + heated.Count;
+        }
+
+        /// <summary>Разметить жар вокруг горящего (раз в полсекунды): прошлый стираем, новый — по силе огня.</summary>
+        public void SetHeat(List<EnvObj> burning)
+        {
+            foreach (int i in heated) Heat[i] = 0;
+            heated.Clear();
+            float c = CellSize;
+            foreach (var o in burning)
+            {
+                if (o.Fire < 0.15f) continue;
+                float r = o.Bound + 1.5f;
+                int ix0 = Math.Max(0, M.Floor((o.X - r + Half) / c)), ix1 = Math.Min(Dim - 1, M.Floor((o.X + r + Half) / c));
+                int iz0 = Math.Max(0, M.Floor((o.Z - r + Half) / c)), iz1 = Math.Min(Dim - 1, M.Floor((o.Z + r + Half) / c));
+                for (int iz = iz0; iz <= iz1; iz++)
+                    for (int ix = ix0; ix <= ix1; ix++)
+                    {
+                        int i = iz * Dim + ix;
+                        var p = Center(i);
+                        if (o.Dist(p.x, p.z) > 1.5f) continue;
+                        if (Heat[i] == 0) heated.Add(i);
+                        Heat[i] = MathF.Max(Heat[i], o.Fire);
+                    }
+            }
+            Barriers = baseBarriers + heated.Count;
         }
 
         /// <summary>
@@ -680,7 +711,7 @@ namespace BattleSim.Core
                 }
                 if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
                 int i = z * Dim + x;
-                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope) return false;
+                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope || Heat[i] > 0.3f) return false;
                 prev = i;
             }
             return true;
@@ -822,7 +853,7 @@ namespace BattleSim.Core
                             int a = cz * D + nx, b2 = nz * D + cx;
                             if (sp[a] == 0 || sp[b2] == 0 || !Step(c, a, false) || !Step(c, b2, false)) continue;
                         }
-                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni]) + MathF.Abs(S[ni] - S[c]) * 0.4f;
+                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni] + Heat[ni] * 12f) + MathF.Abs(S[ni] - S[c]) * 0.4f;
                         if (avoidR > 0)
                         {
                             float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;

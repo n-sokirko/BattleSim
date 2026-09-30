@@ -82,6 +82,47 @@ static class EnvChecks
             n++;
         }
         Console.WriteLine($"  проверок разрушения: {n}");
+        Fire(fail, cityDefs);
+    }
+
+    /// <summary>Огонь: дом горит и рушится, огонь переходит на соседей, жар и дым есть, пока горит, камень не горит.</summary>
+    static void Fire(Action<string> fail, Func<List<CityDef>> cityDefs)
+    {
+        var w = Make(MapType.City, 11, cityDefs());
+        const string at = "огонь, город, зерно 11";
+        var house = w.Env.All.Where(o => o.Kind == EnvKind.House && o.Breakable && o.Mat == EnvMat.Wood && o.Rect && Across(w, o, out _, out _))
+            .OrderByDescending(o => w.Env.All.Count(n => n != o && n.Mat == EnvMat.Wood && n.Kind == EnvKind.House && n.Dist(o.X, o.Z) < o.Bound + 4)).FirstOrDefault();
+        if (house == null) { fail($"{at}: нет деревянного дома"); return; }
+        Across(w, house, out var a, out var b);
+        var stone = w.Env.All.FirstOrDefault(o => o.Kind == EnvKind.House && o.Mat == EnvMat.Stone && o.Breakable);
+        if (stone != null && w.Env.Ignite(stone, 1)) fail($"{at}: загорелся каменный дом");
+        if (!w.Env.Ignite(house, 0.3f)) fail($"{at}: деревянный дом не загорелся");
+        float t = 0, ruinedAt = -1, smokeAt = -1, heat = 0;
+        const float dt = 1f / 30;
+        while (t < 150 && w.Env.Burning.Count > 0)
+        {
+            w.Env.Tick(dt, null);
+            t += dt;
+            if (ruinedAt < 0 && house.State == EnvState.Ruined) ruinedAt = t;
+            heat = System.MathF.Max(heat, w.Nav.Heat[w.Nav.Idx(house.X, house.Z)]);
+            if (smokeAt < 0 && house.Fire > 0.9f && !w.Los(a.x, w.GroundAt(a.x, a.z) + 1.5f, a.z, b.x, w.GroundAt(b.x, b.z) + 1.5f, b.z)) smokeAt = t;
+        }
+        Console.WriteLine($"  огонь: дом рухнул через {ruinedAt:F0} с, загоралось {w.Env.Ignited}, догорело за {t:F0} с");
+        if (ruinedAt < 25 || ruinedAt > 90) fail($"{at}: горящий дом рухнул через {ruinedAt:F0} с (ждём 25–90)");
+        if (heat < 0.5f) fail($"{at}: у горящего дома нет жара в сетке путей");
+        if (smokeAt < 0) fail($"{at}: сквозь дым горящего дома видно");
+        if (w.Env.Burning.Count > 0) fail($"{at}: пожар не догорел за 150 с");
+        if (w.Nav.Heat.Any(h => h > 0)) fail($"{at}: после пожара в сетке путей остался жар");
+        if (!house.Burnt) fail($"{at}: дом не выгорел дотла");
+        // лес: огонь бежит по деревьям, но не весь лес за минуту
+        var f = Make(MapType.Forest, 11, cityDefs());
+        var tree = f.Env.All.Where(o => o.Kind == EnvKind.Tree).OrderBy(o => System.MathF.Abs(o.X) + System.MathF.Abs(o.Z)).First();
+        f.Env.Ignite(tree, 1);
+        for (t = 0; t < 60; t += dt) f.Env.Tick(dt, null);
+        int trees = f.Env.All.Count(o => o.Kind == EnvKind.Tree);
+        Console.WriteLine($"  огонь в лесу: за 60 с загорелось {f.Env.Ignited} деревьев из {trees}, горит {f.Env.Burning.Count}");
+        if (f.Env.Ignited < 2) fail("огонь в лесу не перекинулся ни на одно дерево");
+        if (f.Env.Ignited > trees / 3) fail($"огонь в лесу за минуту охватил {f.Env.Ignited} деревьев из {trees} — слишком быстро");
     }
 
     static World Make(MapType map, int seed, List<CityDef> defs)

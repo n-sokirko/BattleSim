@@ -507,6 +507,7 @@ namespace BattleSim
                     }
             if (fx != null)
             {
+                if (!Paused && World.Env != null) fx.Burn(World.Env.Burning, new Vector3(World.Wind.x, 0, -World.Wind.z), animDt);
                 fx.Spawn(Battle.Fx);
                 fx.Update(animDt);
                 fx.Draw();

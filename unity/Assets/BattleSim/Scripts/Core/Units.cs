@@ -262,9 +262,9 @@ namespace BattleSim.Core
 
     /// <summary>
     /// Что случилось в бою — для эффектов на экране (пыль, искры, брызги). Окружение: Crumble — от дома отлетели куски,
-    /// Collapse — дом рухнул, Shatter — ящик, бочка или ограда разлетелись в щепки/камни.
+    /// Collapse — дом рухнул, Shatter — ящик, бочка или ограда разлетелись в щепки/камни, Ignite — занялось пламя.
     /// </summary>
-    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar, Raise, Curse, Wall, Duel, Hero, Crumble, Collapse, Shatter }
+    public enum FxKind { Hit, Block, Kill, Charge, Splash, BoltGround, Cry, Rout, Down, Explosion, Roar, Raise, Curse, Wall, Duel, Hero, Crumble, Collapse, Shatter, Ignite }
 
     public struct FxEvent
     {
