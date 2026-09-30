@@ -41,6 +41,32 @@ namespace BattleSim.Core
         /// <summary>Огонь: сила пламени (0..1), сколько ещё гореть (с), выгорел дотла (дерево — чёрный ствол).</summary>
         public float Fire, Fuel;
         public bool Burnt;
+        /// <summary>Гарнизон: чей отряд засел (или null) и кто внутри.</summary>
+        public Squad Holder;
+        public readonly List<Unit> Occupants = new List<Unit>();
+
+        /// <summary>Точка у стены напротив (x, z), на out метров снаружи: дверь, окно, место у стены для штурма.</summary>
+        public V2 Edge(float x, float z, float @out)
+        {
+            float c = MathF.Cos(Rot), s = MathF.Sin(Rot), dx = x - X, dz = z - Z;
+            float lx = dx * c + dz * s, lz = -dx * s + dz * c;
+            if (!Rect)
+            {
+                float l = M.Hypot(dx, dz);
+                if (l < 1e-3f) { dx = 1; l = 1; }
+                return new V2(X + dx / l * (R + @out), Z + dz / l * (R + @out));
+            }
+            // на ближайшую грань (или угол), затем наружу
+            float ex = M.Clamp(lx, -Hx, Hx), ez = M.Clamp(lz, -Hz, Hz);
+            if (MathF.Abs(lx) <= Hx && MathF.Abs(lz) <= Hz)
+            { // точка внутри: на ближайшую грань
+                if (Hx - MathF.Abs(lx) < Hz - MathF.Abs(lz)) ex = M.Sign(lx == 0 ? 1 : lx) * Hx; else ez = M.Sign(lz == 0 ? 1 : lz) * Hz;
+            }
+            float ox = lx - ex, oz = lz - ez, ol = M.Hypot(ox, oz);
+            if (ol < 1e-3f) { if (MathF.Abs(ex) >= Hx) { ox = M.Sign(ex); oz = 0; } else { ox = 0; oz = M.Sign(ez == 0 ? 1 : ez); } ol = 1; }
+            ex += ox / ol * @out; ez += oz / ol * @out;
+            return new V2(X + ex * c - ez * s, Z + ex * s + ez * c);
+        }
 
         public bool Breakable => MaxHp > 0 && State != EnvState.Ruined;
         /// <summary>Радиус описанного круга.</summary>
@@ -201,7 +227,7 @@ namespace BattleSim.Core
                 var o = Burning[i];
                 if (o.Fuel > 0)
                 {
-                    o.Fire = MathF.Min(1, o.Fire + dt * 0.15f);
+                    o.Fire = MathF.Min(1, o.Fire + dt * (o.Kind == EnvKind.House ? 0.05f : 0.15f)); // дом разгорается ~15 с, ящик — за несколько
                     o.Fuel -= dt * o.Fire;
                     if (o.Breakable) Hurt(o, o.MaxHp / BurnTime(o) * o.Fire * dt, Harm.Fire, b);
                 }
@@ -292,7 +318,7 @@ namespace BattleSim.Core
                 }
                 Touch(o);
             }
-            foreach (var o in All) { o.Fire = 0; o.Fuel = FuelOf(o); o.Burnt = false; }
+            foreach (var o in All) { o.Fire = 0; o.Fuel = FuelOf(o); o.Burnt = false; o.Holder = null; o.Occupants.Clear(); }
             Burning.Clear();
             w.Nav.SetHeat(Burning);
             rubble.Clear();

@@ -51,6 +51,8 @@ namespace BattleSim.Core
         public bool Engaged, Hidden, Special, Reserve;
         /// <summary>Гарнизон рубежа (верх подъёма, замок, край уступа): командиры его не переставляют — он держит своё место.</summary>
         public bool Garrison;
+        /// <summary>Дом, где засел отряд (Core/Garrison.cs), или null.</summary>
+        public EnvObj House;
         public List<Squad> Foes = new List<Squad>();
         public float FoeDist = float.PositiveInfinity;
         public Wing Wing;
@@ -198,6 +200,8 @@ namespace BattleSim.Core
         /// <summary>Упёрся в то, что ломается (ящик, баррикада): сколько уже стоит (BlockT), когда можно ударить конём снова (BashT) и что рубит.</summary>
         public float BlockT, BashT;
         public EnvObj EnvTarget;
+        /// <summary>Засел в доме (гарнизон): не ходит, не виден, стрелы его не берут; стреляет из окон, рубится у двери.</summary>
+        public EnvObj Inside;
         public Squad IgnoreSquad;
         // место в строю: шеренга, смещение вбок и назад от точки отряда
         public int Row = -1;
@@ -290,6 +294,8 @@ namespace BattleSim.Core
         public bool Flying = true;
         /// <summary>Бомба: рвётся там, где упала (радиус, отброс).</summary>
         public float AoeR, AoeKnock;
+        /// <summary>Огненная стрела: воткнулась в деревянное — может поджечь.</summary>
+        public bool Burning;
     }
 
     public sealed class Bolts
@@ -300,7 +306,7 @@ namespace BattleSim.Core
 
         public Bolts(Battle b) { battle = b; }
 
-        public void Fire(Unit src, Unit dst)
+        public void Fire(Unit src, Unit dst, bool burning = false)
         {
             if (List.Count >= Cap)
             {
@@ -312,6 +318,11 @@ namespace BattleSim.Core
             var W = B.World;
             var f = src.Forward;
             var from = new V3(src.Pos.x + f.x * 0.6f, src.Pos.y + 1.3f, src.Pos.z + f.z * 0.6f);
+            if (src.Inside != null)
+            { // из окна: у стены со стороны цели, на высоте окна — не из середины дома
+                var wp = src.Inside.Edge(dst.Pos.x, dst.Pos.z, 0.3f);
+                from = new V3(wp.x, src.Inside.Y + MathF.Min(src.Inside.Top * 0.45f, 3), wp.z);
+            }
             float dx = dst.Pos.x - src.Pos.x, dz = dst.Pos.z - src.Pos.z, d = M.Hypot(dx, dz);
             if (d == 0) d = 1;
             float dur = d / 42 + 0.22f;
@@ -332,7 +343,7 @@ namespace BattleSim.Core
                     AoeR = src.T.AoeR, AoeKnock = src.T.AoeKnock });
                 return;
             }
-            List.Add(new Bolt { From = from, To = to, Age = 0, Dur = dur, Arc = 0.4f + d * 0.07f, Team = src.Team, Dmg = src.T.Dmg, Flying = true, Pos = from, Dir = new V3(dx, 0, dz) });
+            List.Add(new Bolt { From = from, To = to, Age = 0, Dur = dur, Arc = 0.4f + d * 0.07f, Team = src.Team, Dmg = src.T.Dmg, Flying = true, Pos = from, Dir = new V3(dx, 0, dz), Burning = burning });
         }
 
         public void Tick(float dt)
@@ -357,6 +368,11 @@ namespace BattleSim.Core
                         || W.Decks.SolidTop(a.Pos.x, a.Pos.z, W.HeightAt(a.Pos.x, a.Pos.z)) > a.Pos.y || inTrees))
                     {
                         if (a.AoeR > 0) { battle.Explode(a.Pos, a.AoeR, a.Dmg, a.AoeKnock, a.Team); L.RemoveAt(i); continue; }
+                        if (a.Burning)
+                        { // огненная стрела воткнулась в стену или крышу
+                            var o = W.Obs.Hit(a.Pos.x, a.Pos.z, 0.3f)?.Env;
+                            if (o != null && Rng.Rand() < 0.08f) W.Env.Ignite(o, 0.1f, battle);
+                        }
                         a.Flying = false; a.Stuck = 8; a.Dir = a.Dir.Normalized;
                         battle.Emit(W.HeightAt(a.Pos.x, a.Pos.z) < World.Water && a.Pos.y < World.Water + 0.3f ? FxKind.Splash : FxKind.BoltGround, a.Pos);
                         continue;

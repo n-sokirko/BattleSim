@@ -83,6 +83,86 @@ static class EnvChecks
         }
         Console.WriteLine($"  проверок разрушения: {n}");
         Fire(fail, cityDefs);
+        Garrison(fail, cityDefs);
+    }
+
+    /// <summary>
+    /// Гарнизон: арбалетчики Руси держат место у деревянного дома — засаживаются в него, бьют из окон; на них идут
+    /// пехота и лучники Степи: пехота рубится у стен, лучники жгут дом огненными стрелами, пока не выкурят.
+    /// </summary>
+    static void Garrison(Action<string> fail, Func<List<CityDef>> cityDefs)
+    {
+        const string at = "гарнизон, город, зерно 11";
+        var w = Make(MapType.City, 11, cityDefs());
+        var b = new Battle(w);
+        b.Races[0] = Defs.Races[0]; b.Races[1] = Defs.Races[3];
+        // дом: деревянный, у которого с одной стороны есть место для отряда, а в 35 м — для врага
+        EnvObj house = null; V2 hold = default, foe = default;
+        foreach (var o in w.Env.All.Where(o => Battle.Garrisonable(o) && o.Mat == EnvMat.Wood))
+        {
+            foreach (var dir in new[] { new V2(0, 1), new V2(0, -1), new V2(1, 0), new V2(-1, 0) })
+            {
+                var e = o.Edge(o.X + dir.x * 50, o.Z + dir.z * 50, 4);
+                var f = new V2(o.X + dir.x * 40, o.Z + dir.z * 40);
+                if (!w.Walkable(e.x, e.z, 1.5f) || !w.Walkable(f.x, f.z, 3) || !w.InField(f.x, f.z, 4) || w.Nav.Region[0][w.Nav.Idx(e.x, e.z)] != w.Nav.Region[0][w.Nav.Idx(f.x, f.z)]) continue;
+                // из окна виден подступ (не стена замка и не соседний дом), и отряд выберет именно этот дом
+                var win = o.Edge(f.x, f.z, 0.35f);
+                float wy = o.Y + System.MathF.Min(o.Top * 0.45f, 3), fy = w.GroundAt(f.x, f.z) + 1;
+                if (!w.Los(win.x, wy, win.z, f.x, fy, f.z) || !w.Los(f.x, fy, f.z, win.x, wy, win.z)) continue;
+                float mine = o.Dist(e.x, e.z);
+                if (w.Env.Near(e.x, e.z, 12).Any(q => q != o && Battle.Garrisonable(q) && q.Dist(e.x, e.z) + (q.Mat == EnvMat.Stone ? -4 : 0) <= mine)) continue;
+                house = o; hold = e; foe = f; break;
+            }
+            if (house != null) break;
+        }
+        if (house == null) { fail($"{at}: не нашлось дома для проверки"); return; }
+        var rus = Defs.Races[0]; var st = Defs.Races[3];
+        float yawToFoe = System.MathF.Atan2(foe.x - hold.x, foe.z - hold.z);
+        b.PlaceSquad(rus.Units[2].Id, 0, hold.x, hold.z, yawToFoe);
+        b.PlaceSquad(st.Units[0].Id, 1, foe.x, foe.z, yawToFoe + System.MathF.PI);
+        // лучники — на 24 м от дома, на подступе, откуда видно окна
+        // точка без домов вокруг (иначе лучники сами засядут), в 12–24 м от дома
+        var arc = new V2(house.X + (foe.x - house.X) * 0.45f, house.Z + (foe.z - house.Z) * 0.45f);
+        for (float f = 0.3f; f <= 0.6f; f += 0.05f)
+        {
+            var p = new V2(house.X + (foe.x - house.X) * f, house.Z + (foe.z - house.Z) * f);
+            if (w.Walkable(p.x, p.z, 2) && !w.Env.Near(p.x, p.z, 13).Any(Battle.Garrisonable)) { arc = p; break; }
+        }
+        b.PlaceSquad(st.Units[2].Id, 1, arc.x, arc.z, yawToFoe + System.MathF.PI);
+        b.StartFight();
+        var def = b.Squads.First(q => q.Team == 0);
+        def.Garrison = true;
+        def.Order = new Order(OrderKind.Hold, Mode.Hold) { Leash = 12 }.At(hold);
+        var archers = b.Squads.First(q => q.Team == 1 && q.T.Ranged);
+        archers.Garrison = true;
+        archers.Order = new Order(OrderKind.Fire, Mode.Hold) { Leash = 6 }.At(arc);
+        float claimed = -1, maxIn = 0, ignited = -1, released = -1, shotsOut = 0, wallFights = 0, fireArrows = 0;
+        const float dt = 1f / 30;
+        var seen = new HashSet<Bolt>();
+        for (int k = 0; k < 150 * 30 && def.Alive > 0; k++)
+        {
+            b.Tick(dt);
+            if (claimed < 0 && def.House != null) { claimed = b.Time; house = def.House; }
+            maxIn = System.Math.Max(maxIn, house.Occupants.Count);
+            if (ignited < 0 && house.Fire > 0) ignited = b.Time;
+            if (claimed >= 0 && released < 0 && def.House == null) released = b.Time;
+            foreach (var bl in b.Bolts.List)
+                if (seen.Add(bl))
+                {
+                    if (bl.Team == 0 && house.Dist(bl.From.x, bl.From.z) < 1) shotsOut++;
+                    if (bl.Burning) fireArrows++;
+                }
+            foreach (var u in b.Units) if (u.Alive && u.Team == 1 && u.Engaged && u.Target?.Inside != null) wallFights++;
+            // пока сидят — не видны и стоят внутри; вышли — никого внутри не числится
+            if (def.House == null && def.Units.Any(u => u.Inside != null)) { fail($"{at}: отряд вышел, а бойцы числятся в доме"); break; }
+        }
+        Console.WriteLine($"  гарнизон: засели через {claimed:F0} с, внутри до {maxIn}, выстрелов из окон {shotsOut}, огненных стрел {fireArrows}, схваток у стен {wallFights / 30:F0} с, дом загорелся на {ignited:F0} с, вышли на {released:F0} с; в отряде {def.Alive} из {def.Units.Count}");
+        if (claimed < 0 || claimed > 20) fail($"{at}: арбалетчики не засели в дом (через {claimed:F0} с)");
+        if (maxIn < 4) fail($"{at}: в дом вошло только {maxIn}");
+        if (shotsOut == 0) fail($"{at}: из окон не стреляли");
+        if (fireArrows == 0) fail($"{at}: по засевшим в деревянном доме не пускали огненных стрел");
+        if (ignited < 0 && house.State != EnvState.Ruined && def.Alive > 0) fail($"{at}: за 150 с дом не подожгли и гарнизон цел");
+        if (b.Units.Any(u => u.Inside != null && !u.Alive)) fail($"{at}: мёртвые числятся в доме");
     }
 
     /// <summary>Огонь: дом горит и рушится, огонь переходит на соседей, жар и дым есть, пока горит, камень не горит.</summary>

@@ -537,6 +537,7 @@ namespace BattleSim
             {
                 u.Anim.Step(animDt);
                 u.Ride?.Step(animDt);
+                if (u.Inside != null) continue; // засел в доме — не видно
                 var p = Conv.U(u.RenderPos(Alpha));
                 if (!GeometryUtility.TestPlanesAABB(frustum, new Bounds(p + Vector3.up, Vector3.one * 5))) continue;
                 float dd = (p - cp).sqrMagnitude;

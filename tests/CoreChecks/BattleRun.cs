@@ -41,6 +41,7 @@ static class BattleRun
         var prev = new Dictionary<Unit, V3>();
         var lastSec = new Dictionary<Unit, V3>();
         var fallen = new HashSet<Unit>(); // погибшие в бою (гонцы, доехавшие до места, не в счёт)
+        int insideMax = 0;
         for (int k = 0; k < ticks; k++)
         {
             b.Tick(dt);
@@ -51,6 +52,7 @@ static class BattleRun
                     if (prev.Remove(u) && u.T.Special != Special.Messenger) fallen.Add(u);
                     continue;
                 }
+                if (u.Inside != null) { prev.Remove(u); insideMax = Math.Max(insideMax, u.Inside.Occupants.Count); continue; } // засел в доме: вход и выход — не скачок
                 if (!float.IsFinite(u.Pos.x) || !float.IsFinite(u.Pos.y) || !float.IsFinite(u.Pos.z))
                 {
                     if (nan++ < 3) notes.Add($"NaN t={b.Time:F1} {u.T.Name}");
@@ -77,7 +79,7 @@ static class BattleRun
             if (k % 10 != 0) continue;
             foreach (var u in b.Units)
             {
-                if (!u.Alive || !float.IsFinite(u.Pos.x)) continue;
+                if (!u.Alive || !float.IsFinite(u.Pos.x) || u.Inside != null) continue;
                 samples++;
                 var o = world.Obs.Hit(u.Pos.x, u.Pos.z, -0.1f);
                 if (o != null && o.Top > 0.3f && o.Ground + o.Top > u.Pos.y + 0.3f && inObs++ < 3)
@@ -91,6 +93,8 @@ static class BattleRun
         int lost = fallen.Count;
         Console.WriteLine(FormattableString.Invariant(
             $"RESULT units={b.Units.Count} lost={lost} stuck%={100.0 * stuck / Math.Max(1, stuckSamples):F2} jumps={jumps} inObs={inObs} deep={deep} nan={nan} samples={samples} ruined={world.Env.Ruined} ignited={world.Env.Ignited}"));
+        int garrisons = b.Log.Count(e => e.Text.Contains(" засели ")), smoked = b.Log.Count(e => e.Text.Contains("выкурили") || e.Text.Contains("рухнул на головы"));
+        if (garrisons > 0) notes.Add($"гарнизонов {garrisons}, выкурено/завалено {smoked}, в одном доме до {insideMax}");
         var broken = world.Env.All.Where(o => o.State == EnvState.Ruined).GroupBy(o => $"{o.Kind}/{o.LastHarm}").Select(g => $"{g.Key}×{g.Count()}").ToArray();
         if (broken.Length > 0) notes.Add("разрушено: " + string.Join(", ", broken));
         foreach (var n in notes) Console.WriteLine("  " + n);
