@@ -158,6 +158,30 @@ namespace BattleSim.Core
                 }
         }
 
+        /// <summary>Убрать объект, вставленный с теми же x, z, r (разрушенный дом, сломанная ограда).</summary>
+        public void Remove(T item, float x, float z, float r)
+        {
+            All.Remove(item);
+            int x0 = M.Clamp(M.Floor((x - r + Half) / Cell), 0, Dim - 1), x1 = M.Clamp(M.Floor((x + r + Half) / Cell), 0, Dim - 1);
+            int z0 = M.Clamp(M.Floor((z - r + Half) / Cell), 0, Dim - 1), z1 = M.Clamp(M.Floor((z + r + Half) / Cell), 0, Dim - 1);
+            for (int iz = z0; iz <= z1; iz++)
+                for (int ix = x0; ix <= x1; ix++)
+                    grid[iz * Dim + ix]?.Remove(item);
+        }
+
+        /// <summary>Все объекты клеток, которые задевает круг (x, z, r); объект может встретиться несколько раз.</summary>
+        public void Around(float x, float z, float r, List<T> into)
+        {
+            int x0 = M.Clamp(M.Floor((x - r + Half) / Cell), 0, Dim - 1), x1 = M.Clamp(M.Floor((x + r + Half) / Cell), 0, Dim - 1);
+            int z0 = M.Clamp(M.Floor((z - r + Half) / Cell), 0, Dim - 1), z1 = M.Clamp(M.Floor((z + r + Half) / Cell), 0, Dim - 1);
+            for (int iz = z0; iz <= z1; iz++)
+                for (int ix = x0; ix <= x1; ix++)
+                {
+                    var L = grid[iz * Dim + ix];
+                    if (L != null) foreach (var o in L) if (!into.Contains(o)) into.Add(o);
+                }
+        }
+
         /// <summary>Объекты клетки, где лежит точка (null — точка вне сетки).</summary>
         public List<T> Near(float x, float z)
         {

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Ядро игры (Scripts/Core) как обычная библиотека: тот же язык (C# 9) и тот же набор API (.NET Standard 2.1), что у Unity. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <Optimize>true</Optimize>
+    <RootNamespace>BattleSim.Core</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>CS0162;CS0168;CS0169;CS0219;CS0414;CS0649;CS8632</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../unity/Assets/BattleSim/Scripts/Core/*.cs" />
+  </ItemGroup>
+</Project>

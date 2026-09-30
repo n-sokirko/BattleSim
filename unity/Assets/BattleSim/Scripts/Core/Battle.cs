@@ -146,6 +146,8 @@ namespace BattleSim.Core
 
         public void ResetToPlan()
         {
+            World.Env?.Restore(); // реванш на той же карте: дома стоят, ограды целы, ворота распахнуты
+            gateBroken.Clear();
             ClearUnits();
             var map = new Dictionary<string, Squad>();
             Plan = Plan.Where(p => World.InField(p.X, p.Z, 1) && World.Walkable(p.X, p.Z, 0.4f)).ToList();
@@ -553,6 +555,8 @@ namespace BattleSim.Core
                 if ((foesT -= dt) <= 0) { foesT = 0.8f; UpdateFoes(); World.Nav.DecayCrowd(0.93f); }
                 Lap(1);
                 UpdateSquads(dt);
+                UpdateGarrisons(dt);
+                UpdateGates(dt);
                 foreach (var c in Commanders) c?.Tick(dt);
                 foreach (var list in Captains) foreach (var c in list) c.Tick(dt);
                 Lap(2);
@@ -561,12 +565,17 @@ namespace BattleSim.Core
                 // решения — через шаг (половина армии на чётных шагах, половина на нечётных), движение — каждый шаг
                 for (int i = 0; i < Units.Count; i++) if (Units[i].Alive && ((i + tickNo) & 1) == 0) Think(Units[i], dt * 2);
                 Lap(4);
-                for (int i = 0; i < Units.Count; i++) if (Units[i].Alive) Integrate(Units[i], dt);
+                for (int i = 0; i < Units.Count; i++) if (Units[i].Alive && Units[i].Inside == null) Integrate(Units[i], dt);
                 Lap(5);
                 ResolveContacts();
                 Lap(6);
             }
             Bolts.Tick(dt);
+            if (Fighting && dt > 0 && World.Env != null && World.Env.Burning.Count > 0)
+            {
+                World.Env.Tick(dt, this);
+                BurnUnits(dt);
+            }
             Lap(7);
 
             for (int i = Units.Count - 1; i >= 0; i--)
@@ -687,7 +696,8 @@ namespace BattleSim.Core
                     continue;
                 }
 
-                sq.Hidden = World.ConcealedAt(sq.Center.x, sq.Center.z) && !sq.Engaged && Time - sq.LastShotT > 3 && !enemyNear;
+                // засевшие в доме не прячутся: дом на виду, враг видел, как в него вошли
+                sq.Hidden = sq.House == null && World.ConcealedAt(sq.Center.x, sq.Center.z) && !sq.Engaged && Time - sq.LastShotT > 3 && !enemyNear;
 
                 if (o.Mode == Mode.Move && (D2d(sq.Center, o.Pos) < 4 || (sq.AnchorArrived && sq.Lag < 2.5f && Time - sq.OrderT > 2) || Time - sq.OrderT > 35))
                 {
@@ -738,6 +748,7 @@ namespace BattleSim.Core
                 return;
             }
             if (o.Mode == Mode.Rout) { Flee(u, dt); return; }
+            if ((sq.House != null || u.Inside != null) && ThinkGarrison(u, dt)) return;
 
 #if PROF
             SubLap(-1);
@@ -768,6 +779,7 @@ namespace BattleSim.Core
             {
                 float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = M.Hypot(tx, tz);
                 float nx = d > 1e-4f ? tx / d : MathF.Sin(u.Yaw), nz = d > 1e-4f ? tz / d : MathF.Cos(u.Yaw);
+                if (tg.Inside != null) d = MeleeDist(u, tg); // засел в доме — бьются у стены
                 float contact = t.Radius + tg.T.Radius + t.Reach;
                 if (t.Ranged && d > contact + 1.5f)
                 {
@@ -845,12 +857,7 @@ namespace BattleSim.Core
                 if (u.CurSpeed > t.Speed * 0.7f) u.ChargeT += dt;
                 else if (!u.Engaged) u.ChargeT = MathF.Max(0, u.ChargeT - dt * 2);
             }
-            if (u.AtkT >= 0)
-            {
-                u.AtkT += dt / u.AtkDur;
-                if (!u.HitDone && u.AtkT >= (u.Shot ? 0.55f : 0.5f)) { u.HitDone = true; ResolveHit(u); }
-                if (u.AtkT >= 1) u.AtkT = -1;
-            }
+            AttackStep(u, dt);
 #if PROF
             SubLap(3);
 #endif
@@ -1052,6 +1059,11 @@ namespace BattleSim.Core
         {
             if (u.LosTarget == tg && Time - u.LosT < 0.5f) return u.LosOk;
             u.LosTarget = tg; u.LosT = Time;
+            if (u.Inside != null || tg.Inside != null)
+            { // из окна или на стену дома, где засел враг
+                SightLine(u, tg, out var a, out var b);
+                return u.LosOk = World.Los(a.x, a.y, a.z, b.x, b.y, b.z, 2.5f);
+            }
             return u.LosOk = World.Los(u.Pos.x, u.Pos.y + 1.5f, u.Pos.z, tg.Pos.x, tg.Pos.y + 1.0f, tg.Pos.z, 2.5f);
         }
 
@@ -1154,6 +1166,15 @@ namespace BattleSim.Core
             Steer(u, vx / vl * u.T.Speed, vz / vl * u.T.Speed, dt, true);
         }
 
+        /// <summary>Удар или выстрел идёт своим ходом: на середине — попадание, в конце — готов к следующему.</summary>
+        void AttackStep(Unit u, float dt)
+        {
+            if (u.AtkT < 0) return;
+            u.AtkT += dt / u.AtkDur;
+            if (!u.HitDone && u.AtkT >= (u.Shot ? 0.55f : 0.5f)) { u.HitDone = true; ResolveHit(u); }
+            if (u.AtkT >= 1) u.AtkT = -1;
+        }
+
         void StartAttack(Unit u, bool shot)
         {
             u.AtkT = 0; u.HitDone = false; u.Shot = shot; u.AtkNew = true;
@@ -1166,6 +1187,18 @@ namespace BattleSim.Core
 
         void ResolveHit(Unit u)
         {
+            if (u.EnvTarget != null)
+            { // рубим баррикаду или ящик, в который упёрлись
+                var o = u.EnvTarget;
+                u.EnvTarget = null;
+                if (!u.Shot && o.Breakable && o.Dist(u.Pos.x, u.Pos.z) < u.T.Radius + u.T.Reach + 0.4f)
+                {
+                    Emit(FxKind.Hit, new V3((u.Pos.x + o.X) / 2, u.Pos.y + 0.9f, (u.Pos.z + o.Z) / 2), o.X - u.Pos.x, o.Z - u.Pos.z, u.Team);
+                    World.Env.Hurt(o, (u.T.Ranged ? 8 : u.T.Dmg) * 2, Harm.Blade, this);
+                }
+                u.BlockT = 0;
+                return;
+            }
             var tg = u.Target;
             if (tg == null || !tg.Alive) return;
             if (u.Shot)
@@ -1177,10 +1210,12 @@ namespace BattleSim.Core
                     if (tg.Squad != null && !tg.T.Fearless) tg.Squad.Morale -= 0.4f;
                     return;
                 }
-                Bolts.Fire(u, tg); return;
+                // по засевшим в деревянном доме — огненными: выкурить
+                Bolts.Fire(u, tg, tg.Inside != null && tg.Inside.Mat == EnvMat.Wood); return;
             }
-            float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = M.Hypot(tx, tz);
+            float tx = tg.Pos.x - u.Pos.x, tz = tg.Pos.z - u.Pos.z, d = u.Inside != null || tg.Inside != null ? MeleeDist(u, tg) : M.Hypot(tx, tz);
             if (d > u.T.Radius + tg.T.Radius + u.T.Reach + 0.6f || MathF.Abs(tg.Pos.y - u.Pos.y) > 2) return; // промах: цель отошла
+            if (u.Inside != null) { tx = tg.Pos.x - u.Inside.X; tz = tg.Pos.z - u.Inside.Z; d = MathF.Max(1e-3f, M.Hypot(tx, tz)); }
             float nx = d > 1e-4f ? tx / d : 0, nz = d > 1e-4f ? tz / d : 1;
             float dmg = u.T.Ranged ? 8 : u.T.Dmg;
             if (tg.T.Mount) dmg *= u.T.VsCav;
@@ -1190,6 +1225,7 @@ namespace BattleSim.Core
             if (Time - u.Squad.FirstStrikeT < 2.5f) dmg *= 1.6f;               // удар из засады
             if (Time < u.Squad.RushUntil) dmg *= 1.25f;                        // удар с разбега после клича
             if (u.Duel == tg) dmg *= 2.5f;                                     // поединок богатырей — недолгий
+            if (tg.Inside != null) dmg *= 0.5f;                                // засевший в доме бьётся из двери и окон
             bool charge = u.T.Charge > 1 && u.ChargeT > 0.8f;
             if (charge) { dmg *= u.T.Charge; u.ChargeT = 0; Trample(u, tg); }
             float kb = (charge ? 5 : 1.3f) * u.T.KnockMul / tg.T.Mass;
@@ -1279,6 +1315,7 @@ namespace BattleSim.Core
                 u.Fly = new V3(u.LastKnock.x * 1.1f, 2.5f + kl * 0.45f, u.LastKnock.z * 1.1f);
                 u.Flying = true;
             }
+            if (u.Inside != null) Exit(u); // погиб в доме — падает у двери
             u.Alive = false; u.DeadT = 0; u.Target = null; u.AtkT = -1; u.DownT = 0;
             if (u.T.Special != Special.Messenger) LastKillT = Time;
             u.Vel = new V3(0, 0, 0); u.CurSpeed = 0;
@@ -1338,11 +1375,72 @@ namespace BattleSim.Core
             u.Pace += (u.CurSpeed - u.Pace) * (1 - MathF.Exp(-dt / 0.4f));
             float ox = u.Pos.x, oz = u.Pos.z, oy = u.Pos.y, lim = World.Field - 0.5f;
             float nx = M.Clamp(ox + (vx * f + u.Knock.x) * dt, -lim, lim), nz = M.Clamp(oz + (vz * f + u.Knock.z) * dt, -lim, lim);
+            if (sp > 0.5f) Bash(u, nx, nz, oy, u.CurSpeed, dt);
             // Не заходим в непроходимое, в ствол и в камень, не прыгаем с обрыва или со стены — скользим вдоль
             if (!Place(u, nx, nz, cls) && !Place(u, nx, oz, cls) && !Place(u, ox, nz, cls) && !Veer(u, nx - ox, nz - oz, cls)) u.Pos.y = World.GroundAt(ox, oz);
             float k = MathF.Exp(-7 * dt);
             u.Knock.x *= k; u.Knock.z *= k;
             u.Phase += dt * u.CurSpeed * (u.T.Mount ? 1.4f : 3.3f);
+        }
+
+        float burnT;
+
+        /// <summary>Кто стоит в огне или вплотную к пламени — обжигается (раз в четверть секунды) и отшатывается прочь.</summary>
+        void BurnUnits(float dt)
+        {
+            if ((burnT -= dt) > 0) return;
+            burnT = 0.25f;
+            foreach (var o in World.Env.Burning)
+            {
+                if (o.Fire < 0.2f) continue;
+                foreach (var u in Units)
+                {
+                    if (!u.Alive || MathF.Abs(u.Pos.y - o.Y) > 3 || M.Hypot(u.Pos.x - o.X, u.Pos.z - o.Z) > o.Bound + 2) continue;
+                    float d = o.Dist(u.Pos.x, u.Pos.z);
+                    if (d > 1 + u.T.Radius) continue;
+                    float nx = u.Pos.x - o.X, nz = u.Pos.z - o.Z, l = M.Hypot(nx, nz);
+                    if (l > 1e-3f) { nx /= l; nz /= l; }
+                    Damage(u, 12 * o.Fire * 0.25f * (d <= 0 ? 1.5f : 1), nx * 1.5f, nz * 1.5f, false, null);
+                    if (u.Squad != null && !u.T.Fearless) u.Squad.Morale -= 0.3f * o.Fire;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Шаг упирается в то, что ломается (ящик, бочка, телега, деревянная баррикада). Конь на скаку разносит его
+        /// с разгона; пехотинец, который идёт в атаку или гонится за врагом, постоит секунду и начнёт рубить.
+        /// Стоящие в обороне свою баррикаду не трогают.
+        /// </summary>
+        void Bash(Unit u, float nx, float nz, float oy, float speed, float dt)
+        {
+            var ob = World.Obs.Hit(nx, nz, u.T.Radius * 0.75f, oy);
+            var o = ob?.Env;
+            if (o == null || !o.Breakable || o.Mat != EnvMat.Wood || o.Kind == EnvKind.Tree || o.Kind == EnvKind.House) { u.BlockT = 0; return; }
+            if (u.T.Mount)
+            {
+                if (speed < u.T.Speed * 0.5f || Time < u.BashT) return;
+                if (o.Kind == EnvKind.Wall || o.Kind == EnvKind.Gate)
+                { // баррикаду и ворота конь берёт только в лоб; вдоль, протискиваясь в проём, — просто задевает
+                    float vl = M.Hypot(u.Vel.x, u.Vel.z), wn = MathF.Abs(-MathF.Sin(o.Rot) * u.Vel.x + MathF.Cos(o.Rot) * u.Vel.z);
+                    if (vl < 1e-3f || wn < 0.7f * vl) return;
+                }
+                u.BashT = Time + 0.5f;
+                if (World.Env.Hurt(o, u.T.Mass * speed * 9, Harm.Charge, this)) { u.Vel.x *= 0.75f; u.Vel.z *= 0.75f; }
+                else if (o.Kind == EnvKind.Prop) { World.Env.Shove(o, u.Vel.x * 0.12f, u.Vel.z * 0.12f); u.Vel.x *= 0.8f; u.Vel.z *= 0.8f; } // уцелевшую бочку — копытом в сторону
+                else { u.Vel.x *= 0.4f; u.Vel.z *= 0.4f; } // не разнёс — осадил коня
+                Emit(FxKind.Charge, new V3(nx, oy, nz), u.Vel.x, u.Vel.z, u.Team);
+                return;
+            }
+            var mode = u.Squad?.Order.Mode;
+            bool pushing = u.Target != null || mode == Mode.Advance || mode == Mode.Charge;
+            if (!pushing || u.Engaged || u.DownT > 0) { u.BlockT = 0; return; }
+            // протискивается в проём, задевая баррикаду боком, — не рубит; встал и стоит — рубит
+            if (u.CurSpeed > 0.5f) { u.BlockT = MathF.Max(0, u.BlockT - dt); return; }
+            u.BlockT += dt;
+            if (u.BlockT < 2 || u.AtkT >= 0 || u.Cooldown > 0) return;
+            u.Face(o.X - u.Pos.x, o.Z - u.Pos.z, 1);
+            u.EnvTarget = o;
+            StartAttack(u, false);
         }
 
         /// <summary>
@@ -1406,8 +1504,9 @@ namespace BattleSim.Core
             if (dy <= d * 1.3f + 0.005f) return true;
             // ступенька круче уклона — только на настиле или на его край (въезд на мост, с лестницы на боевой ход), не выше
             // DeckStep, как и в сетке путей. На склоне такой поблажки нет: толкотня дёргает бойца по 1–2 см несколько раз
-            // за шаг, и с поблажкой он сползал по отвесу ущелья
-            return dy <= World.DeckStep + d * 1.3f && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz));
+            // за шаг, и с поблажкой он сползал по отвесу ущелья. Сам уступ меряется отдельно (World.Ledge): за длинный шаг
+            // конного «DeckStep + уклон» набегал до 0,6 м, и у конца моста над крутым берегом всадник сходил с настила вбок
+            return dy <= World.DeckStep + d * 1.3f && (World.OnDeck(ox, oz) || World.OnDeck(nx, nz)) && !World.Ledge(ox, oz, nx, nz);
         }
 
         // ---------------------------------------------------------------- соседи
@@ -1570,11 +1669,14 @@ namespace BattleSim.Core
                         float ex = e.Pos.x - p.x, ez = e.Pos.z - p.z, d = M.Hypot(ex, ez);
                         if (d > r + e.T.Radius) continue;
                         float fall = 1 - M.Clamp(d / (r + e.T.Radius), 0, 1) * 0.6f, own = e.Team == team ? 0.5f : 1f;
+                        if (e.Inside != null) { Damage(e, dmg * fall * own * 0.25f, 0, 0, false, null); continue; } // стены держат взрыв
                         float k = knock * fall / e.T.Mass, nx = d > 1e-3f ? ex / d : 0, nz = d > 1e-3f ? ez / d : 0;
                         if (!e.T.Mount && k > 3 && e.DownT <= 0) { e.DownT = 1.2f + Rng.Rand() * 1.2f; e.DownAnim = 0; }
                         Damage(e, dmg * fall * own, nx * k, nz * k, false, null);
                         if (e.Squad != null) e.Squad.Morale -= 1.5f * own;
                     }
+            // и окружению: ящики и бочки в щепки, баррикады в пролом, дом после нескольких бомб оседает
+            World.Env?.Blast(p, r * 1.2f, dmg * 5, this);
         }
 
         void Separate()
@@ -1586,7 +1688,7 @@ namespace BattleSim.Core
             {
                 P[i * 2] = 0; P[i * 2 + 1] = 0;
                 var u = U[i];
-                if (!u.Alive) continue;
+                if (!u.Alive || u.Inside != null) continue; // засевшие в доме не толкаются
                 CellOf(u.Pos.x, u.Pos.z, out int cx, out int cz);
                 for (int z = Math.Max(cz - 1, 0); z <= Math.Min(cz + 1, gridDim - 1); z++)
                     for (int x = Math.Max(cx - 1, 0); x <= Math.Min(cx + 1, gridDim - 1); x++)
@@ -1594,6 +1696,7 @@ namespace BattleSim.Core
                         {
                             if (j == i || j >= U.Count) continue;
                             var o = U[j];
+                            if (o.Inside != null) continue;
                             float dx = u.Pos.x - o.Pos.x, dz = u.Pos.z - o.Pos.z, min = u.T.Radius + o.T.Radius, d2 = dx * dx + dz * dz;
                             if (d2 >= min * min || MathF.Abs(u.Pos.y - o.Pos.y) > 1.5f) continue; // на стене и под стеной не толкаются
                             float d = MathF.Sqrt(d2);
@@ -1627,7 +1730,7 @@ namespace BattleSim.Core
                     {
                         if (j >= Units.Count) continue;
                         var o = Units[j];
-                        if (!o.Alive || o.Team == team) continue;
+                        if (!o.Alive || o.Team == team || o.Inside != null) continue; // в доме стрела не достанет
                         float dx = o.Pos.x - x, dz = o.Pos.z - z, r = o.T.Radius + extra, d2 = dx * dx + dz * dz;
                         if (d2 < r * r && d2 < bestD) { bestD = d2; best = o; }
                     }

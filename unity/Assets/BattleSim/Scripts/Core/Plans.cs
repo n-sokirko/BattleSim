@@ -102,12 +102,14 @@ namespace BattleSim.Core
     {
         public CityDef Def;
         public float X, Z, Rot, S, Hx, Hz, Top, Y;
+        public EnvObj Env;
     }
 
     public sealed class Prop
     {
         public CityDef Def;
         public float X, Z, Rot, S, Y;
+        public EnvObj Env;
     }
 
     /// <summary>Каменная ограда, завал в проломе или баррикада: через неё перелезают.</summary>
@@ -116,6 +118,11 @@ namespace BattleSim.Core
         public float Ax, Az, Bx, Bz, H, T;
         /// <summary>Сплошная ограда: сквозь неё не пройти, только через проёмы. Завал (false) — перелезают медленно.</summary>
         public bool Solid = true;
+        /// <summary>Деревянная баррикада (иначе — каменная ограда): горит и ломается легче.</summary>
+        public bool Wood;
+        /// <summary>Проломлена: больше не преграда (осталась осыпь камней или обломки).</summary>
+        public bool Broken;
+        public EnvObj Env;
     }
 
     public sealed class Seg
@@ -621,8 +628,8 @@ namespace BattleSim.Core
             foreach (var br in rv.Bridges)
             {
                 float z = MathF.Max(br.Az, br.Bz) + 3.5f, x = br.Ax;
-                city.Walls.Add(new FeatureWall { Ax = x - br.W / 2 - 0.5f, Az = z, Bx = x - 1.7f, Bz = z, H = 1.25f, T = 0.6f }); // проём 3,4 м — пройдёт и всадник
-                city.Walls.Add(new FeatureWall { Ax = x + 1.7f, Az = z, Bx = x + br.W / 2 + 0.5f, Bz = z, H = 1.25f, T = 0.6f });
+                city.Walls.Add(new FeatureWall { Ax = x - br.W / 2 - 0.5f, Az = z, Bx = x - 1.7f, Bz = z, H = 1.25f, T = 0.6f, Wood = true }); // проём 3,4 м — пройдёт и всадник
+                city.Walls.Add(new FeatureWall { Ax = x + 1.7f, Az = z, Bx = x + br.W / 2 + 0.5f, Bz = z, H = 1.25f, T = 0.6f, Wood = true });
             }
             var props = defs.Where(d => d.Kind == "prop").ToList();
             for (int k = 0; k < 60 && props.Count > 0; k++)

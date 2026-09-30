@@ -51,6 +51,40 @@ namespace BattleSim
 
         static Vector3 Rnd(float s) => new Vector3(Random.Range(-s, s), Random.Range(-s, s), Random.Range(-s, s));
 
+        static readonly Color Flame = new Color(1f, 0.55f, 0.16f, 0.85f), Ember = new Color(1f, 0.78f, 0.35f, 1f), Smoke = new Color(0.2f, 0.19f, 0.18f, 0.5f);
+        float burnAcc;
+
+        /// <summary>
+        /// Пожары: над каждым горящим предметом — языки пламени, искры и столб дыма по ветру, по силе огня и размеру.
+        /// Вызывается каждый кадр (частиц — по времени, а не по кадрам).
+        /// </summary>
+        public void Burn(List<EnvObj> burning, Vector3 wind, float dt)
+        {
+            if (burning.Count == 0 || dt <= 0) return;
+            burnAcc += dt;
+            if (burnAcc < 1f / 20) return; // 20 раз в секунду хватает
+            float step = burnAcc;
+            burnAcc = 0;
+            foreach (var o in burning)
+            {
+                if (o.Fire <= 0.02f) continue;
+                float size = Mathf.Clamp(o.Bound, 0.4f, 5f), top = Mathf.Min(o.Top, 6f) * (o.State == EnvState.Ruined ? 0.25f : 0.7f);
+                var c = Conv.U(o.X, o.Y, o.Z);
+                float flames = o.Fire * size * 6 * step, smoke = o.Fire * (0.8f + size) * 1.6f * step;
+                for (int k = 0; k < Count(flames); k++)
+                    Add(c + new Vector3(Random.Range(-size, size) * 0.7f, Random.Range(0.1f, top), Random.Range(-size, size) * 0.7f), Vector3.up * Random.Range(1.2f, 2.6f) + Rnd(0.3f) + wind * 0.2f,
+                        Random.Range(0.35f, 0.7f), 0.25f + 0.1f * size, -0.4f, -1.5f, Flame);
+                for (int k = 0; k < Count(flames * 0.3f); k++)
+                    Add(c + Vector3.up * Random.Range(0.3f, top + 0.5f) + Rnd(size * 0.5f), Vector3.up * Random.Range(2.5f, 4.5f) + Rnd(0.8f) + wind * 0.4f, Random.Range(0.8f, 1.4f), 0.04f, 0, -0.5f, Ember);
+                for (int k = 0; k < Count(smoke); k++)
+                    Add(c + Vector3.up * (top + Random.Range(0.3f, 1.2f)) + Rnd(size * 0.4f), Vector3.up * Random.Range(1f, 1.8f) + wind * 0.6f + Rnd(0.2f),
+                        Random.Range(3f, 5f), 0.6f + 0.2f * size, 1.1f, -0.1f, Smoke);
+            }
+        }
+
+        /// <summary>Дробное число частиц — целая часть и остаток с вероятностью.</summary>
+        static int Count(float x) => (int)x + (Random.value < x - (int)x ? 1 : 0);
+
         /// <summary>Разворачивает события ядра в частицы.</summary>
         public void Spawn(List<FxEvent> events)
         {
@@ -106,6 +140,28 @@ namespace BattleSim
                             var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
                             Add(p + dir * 2f + Vector3.up * 0.2f, dir * 7f, 0.7f, 0.18f, 0.6f, 0, new Color(1f, 0.92f, 0.6f, 0.55f));
                         }
+                        break;
+                    case FxKind.Crumble: // от дома отлетели куски
+                        for (int k = 0; k < 6; k++) Add(p + Rnd(0.8f), Rnd(1.5f) + Vector3.up * 1.5f, Random.Range(0.8f, 1.2f), 0.09f, 0, 9.8f, Chip);
+                        for (int k = 0; k < 3; k++) Add(p + Rnd(0.6f), Rnd(0.4f) + Vector3.down * 0.3f, Random.Range(1f, 1.5f), 0.35f, 0.8f, -0.2f, Dust);
+                        break;
+                    case FxKind.Collapse: // дом рухнул: столб пыли, кольцо пыли по земле, обломки
+                        for (int k = 0; k < 10; k++) Add(p + new Vector3(Random.Range(-2.5f, 2.5f), Random.Range(0.3f, 3f), Random.Range(-2.5f, 2.5f)), Rnd(0.6f) + Vector3.up * Random.Range(0.6f, 1.6f), Random.Range(2.2f, 3.4f), 1.1f, 1.4f, -0.15f, Dust);
+                        for (int k = 0; k < 24; k++)
+                        {
+                            float a = k / 24f * Mathf.PI * 2;
+                            var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                            Add(p + dir * 2.5f + Vector3.up * 0.3f, dir * Random.Range(2.5f, 4.5f) + Vector3.up * 0.3f, Random.Range(1.2f, 1.8f), 0.6f, 1.2f, 0.2f, Dust);
+                        }
+                        for (int k = 0; k < 18; k++) Add(p + Vector3.up * Random.Range(0.5f, 3f) + Rnd(1.5f), Rnd(3f) + Vector3.up * Random.Range(2f, 5f), 1.2f, 0.12f, 0, 9.8f, Chip);
+                        break;
+                    case FxKind.Ignite: // занялось: вспышка и сноп искр
+                        Add(p, Vector3.up * 0.5f, 0.3f, 0.6f, 2.5f, -0.5f, Flame);
+                        for (int k = 0; k < 10; k++) Add(p + Rnd(0.4f), Rnd(1.5f) + Vector3.up * 3f, Random.Range(0.6f, 1f), 0.04f, 0, 2f, Ember);
+                        break;
+                    case FxKind.Shatter: // ящик, бочка, баррикада — в щепки
+                        for (int k = 0; k < 12; k++) Add(p + Rnd(0.3f) + Vector3.up * 0.4f, d * 2f + Rnd(2.5f) + Vector3.up * Random.Range(2f, 4f), Random.Range(0.7f, 1.1f), 0.07f, 0, 9.8f, Chip);
+                        for (int k = 0; k < 4; k++) Add(p + Rnd(0.4f) + Vector3.up * 0.3f, Rnd(0.8f) + Vector3.up * 0.4f, Random.Range(0.6f, 1f), 0.3f, 0.8f, -0.1f, Dust);
                         break;
                     case FxKind.Down:
                         for (int k = 0; k < 5; k++) Add(p + new Vector3(Random.Range(-0.4f, 0.4f), 0.15f, Random.Range(-0.4f, 0.4f)), Rnd(0.4f) + Vector3.up * 0.3f, 0.8f, 0.2f, 0.6f, 0, Dust);

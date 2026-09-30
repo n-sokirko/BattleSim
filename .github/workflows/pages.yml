@@ -1,0 +1,73 @@
+# Веб-версия на GitHub Pages: после зелёного CI на main (или вручную).
+# Один раз включить: Settings → Pages → Build and deployment → Source: GitHub Actions.
+# Пока Pages не включены, выкладка пропускается с пометкой, а не падает.
+name: Pages
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Pages включены?
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>/dev/null)" = workflow ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages не включены — выкладка пропущена. Включить: Settings → Pages → Source: GitHub Actions."
+          fi
+
+  deploy:
+    name: Выкладка веб-версии
+    needs: check
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # страница целиком (local.html — index.html в обёртке документа) и упакованные модели рядом
+      - name: Сборка сайта
+        run: |
+          python3 web/build.py
+          mkdir -p _site
+          cp web/local.html _site/index.html
+          cp -r web/pack _site/pack
+          cp web/models/LICENSE_*.txt _site/
+          touch _site/.nojekyll
+          du -sh _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

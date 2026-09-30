@@ -1,0 +1,80 @@
+# Проверки на каждый пуш в любую ветку: ядро без Unity и сборка веб-версии.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Ядро — модели и бои
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # C# 9 и .NET Standard 2.1 — как у Unity: ядро не должно тянуть то, чего в Unity нет
+      - name: Сборка ядра как в Unity
+        run: dotnet build tests/Core -c Release -nologo
+
+      # Scripts/Game против эталонных сборок UnityEngine (без самого Unity): ошибки компиляции — до сборки в редакторе
+      - name: Скрипты Unity компилируются
+        run: dotnet build tests/UnityScripts -c Release -nologo
+
+      # модели бойцов, снаряжение и клипы; окружение ломается как надо; 15 боёв на всех картах (итог — в Summary запуска)
+      - name: Проверки ядра
+        run: dotnet run -c Release --project tests/CoreChecks
+
+  web:
+    name: Веб-версия
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сборка index.html из web/src
+        run: python3 web/build.py
+
+      - name: index.html совпадает с исходниками
+        run: |
+          if ! git diff --quiet -- web/index.html; then
+            echo "::error file=web/index.html::index.html не пересобран из web/src: выполните python web/build.py и закоммитьте"
+            git diff --stat -- web/index.html
+            exit 1
+          fi
+
+      - name: Синтаксис JS
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          html = pathlib.Path('web/index.html').read_text(encoding='utf-8')
+          code = re.findall(r'<script type="module">(.*?)</script>', html, re.S)
+          assert code, 'в index.html нет <script type="module">'
+          pathlib.Path('game.mjs').write_text(code[0], encoding='utf-8')
+          PY
+          node --check game.mjs
+
+      - name: Модели веб-версии упакованы
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          src = pathlib.Path('web/src/3_assets.js').read_text(encoding='utf-8')
+          names = re.findall(r"'([\w]+)'", re.search(r'const MODEL_NAMES = \[(.*?)\];', src, re.S).group(1))
+          city = re.search(r'const CITY_MODELS = \{(.*?)\};', src, re.S).group(1)
+          names += ['city_' + n for lst in re.findall(r'\[(.*?)\]', city, re.S) for n in re.findall(r"'([\w]+)'", lst)]
+          missing = [n for n in names if not pathlib.Path(f'web/pack/{n}.txt').is_file()]
+          print(f'моделей в 3_assets.js: {len(names)}, нет в web/pack: {len(missing)}')
+          for n in missing: print(f'::error file=web/src/3_assets.js::нет web/pack/{n}.txt — запустите python web/pack_models.py')
+          sys.exit(1 if missing else 0)
+          PY

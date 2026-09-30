@@ -503,15 +503,18 @@ namespace BattleSim
                         case FxKind.Hero: Rig.Shake(0.5f, e.Pos); break;
                         case FxKind.Roar: Rig.Shake(0.35f, e.Pos); break;
                         case FxKind.Charge: Rig.Shake(0.06f, e.Pos); break;
+                        case FxKind.Collapse: Rig.Shake(0.3f, e.Pos); break;
                     }
             if (fx != null)
             {
+                if (!Paused && World.Env != null) fx.Burn(World.Env.Burning, new Vector3(World.Wind.x, 0, -World.Wind.z), animDt);
                 fx.Spawn(Battle.Fx);
                 fx.Update(animDt);
                 fx.Draw();
             }
             Battle.Fx.Clear();
             UpdateBanners();
+            view.Sync();
             view.Draw();
         }
 
@@ -534,6 +537,7 @@ namespace BattleSim
             {
                 u.Anim.Step(animDt);
                 u.Ride?.Step(animDt);
+                if (u.Inside != null) continue; // засел в доме — не видно
                 var p = Conv.U(u.RenderPos(Alpha));
                 if (!GeometryUtility.TestPlanesAABB(frustum, new Bounds(p + Vector3.up, Vector3.one * 5))) continue;
                 float dd = (p - cp).sqrMagnitude;

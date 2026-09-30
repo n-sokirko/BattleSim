@@ -16,7 +16,7 @@ namespace BattleSim.Core
         public List<FeatureWall> Walls = new List<FeatureWall>();
     }
 
-    public sealed class ForestTree { public float X, Z, Rot, K, Trunk; public int Kind; }
+    public sealed class ForestTree { public float X, Z, Rot, K, Trunk; public int Kind; public EnvObj Env; }
     public sealed class Watchtower { public float X, Z, Y; }
 
     public sealed class HighSpot { public float X, Z, H, Prom; }
@@ -82,6 +82,8 @@ namespace BattleSim.Core
         public Features Features;
         public V2 Wind;
         public Obstacles Obs;
+        /// <summary>Что в мире ломается и горит: дома, мелочи на улицах, ограды, деревья (Env.cs).</summary>
+        public Env Env;
         public SpatialGrid<FeatureWall> WallGrid;
         public List<ForestTree> Trees = new List<ForestTree>();
         public NavGrid Nav;
@@ -127,8 +129,10 @@ namespace BattleSim.Core
             if (Mtn != null) CarveMountains(rand);
             if (Town != null) AddFortress();
 
-            // Препятствия: стволы леса, дома, мелочи; ограды — отдельной сеткой (их перелезают)
+            // Препятствия: стволы леса, дома, мелочи; ограды — отдельной сеткой (их перелезают).
+            // Каждое, что можно сломать или сжечь, — ещё и предмет окружения (Env) со своей прочностью.
             Obs = new Obstacles(Field);
+            Env = new Env(this);
             WallGrid = new SpatialGrid<FeatureWall>(Field);
             foreach (var w in Features.Walls)
             {
@@ -141,24 +145,42 @@ namespace BattleSim.Core
                 if (!w.Solid) continue;
                 float len = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);
                 if (len < 0.3f) continue;
-                float mx = (w.Ax + w.Bx) / 2, mz = (w.Az + w.Bz) / 2;
-                Obs.AddRect(mx, mz, len / 2, w.T / 2, MathF.Atan2(w.Bz - w.Az, w.Bx - w.Ax), w.H, MathF.Min(HeightAt(w.Ax, w.Az), HeightAt(w.Bx, w.Bz)));
+                float mx = (w.Ax + w.Bx) / 2, mz = (w.Az + w.Bz) / 2, ang = MathF.Atan2(w.Bz - w.Az, w.Bx - w.Ax), gy = MathF.Min(HeightAt(w.Ax, w.Az), HeightAt(w.Bx, w.Bz));
+                var ob = Obs.AddRect(mx, mz, len / 2, w.T / 2, ang, w.H, gy);
+                // сухая каменная ограда держит ~2 бомбы на погонный метр, деревянная баррикада — меньше
+                ob.Env = w.Env = Env.Add(new EnvObj { Kind = EnvKind.Wall, Mat = w.Wood ? EnvMat.Wood : EnvMat.Stone, Rect = true, X = mx, Z = mz, Y = gy,
+                    Hx = len / 2, Hz = w.T / 2, Rot = ang, Top = w.H, MaxHp = len * (w.Wood ? 45 : 110), Obs = ob, Wall = w });
             }
             Trees = type == MapType.Forest ? PlantForest(rand) : new List<ForestTree>();
-            foreach (var t in Trees) Obs.AddCircle(t.X, t.Z, t.Trunk, 7, HeightAt(t.X, t.Z));
+            foreach (var t in Trees)
+            {
+                float gy = HeightAt(t.X, t.Z);
+                var ob = Obs.AddCircle(t.X, t.Z, t.Trunk, 7, gy);
+                ob.Env = t.Env = Env.Add(new EnvObj { Kind = EnvKind.Tree, Mat = EnvMat.Wood, X = t.X, Z = t.Z, Y = gy, R = t.Trunk, Top = 7, MaxHp = 300, Obs = ob, Tree = t });
+            }
             if (Town != null)
             {
                 foreach (var b in Town.Buildings)
                 {
                     b.Y = FootprintY(b);
-                    if (b.Def.Kind == "well") Obs.AddCircle(b.X, b.Z, MathF.Max(b.Hx, b.Hz), b.Top, b.Y);
-                    else Obs.AddRect(b.X, b.Z, b.Hx, b.Hz, b.Rot, b.Top, b.Y);
+                    var ob = b.Def.Kind == "well" ? Obs.AddCircle(b.X, b.Z, MathF.Max(b.Hx, b.Hz), b.Top, b.Y) : Obs.AddRect(b.X, b.Z, b.Hx, b.Hz, b.Rot, b.Top, b.Y);
+                    ob.Env = b.Env = Env.Add(new EnvObj { Kind = EnvKind.House, Mat = HouseMat(b.Def.Kind), Rect = ob.Rect, X = b.X, Z = b.Z, Y = b.Y,
+                        Hx = b.Hx, Hz = b.Hz, Rot = b.Rot, R = ob.R, Top = b.Top, MaxHp = HouseHp(b), Obs = ob, Building = b });
+                }
+                // ворота крепости: пока распахнуты (препятствия нет), запирает их обороняющийся (Battle.UpdateGates)
+                foreach (var a in Town.Fort.Arches)
+                {
+                    float gy = HeightAt(a.X, a.Z);
+                    Env.Add(new EnvObj { Kind = EnvKind.Gate, Mat = EnvMat.Wood, Rect = true, X = a.X, Z = a.Z, Y = gy, Hx = a.Citadel ? 3.3f : 4f, Hz = MathF.Max(0.35f, a.W * 0.2f),
+                        Rot = MathF.Atan2(a.Uz, a.Ux), Top = a.H - 1.8f, MaxHp = a.Citadel ? 3000 : 2500, Arch = a });
                 }
                 foreach (var p in Town.Props)
                 {
                     float s = 1.1f / p.Def.H;
                     p.S = s; p.Y = HeightAt(p.X, p.Z);
-                    Obs.AddCircle(p.X, p.Z, MathF.Max(p.Def.W, p.Def.D) * s * 0.5f, 1.1f, p.Y);
+                    float r = MathF.Max(p.Def.W, p.Def.D) * s * 0.5f;
+                    var ob = Obs.AddCircle(p.X, p.Z, r, 1.1f, p.Y);
+                    ob.Env = p.Env = Env.Add(new EnvObj { Kind = EnvKind.Prop, Mat = EnvMat.Wood, X = p.X, Z = p.Z, Y = p.Y, R = r, Top = 1.1f, MaxHp = 40, Obs = ob, Prop = p });
                 }
             }
             foreach (var t in Watchtowers) Obs.AddCircle(t.X, t.Z, 3, 11, t.Y);
@@ -309,6 +331,17 @@ namespace BattleSim.Core
         }
 
         /// <summary>Высота основания дома: по самому низкому углу, чтобы он не висел над землёй.</summary>
+        /// <summary>Из чего дом: церковь, кузня, башня и колодец — камень, остальное — дерево и мазанка.</summary>
+        static EnvMat HouseMat(string kind) => kind == "church" || kind == "blacksmith" || kind == "tower_B" || kind == "well" ? EnvMat.Stone : EnvMat.Wood;
+
+        /// <summary>Прочность дома — по площади: деревянный дом в 5×5 м держит ~4 бомбы, каменная церковь — десятки. Развалины не ломаются.</summary>
+        static float HouseHp(Building b)
+        {
+            if (b.Def.Kind == "destroyed") return 0;
+            float area = MathF.Max(4, 4 * b.Hx * b.Hz);
+            return HouseMat(b.Def.Kind) == EnvMat.Stone ? area * 45 : area * 16;
+        }
+
         float FootprintY(Building b)
         {
             float lo = float.PositiveInfinity;
@@ -370,6 +403,22 @@ namespace BattleSim.Core
 
         /// <summary>Стоит ли точка на настиле (мост, стена, лестница), а не на земле.</summary>
         public bool OnDeck(float x, float z) { float g = HeightAt(x, z); return Decks.Surface(x, z, g) > g + 0.01f; }
+
+        /// <summary>
+        /// Уступ у края настила на отрезке a→b выше DeckStep? Сам уступ находится делением пополам и меряется без уклона
+        /// по обе стороны. Так меряют и сетка путей (Nav.SheerLine), и шаг бойца (Battle.CanMove): иначе у конца моста над
+        /// крутым берегом скачущий всадник сходил вбок на 0,6 м, хотя путь туда не ведёт.
+        /// </summary>
+        public bool Ledge(float ax, float az, float bx, float bz)
+        {
+            float d = M.Hypot(bx - ax, bz - az), lo = 0, hi = 1, hl = GroundAt(ax, az), hh = GroundAt(bx, bz);
+            for (int it = 0; it < 7; it++)
+            {
+                float mid = (lo + hi) / 2, hm = GroundAt(ax + (bx - ax) * mid, az + (bz - az) * mid);
+                if (MathF.Abs(hm - hl) > MathF.Abs(hh - hm)) { hi = mid; hh = hm; } else { lo = mid; hl = hm; }
+            }
+            return MathF.Abs(hh - hl) > DeckStep + (hi - lo) * d * 1.3f;
+        }
 
         /// <summary>
         /// Омут в самой точке (настил моста — не вода). Клетка сетки путей — полтора метра: у края моста
@@ -479,6 +528,8 @@ namespace BattleSim.Core
                 if (houses && Obs.Blocks(x, z, y)) return false;
                 if (forest && y < g + 7 && Nav.CanopyAt(x, z) && (canopy += step) > 7) return false;
             }
+            // дым пожара: над горящим домом не видно
+            if (Env != null && Env.Burning.Count > 0 && Env.Smoke(ax, ay, az, bx, by, bz) >= 1) return false;
             return true;
         }
 
@@ -489,6 +540,7 @@ namespace BattleSim.Core
             foreach (var l in An.Hide) output.Add(new CoverSpot { X = l.X, Z = l.Z, Kind = CoverKind.Low });
             foreach (var w in Features.Walls)
             {
+                if (w.Broken) continue;
                 float mx = (w.Ax + w.Bx) / 2, mz = (w.Az + w.Bz) / 2, l = M.Hypot(w.Bx - w.Ax, w.Bz - w.Az);
                 if (l == 0) l = 1;
                 float nx = -(w.Bz - w.Az) / l, nz = (w.Bx - w.Ax) / l, side = nx * (mx - ec.x) + nz * (mz - ec.z) > 0 ? 1 : -1;
@@ -499,6 +551,8 @@ namespace BattleSim.Core
                 foreach (var w in Town.Fort.Walls) output.Add(new CoverSpot { X = (w.Ax + w.Bx) / 2, Z = (w.Az + w.Bz) / 2, Kind = CoverKind.WallWalk });
                 foreach (var b in Town.Buildings)
                 {
+                    // руины — низкое укрытие среди обломков, а не тень за стеной
+                    if (b.Env != null && b.Env.State == EnvState.Ruined) { output.Add(new CoverSpot { X = b.X, Z = b.Z, Kind = CoverKind.Low }); continue; }
                     var v = M.Norm2(b.X - ec.x, b.Z - ec.z);
                     float r = MathF.Max(b.Hx, b.Hz) + 2;
                     output.Add(new CoverSpot { X = b.X + v.x * r, Z = b.Z + v.z * r, Kind = CoverKind.House });
