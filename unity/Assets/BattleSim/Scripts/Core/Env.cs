@@ -5,7 +5,7 @@ namespace BattleSim.Core
 {
     // ------------------------------------------------------------------ окружение: дома, мелочи, ограды, деревья — то, что ломается и горит
 
-    public enum EnvKind { House, Prop, Wall, Tree }
+    public enum EnvKind { House, Prop, Wall, Tree, Gate }
     public enum EnvMat { Wood, Stone }
     public enum EnvState { Intact, Damaged, Ruined }
     /// <summary>Чем бьют по окружению: взрыв, натиск конницы, топор и меч, огонь.</summary>
@@ -28,12 +28,16 @@ namespace BattleSim.Core
         /// <summary>Прочность; MaxHp 0 — не ломается (развалины, колодец-сруб из камня на площади и т. п.).</summary>
         public float Hp, MaxHp;
         public Obstacle Obs;
-        /// <summary>Препятствие целого предмета — чтобы вернуть его на реванш.</summary>
+        /// <summary>Препятствие целого предмета и где он стоял — чтобы вернуть на реванш (бочку могло отшвырнуть).</summary>
         public Obstacle Home;
+        public float HomeX, HomeZ, HomeY;
         public Building Building;
         public Prop Prop;
         public FeatureWall Wall;
         public ForestTree Tree;
+        /// <summary>Ворота крепости: арка и заперты ли (запертые — препятствие поперёк проёма).</summary>
+        public FortArch Arch;
+        public bool Closed;
         /// <summary>Растёт при каждом видимом изменении (повреждён, рухнул) — Unity-слой перестраивает свой меш.</summary>
         public int Version;
         /// <summary>Чем ударили последний раз (от этого — как рушится: взрыв разбрасывает, огонь оставляет головешки).</summary>
@@ -116,6 +120,7 @@ namespace BattleSim.Core
             o.Id = All.Count;
             o.Hp = o.MaxHp;
             o.Home = o.Obs;
+            o.HomeX = o.X; o.HomeZ = o.Z; o.HomeY = o.Y;
             o.Fuel = FuelOf(o);
             All.Add(o);
             grid.Insert(o, o.X, o.Z, o.Bound);
@@ -144,6 +149,7 @@ namespace BattleSim.Core
         public static float Factor(EnvObj o, Harm h)
         {
             if (o.Kind == EnvKind.Tree) return h == Harm.Fire ? 1 : h == Harm.Blast ? 0.1f : 0;
+            if (o.Kind == EnvKind.Gate) return h == Harm.Blade ? 0.35f : h == Harm.Charge ? 0.3f : h == Harm.Blast ? 0.6f : 1; // окованные створки
             if (o.Mat == EnvMat.Stone) return h == Harm.Blast ? 0.35f : h == Harm.Blade ? 0.05f : 0;
             if (o.Kind == EnvKind.Wall && h == Harm.Charge) return 0.5f; // баррикада держит коня вдвое лучше ящика
             return 1;
@@ -181,6 +187,11 @@ namespace BattleSim.Core
                 float fall = 1 - M.Clamp(o.Dist(p.x, p.z) / r, 0, 1) * 0.6f;
                 if (o.Breakable) Hurt(o, amount * fall, Harm.Blast, b);
                 if (Rng.Rand() < 0.2f * fall) Ignite(o, 0.25f, b);
+                if (o.Kind == EnvKind.Prop && o.State != EnvState.Ruined)
+                { // уцелевшую бочку или ящик отшвыривает
+                    float dx = o.X - p.x, dz = o.Z - p.z, l = MathF.Max(0.2f, M.Hypot(dx, dz));
+                    Shove(o, dx / l * 1.6f * fall, dz / l * 1.6f * fall);
+                }
             }
         }
 
@@ -195,12 +206,13 @@ namespace BattleSim.Core
                 case EnvKind.House: return 50 + 4 * o.Hx * o.Hz * 0.5f;
                 case EnvKind.Tree: return 35;
                 case EnvKind.Wall: return 25;
+                case EnvKind.Gate: return 60;
                 default: return 12;
             }
         }
 
         /// <summary>За сколько секунд полного пламени сгорает целиком (дом рушится раньше, чем выгорит).</summary>
-        static float BurnTime(EnvObj o) => o.Kind == EnvKind.House ? 40 : o.Kind == EnvKind.Tree ? 30 : o.Kind == EnvKind.Wall ? 15 : 6;
+        static float BurnTime(EnvObj o) => o.Kind == EnvKind.House ? 40 : o.Kind == EnvKind.Gate ? 60 : o.Kind == EnvKind.Tree ? 30 : o.Kind == EnvKind.Wall ? 15 : 6;
 
         /// <summary>Поджечь: горит только дерево, и только если есть чему гореть.</summary>
         public bool Ignite(EnvObj o, float strength, Battle b = null)
@@ -295,12 +307,65 @@ namespace BattleSim.Core
             if (!Changed.Contains(o)) Changed.Add(o);
         }
 
+        /// <summary>Запереть или распахнуть ворота: запертые — препятствие поперёк проёма (в сетке путей — дорогой, но проходимый участок: ворота можно выбить).</summary>
+        public void SetGate(EnvObj g, bool closed, Battle b = null)
+        {
+            if (g.Kind != EnvKind.Gate || g.State == EnvState.Ruined || g.Closed == closed) return;
+            g.Closed = closed;
+            if (closed) { g.Obs = w.Obs.AddRect(g.X, g.Z, g.Hx, g.Hz, g.Rot, g.Top, g.Y); g.Obs.Env = g; }
+            else if (g.Obs != null) { w.Obs.Remove(g.Obs); g.Obs = null; }
+            float rr = g.Bound + 0.5f;
+            w.Nav.Refresh(w, g.X - rr, g.Z - rr, g.X + rr, g.Z + rr);
+            Touch(g);
+            b?.Emit(FxKind.Wall, new V3(g.X, g.Y + 1, g.Z));
+        }
+
+        /// <summary>
+        /// Отшвырнуть мелочь (бочку, ящик) на (dx, dz) — от взрыва или конём: только туда, где ей есть место
+        /// (не в стену, не в дом, не в воду).
+        /// </summary>
+        public void Shove(EnvObj o, float dx, float dz)
+        {
+            if (o.Kind != EnvKind.Prop || o.State == EnvState.Ruined || o.Obs == null) return;
+            float nx = o.X + dx, nz = o.Z + dz;
+            if (w.TooDeep(nx, nz) || w.OnDeck(nx, nz) != w.OnDeck(o.X, o.Z) || w.Nav.SpeedAt(nx, nz, 0) == 0) return;
+            var hit = w.Obs.Hit(nx, nz, o.R);
+            if (hit != null && hit != o.Obs) return;
+            w.Obs.Remove(o.Obs);
+            grid.Remove(o, o.X, o.Z, o.Bound);
+            o.X = nx; o.Z = nz; o.Y = w.HeightAt(nx, nz);
+            o.Obs.X = nx; o.Obs.Z = nz; o.Obs.Ground = o.Y;
+            w.Obs.Restore(o.Obs);
+            grid.Insert(o, o.X, o.Z, o.Bound);
+            if (o.Prop != null) { o.Prop.X = nx; o.Prop.Z = nz; o.Prop.Y = o.Y; }
+            Touch(o);
+        }
+
         /// <summary>Реванш на той же карте: всё целое, как до боя.</summary>
         public void Restore()
         {
             bool any = false;
             foreach (var o in All)
             {
+                if (o.Kind == EnvKind.Prop && (o.X != o.HomeX || o.Z != o.HomeZ))
+                { // отшвырнутую бочку — на место
+                    bool present = o.Obs != null;
+                    if (present) w.Obs.Remove(o.Obs);
+                    grid.Remove(o, o.X, o.Z, o.Bound);
+                    o.X = o.HomeX; o.Z = o.HomeZ; o.Y = o.HomeY;
+                    if (o.Home != null) { o.Home.X = o.X; o.Home.Z = o.Z; o.Home.Ground = o.Y; }
+                    if (present) w.Obs.Restore(o.Obs);
+                    grid.Insert(o, o.X, o.Z, o.Bound);
+                    if (o.Prop != null) { o.Prop.X = o.X; o.Prop.Z = o.Z; o.Prop.Y = o.Y; }
+                    Touch(o);
+                }
+                if (o.Kind == EnvKind.Gate && (o.Closed || o.Obs != null))
+                { // ворота — распахнуты, как до боя
+                    if (o.Obs != null) { w.Obs.Remove(o.Obs); o.Obs = null; }
+                    o.Closed = false;
+                    any = true;
+                    Touch(o);
+                }
                 if (o.State == EnvState.Intact && o.Hp == o.MaxHp && o.Fire == 0 && !o.Burnt) continue;
                 bool was = o.State == EnvState.Ruined;
                 o.Hp = o.MaxHp;
@@ -349,6 +414,10 @@ namespace BattleSim.Core
                     b?.Emit(FxKind.Shatter, at);
                     break;
                 case EnvKind.Tree:
+                    break;
+                case EnvKind.Gate:
+                    o.Closed = false;
+                    b?.Emit(FxKind.Shatter, at);
                     break;
                 default:
                     b?.Emit(FxKind.Shatter, at);

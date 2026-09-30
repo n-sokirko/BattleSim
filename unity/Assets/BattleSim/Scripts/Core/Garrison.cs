@@ -74,6 +74,44 @@ namespace BattleSim.Core
             }
         }
 
+        // ------------------------------------------------------------ ворота
+
+        float gateT;
+        readonly HashSet<EnvObj> gateBroken = new HashSet<EnvObj>();
+
+        /// <summary>
+        /// Ворота крепости раз в секунду: обороняющиеся (чья армия ближе к середине города) запирают их, когда враг
+        /// ближе 35 м, а в проёме никого нет. Выбили — в летопись.
+        /// </summary>
+        void UpdateGates(float dt)
+        {
+            if (World.Town == null || (gateT -= dt) > 0) return;
+            gateT = 1;
+            int def = -1;
+            if (ArmyC[0] != null && ArmyC[1] != null) def = ArmyC[0].Value.x * ArmyC[0].Value.x + ArmyC[0].Value.z * ArmyC[0].Value.z < ArmyC[1].Value.x * ArmyC[1].Value.x + ArmyC[1].Value.z * ArmyC[1].Value.z ? 0 : 1;
+            foreach (var g in World.Env.All)
+            {
+                if (g.Kind != EnvKind.Gate) continue;
+                if (g.State == EnvState.Ruined)
+                {
+                    if (gateBroken.Add(g)) AddLog(def < 0 ? 0 : 1 - def, g.Arch != null && g.Arch.Citadel ? "Ворота замка выбиты!" : "Городские ворота выбиты!");
+                    continue;
+                }
+                if (g.Closed || def < 0) continue;
+                bool foe = false, busy = false;
+                foreach (var u in Units)
+                {
+                    if (!u.Alive) continue;
+                    float d = g.Dist(u.Pos.x, u.Pos.z);
+                    if (d < u.T.Radius + 1) { busy = true; break; }
+                    if (u.Team != def && d < 35 && u.T.Special == Special.None) foe = true;
+                }
+                if (!foe || busy) continue;
+                World.Env.SetGate(g, true, this);
+                AddLog(def, g.Arch != null && g.Arch.Citadel ? "Ворота замка заперты" : "Городские ворота заперты");
+            }
+        }
+
         /// <summary>Отряд покидает дом: все выходят к двери (рухнул — с увечьями), дом свободен.</summary>
         void Release(Squad sq, string why, bool collapsed)
         {

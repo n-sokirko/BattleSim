@@ -183,6 +183,7 @@ namespace BattleSim
             public readonly List<Building> Houses = new List<Building>();
             public readonly List<Prop> Props = new List<Prop>();
             public readonly List<int> WallIdx = new List<int>();
+            public readonly List<(FortArch a, EnvObj g)> Gates = new List<(FortArch, EnvObj)>();
         }
 
         /// <summary>Деревья одного вида: живые и сгоревшие — два набора инстансов; при пожаре перестраиваются.</summary>
@@ -231,6 +232,17 @@ namespace BattleSim
                 }
                 envChunks.Add(ch);
             }
+            if (world.Town != null && world.Town.Fort.Arches.Count > 0)
+            { // створки ворот — по состоянию (распахнуты, заперты, выбиты)
+                var gc = new EnvChunk { Walls = true };
+                foreach (var a in world.Town.Fort.Arches)
+                {
+                    var g = world.Env.All.Find(o => o.Arch == a);
+                    gc.Gates.Add((a, g));
+                    if (g != null) chunkOf[g] = gc;
+                }
+                envChunks.Add(gc);
+            }
             if (world.Town != null)
             {
                 EnvChunk ch = null;
@@ -249,6 +261,7 @@ namespace BattleSim
             {
                 var bb = new BoxBuilder();
                 foreach (int k in ch.WallIdx) WorldMeshes.DryWall(bb, world, world.Features.Walls[k], k);
+                foreach (var (a, g) in ch.Gates) WorldMeshes.GateLeaves(bb, world, a, g);
                 data = bb.Count > 0 ? bb.Build() : null;
             }
             else

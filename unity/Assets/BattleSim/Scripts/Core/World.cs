@@ -167,6 +167,13 @@ namespace BattleSim.Core
                     ob.Env = b.Env = Env.Add(new EnvObj { Kind = EnvKind.House, Mat = HouseMat(b.Def.Kind), Rect = ob.Rect, X = b.X, Z = b.Z, Y = b.Y,
                         Hx = b.Hx, Hz = b.Hz, Rot = b.Rot, R = ob.R, Top = b.Top, MaxHp = HouseHp(b), Obs = ob, Building = b });
                 }
+                // ворота крепости: пока распахнуты (препятствия нет), запирает их обороняющийся (Battle.UpdateGates)
+                foreach (var a in Town.Fort.Arches)
+                {
+                    float gy = HeightAt(a.X, a.Z);
+                    Env.Add(new EnvObj { Kind = EnvKind.Gate, Mat = EnvMat.Wood, Rect = true, X = a.X, Z = a.Z, Y = gy, Hx = a.Citadel ? 3.3f : 4f, Hz = MathF.Max(0.35f, a.W * 0.2f),
+                        Rot = MathF.Atan2(a.Uz, a.Ux), Top = a.H - 1.8f, MaxHp = a.Citadel ? 3000 : 2500, Arch = a });
+                }
                 foreach (var p in Town.Props)
                 {
                     float s = 1.1f / p.Def.H;

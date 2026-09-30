@@ -146,7 +146,8 @@ namespace BattleSim.Core
 
         public void ResetToPlan()
         {
-            World.Env?.Restore(); // реванш на той же карте: дома стоят, ограды целы
+            World.Env?.Restore(); // реванш на той же карте: дома стоят, ограды целы, ворота распахнуты
+            gateBroken.Clear();
             ClearUnits();
             var map = new Dictionary<string, Squad>();
             Plan = Plan.Where(p => World.InField(p.X, p.Z, 1) && World.Walkable(p.X, p.Z, 0.4f)).ToList();
@@ -555,6 +556,7 @@ namespace BattleSim.Core
                 Lap(1);
                 UpdateSquads(dt);
                 UpdateGarrisons(dt);
+                UpdateGates(dt);
                 foreach (var c in Commanders) c?.Tick(dt);
                 foreach (var list in Captains) foreach (var c in list) c.Tick(dt);
                 Lap(2);
@@ -1417,13 +1419,14 @@ namespace BattleSim.Core
             if (u.T.Mount)
             {
                 if (speed < u.T.Speed * 0.5f || Time < u.BashT) return;
-                if (o.Kind == EnvKind.Wall)
-                { // баррикаду конь берёт только в лоб; вдоль неё, протискиваясь в проём, — просто задевает
+                if (o.Kind == EnvKind.Wall || o.Kind == EnvKind.Gate)
+                { // баррикаду и ворота конь берёт только в лоб; вдоль, протискиваясь в проём, — просто задевает
                     float vl = M.Hypot(u.Vel.x, u.Vel.z), wn = MathF.Abs(-MathF.Sin(o.Rot) * u.Vel.x + MathF.Cos(o.Rot) * u.Vel.z);
                     if (vl < 1e-3f || wn < 0.7f * vl) return;
                 }
                 u.BashT = Time + 0.5f;
                 if (World.Env.Hurt(o, u.T.Mass * speed * 9, Harm.Charge, this)) { u.Vel.x *= 0.75f; u.Vel.z *= 0.75f; }
+                else if (o.Kind == EnvKind.Prop) { World.Env.Shove(o, u.Vel.x * 0.12f, u.Vel.z * 0.12f); u.Vel.x *= 0.8f; u.Vel.z *= 0.8f; } // уцелевшую бочку — копытом в сторону
                 else { u.Vel.x *= 0.4f; u.Vel.z *= 0.4f; } // не разнёс — осадил коня
                 Emit(FxKind.Charge, new V3(nx, oy, nz), u.Vel.x, u.Vel.z, u.Team);
                 return;

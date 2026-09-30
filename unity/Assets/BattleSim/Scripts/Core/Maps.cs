@@ -70,7 +70,7 @@ namespace BattleSim.Core
             for (int i = 0; i < L.Count; i++)
             {
                 var o = L[i];
-                if (!o.Rect && o.R <= 1) continue;
+                if ((!o.Rect && o.R <= 1) || o.Env?.Kind == EnvKind.Gate) continue; // ворота — не стена: их можно выбить
                 float dx = x - o.X, dz = z - o.Z;
                 if (o.Rect)
                 {
@@ -78,6 +78,20 @@ namespace BattleSim.Core
                     if (MathF.Abs(lx) < o.Hx + pad && MathF.Abs(lz) < o.Hz + pad) return true;
                 }
                 else if (dx * dx + dz * dz < (o.R + pad) * (o.R + pad)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Запертые ворота тут (с запасом pad)?</summary>
+        public bool GateAt(float x, float z, float pad)
+        {
+            var L = Grid.Near(x, z);
+            if (L == null) return false;
+            foreach (var o in L)
+            {
+                if (o.Env?.Kind != EnvKind.Gate) continue;
+                float dx = x - o.X, dz = z - o.Z, lx = dx * o.C + dz * o.S, lz = -dx * o.S + dz * o.C;
+                if (MathF.Abs(lx) < o.Hx + pad && MathF.Abs(lz) < o.Hz + pad) return true;
             }
             return false;
         }
@@ -361,6 +375,8 @@ namespace BattleSim.Core
         readonly float[] SlopeCost;
         /// <summary>Жар пожара в клетке (0..1): к цене пути, и прямой путь через огонь не считается свободным — горящее обходят.</summary>
         public readonly float[] Heat;
+        /// <summary>Запертые ворота в клетке: путь через них дорогой (придётся выбивать), прямой — не свободен.</summary>
+        public readonly byte[] Gated;
         readonly List<int> heated = new List<int>();
         int baseBarriers;
 
@@ -379,6 +395,7 @@ namespace BattleSim.Core
             Sheer = new byte[n];
             SlopeCost = new float[n];
             Heat = new float[n];
+            Gated = new byte[n];
             Build(w);
             main = new Search(n);
             Region = new[] { Label(0), Label(1) };
@@ -438,6 +455,7 @@ namespace BattleSim.Core
                         if (w.Env != null && w.Env.RubbleAt(x, z)) { si *= 0.6f; sc *= 0.35f; hide = 1; } // руины дома: завал
                     }
                     if (w.Obs.Solid(x, z, 0.4f)) si = sc = 0;                      // дом, колодец, башня (а не бочка у его стены)
+                    Gated[i] = (byte)(w.Obs.GateAt(x, z, 0.4f) ? 1 : 0);             // запертые ворота: пройти — только выбив
                     Speed[0][i] = si; Speed[1][i] = sc;
                     Conceal[i] = hide; Canopy[i] = canopy;
                 }
@@ -711,7 +729,7 @@ namespace BattleSim.Core
                 }
                 if (x < 0 || z < 0 || x >= Dim || z >= Dim) return true;
                 int i = z * Dim + x;
-                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope || Heat[i] > 0.3f) return false;
+                if (sp[i] == 0 || !Step(prev, i, false) || SlopeCost[i] > maxSlope || Heat[i] > 0.3f || Gated[i] != 0) return false;
                 prev = i;
             }
             return true;
@@ -853,7 +871,7 @@ namespace BattleSim.Core
                             int a = cz * D + nx, b2 = nz * D + cx;
                             if (sp[a] == 0 || sp[b2] == 0 || !Step(c, a, false) || !Step(c, b2, false)) continue;
                         }
-                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni] + Heat[ni] * 12f) + MathF.Abs(S[ni] - S[c]) * 0.4f;
+                        float ng = gs[c] + (diag ? 1.4142f : 1f) * (2f / (sp[c] + sp[ni]) + Crowd[ni] * crowdCost + SlopeCost[ni] + Heat[ni] * 12f + Gated[ni] * 25f) + MathF.Abs(S[ni] - S[c]) * 0.4f;
                         if (avoidR > 0)
                         {
                             float ox = -Half + (nx + 0.5f) * CellSize - avoidX, oz = -Half + (nz + 0.5f) * CellSize - avoidZ;

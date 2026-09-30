@@ -68,6 +68,33 @@ static class EnvChecks
                 if (stone.State != EnvState.Intact) fail($"{at}: каменный дом рухнул от натиска конницы");
                 n++;
             }
+            // ворота: запертые — препятствие, путь через них дорогой, но есть; прямой — не свободен
+            var gate = w.Env.All.FirstOrDefault(o => o.Kind == EnvKind.Gate && o.Arch != null && !o.Arch.Citadel);
+            if (gate == null) fail($"{at}: у города нет ворот");
+            else
+            {
+                float ox = gate.X + gate.Arch.Uz * 6, oz = gate.Z - gate.Arch.Ux * 6, ix = gate.X - gate.Arch.Uz * 6, iz = gate.Z + gate.Arch.Ux * 6;
+                w.Env.SetGate(gate, true);
+                if (!gate.Closed || w.Obs.Hit(gate.X, gate.Z) == null) fail($"{at}: запертые ворота — не препятствие");
+                if (w.Nav.Gated[w.Nav.Idx(gate.X, gate.Z)] == 0) fail($"{at}: запертые ворота не отмечены в сетке путей");
+                if (w.Nav.LineClear(ox, oz, ix, iz, 0)) fail($"{at}: сквозь запертые ворота «свободная прямая»");
+                if (w.Nav.FindPath(ox, oz, ix, iz, 0) == null) fail($"{at}: за запертые ворота нет пути вовсе (их можно выбить или обойти)");
+                w.Env.SetGate(gate, false);
+                if (w.Obs.Hit(gate.X, gate.Z) != null || w.Nav.Gated[w.Nav.Idx(gate.X, gate.Z)] != 0) fail($"{at}: распахнутые ворота всё ещё преграда");
+                w.Env.SetGate(gate, true); // так и оставим — реванш должен распахнуть
+                n++;
+            }
+            // уцелевшую бочку взрыв отшвыривает
+            var keg = w.Env.All.FirstOrDefault(o => o.Kind == EnvKind.Prop && o.State == EnvState.Intact && w.Obs.Hit(o.X + 1.5f, o.Z, o.R + 0.3f) == null && w.Nav.SpeedAt(o.X + 1.5f, o.Z, 0) > 0);
+            if (keg != null)
+            {
+                float kx = keg.X;
+                w.Env.Blast(new V3(keg.X - 1.2f, keg.Y + 0.3f, keg.Z), 3, 1, null);
+                if (keg.State == EnvState.Ruined || keg.X <= kx + 0.2f) fail($"{at}: взрыв рядом не отшвырнул бочку ({kx:F1} → {keg.X:F1})");
+                if (w.Obs.Hit(keg.X, keg.Z)?.Env != keg) fail($"{at}: отшвырнутая бочка не препятствие на новом месте");
+                n++;
+            }
+
             // пересчёт на месте = постройка заново
             var fresh = new NavGrid(w);
             string d = Diff(w.Nav, fresh);
@@ -77,8 +104,9 @@ static class EnvChecks
             var clean = Make(MapType.City, seed, cityDefs());
             d = Diff(w.Nav, clean.Nav);
             if (d != null) fail($"{at}: после восстановления сетка путей не как у нетронутого мира: {d}");
-            if (w.Obs.List.Count != clean.Obs.List.Count || w.WallGrid.All.Count != clean.WallGrid.All.Count || w.Env.All.Any(o => o.State != EnvState.Intact || o.Hp != o.MaxHp))
+            if (w.Obs.List.Count != clean.Obs.List.Count || w.WallGrid.All.Count != clean.WallGrid.All.Count || w.Env.All.Any(o => o.State != EnvState.Intact || o.Hp != o.MaxHp || o.Closed))
                 fail($"{at}: после восстановления не всё целое");
+            if (keg != null && (keg.X != keg.HomeX || w.Obs.Hit(keg.HomeX, keg.HomeZ)?.Env != keg)) fail($"{at}: после восстановления бочка не на своём месте");
             n++;
         }
         Console.WriteLine($"  проверок разрушения: {n}");

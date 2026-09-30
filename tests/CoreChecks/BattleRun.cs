@@ -95,6 +95,8 @@ static class BattleRun
             $"RESULT units={b.Units.Count} lost={lost} stuck%={100.0 * stuck / Math.Max(1, stuckSamples):F2} jumps={jumps} inObs={inObs} deep={deep} nan={nan} samples={samples} ruined={world.Env.Ruined} ignited={world.Env.Ignited}"));
         int garrisons = b.Log.Count(e => e.Text.Contains(" засели ")), smoked = b.Log.Count(e => e.Text.Contains("выкурили") || e.Text.Contains("рухнул на головы"));
         if (garrisons > 0) notes.Add($"гарнизонов {garrisons}, выкурено/завалено {smoked}, в одном доме до {insideMax}");
+        int shut = b.Log.Count(e => e.Text.Contains("заперты")), broke = b.Log.Count(e => e.Text.Contains("выбиты"));
+        if (shut + broke > 0) notes.Add($"ворота: заперто {shut}, выбито {broke}");
         var broken = world.Env.All.Where(o => o.State == EnvState.Ruined).GroupBy(o => $"{o.Kind}/{o.LastHarm}").Select(g => $"{g.Key}×{g.Count()}").ToArray();
         if (broken.Length > 0) notes.Add("разрушено: " + string.Join(", ", broken));
         foreach (var n in notes) Console.WriteLine("  " + n);

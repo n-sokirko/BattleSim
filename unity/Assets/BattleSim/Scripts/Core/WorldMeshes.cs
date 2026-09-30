@@ -222,13 +222,7 @@ namespace BattleSim.Core
                 float span = a.Citadel ? 7.2f : 8.6f;
                 Box(a.X, g + a.H - 0.9f, a.Z, span, 1.8f, a.W, yaw, gateDark);              // арка над воротами
                 Box(a.X, g + a.H - 1.9f, a.Z, span - 0.6f, 0.25f, a.W + 0.3f, yaw, cap);   // замковый пояс
-                // створки ворот распахнуты к стенам проёма (дерево), проход свободен
-                float px = MathF.Cos(yaw), pz = -MathF.Sin(yaw);
-                foreach (float side in new[] { -1f, 1f })
-                {
-                    float gx = a.X + px * side * (span / 2 - 0.25f), gz = a.Z + pz * side * (span / 2 - 0.25f);
-                    Box(gx, g + (a.H - 1.8f) / 2, gz, 0.22f, a.H - 1.8f, a.W * 0.8f, yaw, wood);
-                }
+                // створки ворот — в WorldView по состоянию ворот (GateLeaves): распахнуты, заперты или выбиты
             }
             Terraces(w, bb, R);
             return bb.Count > 0 ? bb.Build() : null;
@@ -378,6 +372,37 @@ namespace BattleSim.Core
             var bb = new BoxBuilder();
             for (int i = 0; i < w.Features.Walls.Count; i++) DryWall(bb, w, w.Features.Walls[i], i);
             return bb.Count > 0 ? bb.Build() : null;
+        }
+
+        /// <summary>
+        /// Створки ворот крепости по состоянию: распахнуты к стенам проёма, заперты поперёк (с окованными поясами),
+        /// выбиты — лежат на земле. Для ворот без предмета окружения (старый мир) — распахнуты.
+        /// </summary>
+        public static void GateLeaves(BoxBuilder bb, World w, FortArch a, EnvObj g)
+        {
+            Rgb wood = Rgb.Hex(0x6b4a2e), iron = Rgb.Hex(0x3b3a38);
+            float gy = w.HeightAt(a.X, a.Z), yaw = MathF.Atan2(a.Ux, a.Uz) - M.PI / 2, span = a.Citadel ? 7.2f : 8.6f, h = a.H - 1.8f;
+            float px = MathF.Cos(yaw), pz = -MathF.Sin(yaw);
+            bool closed = g != null && g.Closed && g.State != EnvState.Ruined, broken = g != null && g.State == EnvState.Ruined;
+            foreach (float side in new[] { -1f, 1f })
+            {
+                if (broken)
+                { // выбиты: створки плашмя в проёме
+                    float gx = a.X + px * side * span / 4 + a.Uz * side * 0.8f, gz = a.Z + pz * side * span / 4 - a.Ux * side * 0.8f;
+                    bb.Box(gx, gy + 0.12f, gz, span / 2 - 0.3f, 0.22f, h * 0.9f, yaw + side * 0.15f, wood * 0.75f);
+                }
+                else if (closed)
+                { // заперты: две створки поперёк проёма, железные пояса
+                    float gx = a.X + px * side * span / 4, gz = a.Z + pz * side * span / 4;
+                    bb.Box(gx, gy + h / 2, gz, span / 2 - 0.05f, h, 0.25f, yaw, wood);
+                    for (int k = 1; k <= 2; k++) bb.Box(gx, gy + h * k / 3, gz, span / 2 - 0.1f, 0.18f, 0.3f, yaw, iron);
+                }
+                else
+                { // распахнуты к стенам проёма
+                    float gx = a.X + px * side * (span / 2 - 0.25f), gz = a.Z + pz * side * (span / 2 - 0.25f);
+                    bb.Box(gx, gy + h / 2, gz, 0.22f, h, a.W * 0.8f, yaw, wood);
+                }
+            }
         }
 
         /// <summary>
