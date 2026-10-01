@@ -51,6 +51,8 @@ namespace BattleSim.Core
         public bool Engaged, Hidden, Special, Reserve;
         /// <summary>Гарнизон рубежа (верх подъёма, замок, край уступа): командиры его не переставляют — он держит своё место.</summary>
         public bool Garrison;
+        /// <summary>Под приказом игрока: полководец его не переставляет, пока игрок не отпустит или отряд не побежит.</summary>
+        public bool Player;
         public List<Squad> Foes = new List<Squad>();
         public float FoeDist = float.PositiveInfinity;
         public Wing Wing;

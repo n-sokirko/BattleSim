@@ -48,11 +48,30 @@ namespace BattleSim
         public float LoadProgress;
         public string LoadText = "Собираем войска и рисуем карту…";
 
+        // ---------------------------------------------------------------- сюжетный поход
+        public enum Ui { None, Title, Chapters, Intro }
+        /// <summary>Что открыто поверх карты: заставка, список глав или рассказ перед главой.</summary>
+        public Ui Menu = Ui.None;
+        /// <summary>Глава похода (null — вольная битва), её ход в бою и запас отрядов при расстановке.</summary>
+        public Chapter Story;
+        public StoryRun Run;
+        public int[] Roster = new int[4];
+        public int StoryStars;
+        /// <summary>Отряд, которому игрок отдаёт приказ.</summary>
+        public Squad Selected;
+        /// <summary>Реплика на экране и сколько ей ещё висеть.</summary>
+        public Line Speech;
+        public float SpeechT;
+        readonly Queue<Line> speechQ = new Queue<Line>();
+
         WorldView view = new WorldView();
         Overlays overlays;
         Light sun;
         Hud hud;
         float resultDelay;
+        /// <summary>Сломленная армия (или -1) и сколько секунд она уже бежит.</summary>
+        int brokenTeam = -1;
+        float brokenT;
         int lastBiome = -1;
         bool pausedByHelp;
         readonly Dictionary<Unit, Banner> banners = new Dictionary<Unit, Banner>();
@@ -131,7 +150,10 @@ namespace BattleSim
             }
             NewMap(Seed != 0 ? Seed : 0);
             Battle.RandomArmies(ArmySize);
-            ShowToast("Карта: " + Style.Title + ". Расставьте армии и жмите «В бой!»", 4.2f);
+            string storyArg = Arg("-story");
+            if (storyArg != null) StartChapter(int.Parse(storyArg) - 1);
+            else if (shots == null) OpenTitle();
+            else ShowToast("Карта: " + Style.Title + ". Расставьте армии и жмите «В бой!»", 4.2f);
             if (shots != null) StartCoroutine(AutoShots(shots));
         }
 
@@ -148,8 +170,36 @@ namespace BattleSim
             // -director: снимки в бою делает режиссёр (что он сам выбрал), плюс промежуточные кадры
             bool directed = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-director") >= 0;
             System.IO.Directory.CreateDirectory(dir);
-            string tag = MapType.ToString().ToLowerInvariant();
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-title") >= 0)
+            { // заставка и список глав
+                var keepStory = Story;
+                OpenTitle();
+                yield return new WaitForSeconds(2.5f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, "title.png"));
+                yield return new WaitForSeconds(0.5f);
+                Menu = Ui.Chapters;
+                yield return new WaitForSeconds(0.6f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, "chapters.png"));
+                yield return new WaitForSeconds(0.5f);
+                Menu = Ui.None; SetOrbit(false);
+                if (keepStory != null) StartChapter(keepStory.No - 1);
+            }
+            string tag = Story != null ? "story" + Story.No : MapType.ToString().ToLowerInvariant();
             yield return new WaitForSeconds(2f);
+            if (Story != null)
+            { // рассказ перед главой, потом «расставить за меня»
+                Menu = Ui.Intro;
+                yield return new WaitForSeconds(0.6f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_intro.png"));
+                yield return new WaitForSeconds(0.5f);
+                Menu = Ui.None;
+                Roster[0]--; // один отряд — касанием, как игрок: проверка черты и запаса
+                AutoPlace();
+                Roster[0]++;
+                var wp = World.WalkableNear(-8, ZoneZ - 5);
+                StoryTap(new V3(wp.x, 0, wp.z));
+                yield return new WaitForSeconds(1f);
+            }
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0setup.png"));
             yield return new WaitForSeconds(1f);
             // общий план карты с юго-востока
@@ -176,6 +226,21 @@ namespace BattleSim
             Speed = 2;
             Perf.Clear();
             if (directed) SetDirector(true);
+            if (Story != null && !directed)
+            { // приказ игрока: выбрать отряд и послать вперёд-вбок — снимок с метками
+                while (BattleTime < 5 && Phase == Phase.Fight) yield return null;
+                var osq = Battle.Squads.Find(q => q.Team == 0 && !q.Special && q.Alive > 0 && !q.T.Hero && !q.T.Mount);
+                if (osq != null)
+                {
+                    Selected = osq;
+                    GiveOrder(Cmd.Move, new V2(osq.Center.x + 14, osq.Center.z + 16));
+                    Rig.LookAt(osq.Center.x + 6, osq.Center.z + 2, 0.25f, 50 * M.DEG, 48, true);
+                    yield return new WaitForSeconds(0.6f);
+                    ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_order.png"));
+                    yield return new WaitForSeconds(0.3f);
+                    GiveOrder(Cmd.Free); // дальше — снова воевода, чтобы проверка не мешала бою
+                }
+            }
             foreach (int t in directed ? new[] { 8, 12, 16, 20, 24, 28, 35, 42, 50 } : new[] { 8, 20, 35 })
             {
                 while (BattleTime < t && Phase == Phase.Fight) yield return null;
@@ -243,6 +308,8 @@ namespace BattleSim
                 $"звуки: {(Sound != null ? string.Join(", ", System.Linq.Enumerable.Select(Sound.Played, kv => kv.Key + " " + kv.Value)) : "—")}\n" +
                 string.Join("\n", Chronicle.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}")) +
                 (directed ? "\nрежиссёр:\n" + string.Join("\n", Director.History) : ""));
+            // вся летопись боя (на экране — только последние строки)
+            System.IO.File.WriteAllLines(System.IO.Path.Combine(dir, tag + "_chronicle.txt"), Battle.Log.ConvertAll(e => $"{e.T:F0} [{e.Team}] {e.Text}"));
             Application.Quit();
         }
 
@@ -295,14 +362,16 @@ namespace BattleSim
         public string MapTypeName => Defs.Maps[(int)MapType].Name;
 
         /// <summary>Новая карта: биом и время суток по сиду, местность — выбранная или случайная.</summary>
-        public void NewMap(int seed = 0)
+        public void NewMap(int seed = 0, int biomeSel = -1, int timeSel = -1)
         {
             MapSeed = seed != 0 ? seed : Random.Range(1, 99999) | 1;
             var r = new Rng(MapSeed);
             int biome = (int)(r.Next() * Defs.Biomes.Length);
             if (biome == lastBiome) biome = (biome + 1 + (int)(r.Next() * (Defs.Biomes.Length - 1))) % Defs.Biomes.Length;
+            if (biomeSel >= 0) biome = biomeSel; // глава похода: время года и суток по сценарию
             lastBiome = biome;
-            Style = Style.Make(biome, (int)(r.Next() * Defs.Times.Length));
+            int time = (int)(r.Next() * Defs.Times.Length);
+            Style = Style.Make(biome, timeSel >= 0 ? timeSel : time);
             MapType = MapSel < 0 ? Defs.Maps[(int)(r.Next() * Defs.Maps.Length)].Type : (MapType)MapSel;
             Style.Tweak(MapType);
             Big = ArmySize == 3;
@@ -354,19 +423,23 @@ namespace BattleSim
 
         public void StartBattle()
         {
+            if (Story != null && Battle.PlanCount[0] == 0) { ShowToast("Поставьте хотя бы один полк ниже золотой черты"); return; }
             if (Battle.PlanCount[0] == 0 || Battle.PlanCount[1] == 0) { ShowToast("Нужны обе армии: поставьте и синих, и красных"); return; }
             if (Phase != Phase.Setup) Battle.ResetToPlan();
             ClearBanners();
             Chronicle.Clear();
             Battle.StartFight();
+            Run = Story != null ? new StoryRun(Story, Battle) : null;
+            Selected = null; Speech = null; speechQ.Clear();
             Director.Reset();
             SlowMo = 1;
-            Phase = Phase.Fight; Paused = false; Speed = 1; Winner = -1; BattleTime = 0; resultDelay = 0; Eraser = false;
+            Phase = Phase.Fight; Paused = false; Speed = 1; Winner = -1; BattleTime = 0; resultDelay = 0; Eraser = false; brokenTeam = -1;
             overlays.GhostCount = 0;
         }
 
         public void StopBattle()
         {
+            Selected = null; Run = null; Speech = null; speechQ.Clear();
             fx?.Clear();
             ClearBanners();
             Battle.ResetToPlan();
@@ -388,8 +461,165 @@ namespace BattleSim
             banners.Clear();
         }
 
+        // ---------------------------------------------------------------- поход
+
+        /// <summary>Заставка: облёт карты, «Поход» и «Вольная битва».</summary>
+        public void OpenTitle()
+        {
+            if (Phase != Phase.Setup) StopBattle();
+            Menu = Ui.Title;
+            Selected = null;
+            SetOrbit(true);
+        }
+
+        /// <summary>Список глав (бой, если шёл, прерывается).</summary>
+        public void OpenChapters()
+        {
+            if (Phase != Phase.Setup) StopBattle();
+            Menu = Ui.Chapters;
+            Selected = null;
+            SetOrbit(true);
+        }
+
+        /// <summary>Вольная битва — прежняя песочница: ставишь обе армии и смотришь.</summary>
+        public void StartSandbox()
+        {
+            bool fromStory = Story != null;
+            if (Phase != Phase.Setup) StopBattle();
+            Story = null; Run = null; Selected = null; Menu = Ui.None;
+            Battle.HeroTitle[0] = Battle.HeroTitle[1] = null;
+            if (fromStory) { MapSel = -1; ArmySize = LowEnd ? 1 : 2; NewMap(); Battle.RandomArmies(ArmySize); }
+            SetOrbit(false);
+            Rig.LookAt(0, -(World.SpawnZ + 22), 0, 36 * M.DEG, Big ? 115 : 85, true);
+            ShowToast("Карта: " + Style.Title + ". Расставьте армии и жмите «В бой!»", 4.2f);
+        }
+
+        /// <summary>Звёзды главы i (с нуля) из сохранения: 0 — не пройдена.</summary>
+        public static int StarsOf(int i) => PlayerPrefs.GetInt("story" + (i + 1), 0);
+        public static bool Unlocked(int i) => i == 0 || StarsOf(i - 1) > 0;
+
+        /// <summary>Глава похода: её карта, враг по сценарию и запас своих полков; сперва — рассказ.</summary>
+        public void StartChapter(int i)
+        {
+            i = Mathf.Clamp(i, 0, Campaign.Chapters.Length - 1);
+            var c = Campaign.Chapters[i];
+            if (Phase != Phase.Setup) StopBattle();
+            Story = c; Run = null; Selected = null; Speech = null; speechQ.Clear(); Chronicle.Clear();
+            Lib.EnsureRace(Defs.Rus); Lib.EnsureRace(c.Foe);
+            MapSel = (int)c.Map;
+            ArmySize = c.Big ? 3 : 2;
+            Battle.ClearAll();
+            NewMap(c.Seed, c.Biome, c.Time);
+            Campaign.Prepare(Battle, c);
+            Roster = (int[])c.Mine.Clone();
+            Team = 0; Eraser = false;
+            Type = Mathf.Max(0, System.Array.FindIndex(Roster, n => n > 0));
+            MapName = $"Глава {c.No}. {c.Title} · {MapTypeName} · {Style.Title}";
+            Menu = Ui.Intro;
+            SetOrbit(false);
+            Rig.LookAt(0, ZoneZ - 20, 0, 42 * M.DEG, Big ? 115 : 85, true);
+        }
+
+        /// <summary>Следующая глава; после последней — список глав.</summary>
+        public void NextChapter()
+        {
+            int next = Story != null ? Story.No : 0; // номера с единицы — это и есть индекс следующей
+            if (next >= Campaign.Chapters.Length) { OpenChapters(); return; }
+            StartChapter(next);
+        }
+
+        /// <summary>Черта расстановки: свои полки ставятся ниже неё (z меньше).</summary>
+        public float ZoneZ => World.Town != null ? -(World.Town.CZ + 6) : -World.SpawnZ * 0.45f;
+
+        /// <summary>«Расставить за меня»: оставшиеся в запасе полки встают сами.</summary>
+        public void AutoPlace()
+        {
+            Roster = Battle.PlaceArmy(0, Roster);
+            int left = 0;
+            foreach (var n in Roster) left += n;
+            ShowToast(left > 0 ? $"Не нашлось места для {left} отр. — поставьте их сами" : "Полки расставлены — жмите «В бой!»");
+        }
+
+        void StoryTap(V3 p)
+        {
+            if (Eraser)
+            {
+                var sq = PickSquad(p, 0, 4.5f);
+                if (sq == null) { ShowToast("Здесь нет вашего отряда"); return; }
+                int slot = Campaign.SlotOf(Battle, sq);
+                Battle.RemoveSquad(sq);
+                if (slot >= 0) Roster[slot]++;
+                return;
+            }
+            if (Roster[Type] <= 0) { ShowToast($"{Battle.Races[0].Units[Type].Name}: в запасе больше нет"); return; }
+            if (!World.InField(p.x, p.z, 1)) { ShowToast("Ставить отряды можно только на поле боя"); return; }
+            if (p.z > ZoneZ) { ShowToast("Свои полки — ниже золотой черты"); return; }
+            int type = Battle.Ty(0, Type), full = Defs.All[type].Cols * Defs.All[type].Rows;
+            int n = Battle.PlaceSquad(type, 0, p.x, p.z, 0);
+            if (n > 0 && n < full * 0.6f) { Battle.RemoveSquad(Battle.Squads[Battle.Squads.Count - 1]); n = 0; }
+            if (n == 0) { ShowToast("Здесь тесно — выберите другое место"); return; }
+            if (--Roster[Type] == 0) { int nx = System.Array.FindIndex(Roster, k => k > 0); if (nx >= 0) Type = nx; }
+        }
+
+        /// <summary>Отряд армии team под пальцем: ближайший живой боец в радиусе r (полководцы и гонцы не в счёт).</summary>
+        Squad PickSquad(V3 p, int team, float r = 3.2f)
+        {
+            Squad best = null;
+            float bd = r;
+            foreach (var u in Battle.Units)
+            {
+                if (!u.Alive || u.Team != team || u.Squad == null || u.Squad.Special) continue;
+                float d = M.Hypot(u.Pos.x - p.x, u.Pos.z - p.z);
+                if (d < bd) { bd = d; best = u.Squad; }
+            }
+            return best;
+        }
+
+        /// <summary>В бою: касание своего отряда — выбрать (ещё раз — снять выбор), земли — идти туда, вражеского отряда — ударить.</summary>
+        void FightTap(V3 p)
+        {
+            var own = PickSquad(p, 0);
+            if (own != null) { Selected = own == Selected ? null : own; return; }
+            if (Selected == null) { ShowToast("Коснитесь своего отряда, чтобы отдать приказ"); return; }
+            var foe = PickSquad(p, 1, 4f);
+            if (foe != null) GiveOrder(Cmd.Attack, default, foe);
+            else GiveOrder(Cmd.Move, new V2(p.x, p.z));
+        }
+
+        public void GiveOrder(Cmd cmd, V2 at = default, Squad target = null)
+        {
+            if (Selected == null) return;
+            var err = Battle.PlayerOrder(Selected, cmd, at, target);
+            if (err != null) ShowToast(err);
+            if (cmd == Cmd.Free) Selected = null;
+        }
+
+        public void OrderAll(Cmd cmd)
+        {
+            if (Battle.PlayerOrderAll(0, cmd) == 0) ShowToast("Приказывать некому");
+        }
+
+        /// <summary>Бой кончился: звёзды главы — в сохранение (лучший результат).</summary>
+        void OnResult()
+        {
+            Selected = null;
+            if (Run == null || Story == null) return;
+            StoryStars = Run.Stars(Winner == 0);
+            string key = "story" + Story.No;
+            if (StoryStars > PlayerPrefs.GetInt(key, 0)) { PlayerPrefs.SetInt(key, StoryStars); PlayerPrefs.Save(); }
+        }
+
         void OnTap(Vector2 screen)
         {
+            if (Menu != Ui.None || HelpOpen) return;
+            if (Story != null)
+            {
+                var sp = Rig.GroundPoint(screen);
+                if (sp == null) return;
+                if (Phase == Phase.Setup) StoryTap(sp.Value);
+                else if (Phase == Phase.Fight) FightTap(sp.Value);
+                return;
+            }
             if (Phase != Phase.Setup || HelpOpen) return;
             var p = Rig.GroundPoint(screen);
             if (p == null) return;
@@ -406,9 +636,9 @@ namespace BattleSim
         void OnHover(Vector2 screen)
         {
             if (overlays == null) return;
-            if (Phase != Phase.Setup || Eraser || HelpOpen) { overlays.GhostCount = 0; return; }
+            if (Phase != Phase.Setup || Eraser || HelpOpen || Menu != Ui.None || (Story != null && Roster[Type] <= 0)) { overlays.GhostCount = 0; return; }
             var p = Rig.GroundPoint(screen);
-            if (p == null || !World.InField(p.Value.x, p.Value.z, 1)) { overlays.GhostCount = 0; return; }
+            if (p == null || !World.InField(p.Value.x, p.Value.z, 1) || (Story != null && p.Value.z > ZoneZ)) { overlays.GhostCount = 0; return; }
             overlays.SetGhost(World, p, Battle.Ty(Team, Type), Team);
         }
 
@@ -419,7 +649,7 @@ namespace BattleSim
             ToastT -= Time.unscaledDeltaTime;
             if (Phase == Phase.Loading) return;
 
-            if (!HelpOpen)
+            if (!HelpOpen && Menu == Ui.None)
             {
                 if (InputBridge.Pressed(K.Space) && Phase == Phase.Fight) Paused = !Paused;
                 if (InputBridge.Pressed(K.Tab)) SetDirector(!Rig.Cinematic);
@@ -431,7 +661,7 @@ namespace BattleSim
                     if (InputBridge.Pressed(K.D2)) { Type = 1; Eraser = false; }
                     if (InputBridge.Pressed(K.D3)) { Type = 2; Eraser = false; }
                     if (InputBridge.Pressed(K.D4)) { Type = 3; Eraser = false; }
-                    if (InputBridge.Pressed(K.T)) Team = 1 - Team;
+                    if (InputBridge.Pressed(K.T) && Story == null) Team = 1 - Team;
                     if (InputBridge.Pressed(K.Enter)) StartBattle();
                 }
             }
@@ -454,6 +684,15 @@ namespace BattleSim
                 Alpha = simAcc / SimStep;
             }
             long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
+            // поход: подмога, реплики героев; выбранный отряд, который полёг, — снять выбор
+            if (Run != null && Phase == Phase.Fight && simDt > 0)
+            {
+                Run.Tick();
+                while (Run.Said.Count > 0) speechQ.Enqueue(Run.Said.Dequeue());
+            }
+            SpeechT -= Time.unscaledDeltaTime;
+            if (SpeechT <= 0 && speechQ.Count > 0) { Speech = speechQ.Dequeue(); SpeechT = Mathf.Clamp(2.2f + Speech.Text.Length * 0.05f, 3.5f, 6.5f); }
+            if (Selected != null && (Selected.Alive == 0 || Phase != Phase.Fight)) Selected = null;
             if (Phase == Phase.Fight)
             {
                 BattleTime += simDt;
@@ -463,6 +702,22 @@ namespace BattleSim
                     Battle.AddLog(Winner, Winner < 0 ? "Армии разошлись — ничья" : $"Армии разошлись: поле боя осталось за {(Winner == 0 ? "синими" : "красными")}");
                     Phase = Phase.Result;
                     Rig.Cinematic = true;
+                    OnResult();
+                }
+                else if (brokenTeam < 0 && Battle.BrokenArmy() is int bt && bt >= 0)
+                { // от армии горстка, у врага втрое больше — остатки бегут, через 3 с — итоги
+                    brokenTeam = bt; brokenT = 0;
+                    Battle.Collapse(bt);
+                }
+                else if (brokenTeam >= 0 && Battle.Alive[0] > 0 && Battle.Alive[1] > 0)
+                {
+                    if ((brokenT += simDt) > 3f)
+                    {
+                        Winner = 1 - brokenTeam;
+                        Phase = Phase.Result;
+                        Rig.Cinematic = true;
+                        OnResult();
+                    }
                 }
                 else if (Battle.Alive[0] == 0 || Battle.Alive[1] == 0)
                 {
@@ -472,6 +727,7 @@ namespace BattleSim
                         Winner = Battle.Alive[0] > 0 ? 0 : Battle.Alive[1] > 0 ? 1 : -1;
                         Phase = Phase.Result;
                         Rig.Cinematic = true;
+                        OnResult();
                     }
                 }
             }
@@ -492,6 +748,7 @@ namespace BattleSim
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (Phase == Phase.Fight && !Paused) Perf.Add(Time.unscaledDeltaTime * 1000, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
             overlays.DrawRings(Battle, Phase == Phase.Setup);
+            if (Story != null && Menu == Ui.None) overlays.DrawStory(Battle, Selected, World, ZoneZ, Phase == Phase.Setup);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
             Sound?.Update(Battle, Cam.transform.position, Conv.U(Rig.Target), SlowMo, Paused || Phase == Phase.Setup, Phase == Phase.Fight);

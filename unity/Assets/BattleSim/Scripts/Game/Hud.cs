@@ -5,7 +5,7 @@ using UnityEngine;
 namespace BattleSim
 {
     /// <summary>Интерфейс на IMGUI: работает без Canvas/EventSystem и масштабируется под экран телефона.</summary>
-    public class Hud : MonoBehaviour
+    public partial class Hud : MonoBehaviour
     {
         public GameMain Game;
 
@@ -14,7 +14,7 @@ namespace BattleSim
         float s = 1f;
         Rect safe;
         Texture2D round, white;
-        GUIStyle btn, btnOn, big, label, small, title, panel, labelTag, center, caption;
+        GUIStyle btn, btnOn, btnGold, big, label, small, title, panel, labelTag, center, caption;
         int styleBase = -1;
         string openDrop;
 
@@ -30,7 +30,7 @@ namespace BattleSim
         {
             var p = new Vector2(screenPos.x, Screen.height - screenPos.y);
             foreach (var r in blockers) if (r.Contains(p)) return true;
-            return Game != null && (Game.HelpOpen || Game.Phase == Phase.Loading);
+            return Game != null && (Game.HelpOpen || Game.Phase == Phase.Loading || Game.Menu != GameMain.Ui.None);
         }
 
         void Awake()
@@ -69,6 +69,8 @@ namespace BattleSim
             btn.hover.textColor = Color.white; btn.active.textColor = Brass;
             btn.border = new RectOffset(10, 10, 10, 10);
             btn.padding = new RectOffset(8, 8, 4, 4);
+            btnGold = new GUIStyle(btn);
+            btnGold.normal.textColor = new Color(0.15f, 0.1f, 0.02f); btnGold.hover.textColor = Color.black; btnGold.active.textColor = Color.black;
             btnOn = new GUIStyle(btn);
             btnOn.normal.textColor = new Color(0.96f, 0.84f, 0.57f);
             big = new GUIStyle(btn) { fontSize = Mathf.RoundToInt(24f * s) };
@@ -153,13 +155,24 @@ namespace BattleSim
             safe = new Rect(sa.x, Screen.height - sa.yMax, sa.width, sa.height);
 
             if (Game.Phase == Phase.Loading) { DrawLoading(); return; }
+            if (Game.Menu == GameMain.Ui.Title || Game.Menu == GameMain.Ui.Chapters)
+            {
+                if (Game.Menu == GameMain.Ui.Title) DrawTitle(); else DrawChapters();
+                DrawToast();
+                if (Game.HelpOpen) DrawHelp();
+                return;
+            }
+            bool story = Game.Story != null;
             DrawSquadBars();
             DrawLabels();
             DrawTally();
-            if (Game.Phase == Phase.Setup) DrawSetup(); else DrawFight();
+            if (Game.Menu == GameMain.Ui.Intro) { DrawIntro(); DrawToast(); if (Game.HelpOpen) DrawHelp(); return; }
+            if (Game.Phase == Phase.Setup) { if (story) DrawStorySetup(); else DrawSetup(); }
+            else DrawFight();
             if (Game.Phase != Phase.Setup) DrawChronicle();
-            if (Game.Phase == Phase.Fight) DrawCaption();
-            if (Game.Phase == Phase.Result) DrawResult();
+            if (Game.Phase == Phase.Fight) { DrawCaption(); if (story) DrawOrders(); }
+            DrawSpeech();
+            if (Game.Phase == Phase.Result) { if (story) DrawStoryResult(); else DrawResult(); }
             DrawToast();
             if (Game.HelpOpen) DrawHelp();
         }
@@ -188,8 +201,9 @@ namespace BattleSim
             bool fight = !setup;
             int a0 = fight ? b.Alive[0] : b.PlanCount[0], a1 = fight ? b.Alive[1] : b.PlanCount[1];
             var inner = new Rect(r.x + 12 * s, r.y + 6 * s, r.width - 24 * s, 22 * s);
-            GUI.Label(inner, $"<color=#8db4f5>Синие {a0}{(fight ? " / " + b.PlanCount[0] : "")}</color>", label);
-            GUI.Label(inner, $"<color=#f08a7e>{a1}{(fight ? " / " + b.PlanCount[1] : "")} Красные</color>", new GUIStyle(label) { alignment = TextAnchor.MiddleRight });
+            string n0 = Game.Story != null ? b.Races[0].Name : "Синие", n1 = Game.Story != null ? b.Races[1].Name : "Красные";
+            GUI.Label(inner, $"<color=#8db4f5>{n0} {a0}{(fight ? " / " + b.PlanCount[0] : "")}</color>", label);
+            GUI.Label(inner, $"<color=#f08a7e>{a1}{(fight ? " / " + b.PlanCount[1] : "")} {n1}</color>", new GUIStyle(label) { alignment = TextAnchor.MiddleRight });
             var bar = new Rect(r.x + 12 * s, r.y + 32 * s, r.width - 24 * s, 8 * s);
             Fill(bar, new Color(0, 0, 0, 0.45f));
             int total = Mathf.Max(1, a0 + a1);
@@ -201,7 +215,13 @@ namespace BattleSim
             string windText = ws < 0.5f ? "Безветрие" : $"{WindArrow()} Ветер {ws:0} м/с";
             if (Game.Style != null && Game.Style.Elev < 26) windText += " · низкое солнце слепит стрелков";
             GUI.Label(new Rect(r.x + 12 * s, r.y + 62 * s, r.width - 24 * s, 18 * s), windText, small);
-            if (setup)
+            if (setup && Game.Story != null)
+            {
+                var c0 = b.CommanderSpec(0); var c1 = b.CommanderSpec(1);
+                GUI.Label(new Rect(r.x + 12 * s, r.y + 80 * s, r.width - 24 * s, 26 * s),
+                    $"<color=#cdbb8f>Ведёт {c0.Name} ({Defs.Traits[c0.Trait].Name}) · враг — {c1.Name}</color>", small);
+            }
+            else if (setup)
             {
                 string info = b.UseCommanders && b.PlanCount[0] > 0 && b.PlanCount[1] > 0
                     ? $"Синих ведёт {b.CommanderSpec(0).Name} ({Defs.Traits[b.CommanderSpec(0).Trait].Name}), красных — {b.CommanderSpec(1).Name} ({Defs.Traits[b.CommanderSpec(1).Trait].Name})"
@@ -227,8 +247,8 @@ namespace BattleSim
             var b = Game.Battle;
             // Верхний ряд
             float y = safe.y + Pad, x = safe.xMax - Pad;
-            float bw = Mathf.Clamp((safe.width - 360 * s) / 7f, 96 * s, 150 * s);
-            var items = new List<(string id, float w)> { ("help", bw), ("cmd", bw), ("clear", bw * 0.8f), ("size", bw), ("random", bw), ("type", bw), ("new", bw) };
+            float bw = Mathf.Clamp((safe.width - 360 * s) / 7.7f, 90 * s, 150 * s);
+            var items = new List<(string id, float w)> { ("menu", bw * 0.7f), ("help", bw), ("cmd", bw), ("clear", bw * 0.8f), ("size", bw), ("random", bw), ("type", bw), ("new", bw) };
             var rects = new Dictionary<string, Rect>();
             foreach (var (id, w) in items) { x -= w; rects[id] = new Rect(x, y, w, BtnH); x -= 6 * s; }
             if (Button(rects["new"], "Новая карта")) { openDrop = null; Game.NewMapButton(); }
@@ -242,6 +262,7 @@ namespace BattleSim
             if (Button(rects["clear"], "Очистить")) { openDrop = null; b.ClearAll(); }
             if (Button(rects["cmd"], b.UseCommanders ? "Полководцы: есть" : "Полководцы: нет", b.UseCommanders)) b.UseCommanders = !b.UseCommanders;
             if (Button(rects["help"], "Как устроен бой")) Game.OpenHelp(true);
+            if (Button(rects["menu"], "Меню")) { openDrop = null; Game.OpenTitle(); }
 
             // Нижняя панель: армии, карточки войск, ластик, «В бой!»
             float fightW = 190 * s, fightH = 64 * s, bottom = safe.yMax - Pad;
@@ -297,7 +318,7 @@ namespace BattleSim
             if (Button(r[6], "?")) Game.OpenHelp(true);
             bool muted = Game.Sound != null && Game.Sound.Muted;
             if (Button(r[7], muted ? "<color=#8a8a8a>Звук</color>" : "Звук", !muted)) Game.ToggleSound();
-            if (Game.Phase == Phase.Fight && Button(new Rect(safe.x + Pad, safe.yMax - Pad - BtnH, 180 * s, BtnH), "■ К расстановке")) Game.StopBattle();
+            if (Game.Phase == Phase.Fight && Button(new Rect(safe.x + Pad, safe.yMax - Pad - BtnH, 180 * s, BtnH), Game.Story != null ? "■ Заново" : "■ К расстановке")) Game.StopBattle();
         }
 
         void DrawChronicle()
@@ -331,6 +352,7 @@ namespace BattleSim
             float chronR = safe.x + Pad + Mathf.Min(440 * s, safe.width - 2 * Pad) + Pad;
             float x = Mathf.Max(safe.center.x - w / 2, chronR), y = safe.yMax - Pad - BtnH - 10 * s - h;
             if (x + w > safe.xMax - Pad) { x = safe.center.x - w / 2; y -= (Screen.height < 500 ? 3 : 6) * 34 * s + 6 * s; }
+            if (Game.Story != null) y -= BtnH + 70 * s; // над панелью приказов
             var r = new Rect(x, y, w, h);
             var old = GUI.color;
             GUI.color = new Color(1, 1, 1, a);
@@ -400,7 +422,7 @@ namespace BattleSim
                 }
                 else
                 {
-                    if (sq.LabelT > 0) { text = Defs.OrderText(sq.Order.Kind); op = Mathf.Min(1, sq.LabelT); }
+                    if (sq.LabelT > 0) { text = sq.Player && sq.Order.Mode == Mode.Move ? "На место" : Defs.OrderText(sq.Order.Kind); op = Mathf.Min(1, sq.LabelT); }
                     else if (sq.Hidden) { text = "затаились"; op = 0.7f; }
                     if (text == null) continue;
                     p = sq.Center; h = sq.T.Mount ? 4 : 3.2f;
@@ -491,7 +513,7 @@ namespace BattleSim
             var st = new GUIStyle(small) { wordWrap = true, richText = true, fontSize = Mathf.RoundToInt(13 * s), alignment = TextAnchor.UpperLeft };
             GUI.Label(new Rect(r.x + 24 * s, r.y + 94 * s, r.width - 48 * s, h - 94 * s - BtnH - 34 * s), ResultSummary(), st);
             float bw = (r.width - 40 * s - 16 * s) / 3, by = r.yMax - BtnH - 18 * s, bx = r.x + 20 * s;
-            if (Button(new Rect(bx, by, bw, BtnH), "Реванш", false, null, Brass)) Game.StartBattle();
+            if (Button(new Rect(bx, by, bw, BtnH), "Реванш", false, btnGold, Brass)) Game.StartBattle();
             if (Button(new Rect(bx + bw + 8 * s, by, bw, BtnH), "Изменить армии")) Game.StopBattle();
             if (Button(new Rect(bx + 2 * (bw + 8 * s), by, bw, BtnH), "Новая карта")) { Game.StopBattle(); Game.NewMap(); }
         }
@@ -501,7 +523,8 @@ namespace BattleSim
             if (Game.ToastT <= 0 || string.IsNullOrEmpty(Game.Toast)) return;
             float a = Mathf.Clamp01(Game.ToastT / 0.4f);
             float w = Mathf.Min(620 * s, safe.width - 2 * Pad), h = 42 * s;
-            var r = new Rect(safe.center.x - w / 2, safe.y + Pad + 100 * s, w, h);
+            float dy = Game.Speech != null && Game.SpeechT > 0 ? 82 * s : 0;
+            var r = new Rect(safe.center.x - w / 2, safe.y + Pad + 100 * s + dy, w, h);
             var old = GUI.color;
             GUI.color = new Color(1, 1, 1, a);
             Box(r, PanelHi, false);
@@ -537,7 +560,7 @@ namespace BattleSim
             "<color=#cdbb8f><b>МЕСТНОСТИ</b></color>\n" +
             "• <color=#f6d792><b>Поле.</b></color> Холмы, овраг между армиями, каменные ограды с проёмами.\n" +
             "• <color=#f6d792><b>Лес.</b></color> Чаща прячет отряды, глушит болты и вдвое замедляет конницу. Хитрый полководец устроит там засаду.\n" +
-            "• <color=#f6d792><b>Горы.</b></color> Террасы с обрывами, серпантины с подъёмами и спусками, ущелье с рекой и мосты. Крутые уступы не пройти — войска ищут тропу.\n" +
+            "• <color=#f6d792><b>Горы.</b></color> Цепь скал поперёк поля, между ними — узкие ущелья; впереди и позади — холмы и одиночные горы. На скалы не забраться: войска идут ущельями, стрелки занимают холмы.\n" +
             "• <color=#f6d792><b>Болото.</b></color> Глубокую воду не перейти, по топи и броду идут медленно, кони вязнут. В камышах легко затаиться.\n" +
             "• <color=#f6d792><b>Город.</b></color> Крепостные стены с башнями, воротами и проломами, лестницы на боевой ход, детинец на холме, тесные кварталы и баррикады.\n\n" +
             "<color=#cdbb8f><b>ПОЛКОВОДЦЫ ДУМАЮТ</b></color>\n" +
@@ -549,6 +572,10 @@ namespace BattleSim
             "• <color=#f6d792><b>Солнце и ветер.</b></color> Низкое солнце слепит стрелков. Ветер сносит болты и меняет дальность.\n" +
             "• <color=#f6d792><b>Засады.</b></color> Первый удар из укрытия сильнее в 1,6 раза. Удар в спину сильнее в 1,35 раза, щит от него не спасает.\n" +
             "• <color=#f6d792><b>Боевой дух.</b></color> Потери, болты и удары в спину его подтачивают. Сломленный отряд бежит, а рядом со знаменем полководца приходит в себя.\n\n" +
+            "<color=#cdbb8f><b>ПОХОД: ВАШИ ПРИКАЗЫ</b></color>\n" +
+            "• В главах похода свои полки ставятся из запаса ниже золотой черты — или кнопкой «Расставить за меня».\n" +
+            "• В бою коснитесь своего отряда (под ним загорятся золотые кольца), потом земли — он пойдёт туда и встанет; вражеского отряда — ударит по нему. Кнопки: «В атаку», «Стоять», «Отступить», «Сам» — вернуть отряд воеводе; у богатыря — «На поединок».\n" +
+            "• Отряды без ваших приказов ведёт ваш воевода. Побежавший отряд приказов не слышит, а опомнившись — снова под рукой воеводы. Пауза — чтобы подумать.\n\n" +
             "<color=#cdbb8f><b>КАМЕРА</b></color>\n" +
             "• <color=#f6d792><b>Режиссёр</b></color> (Tab или кнопка «Режиссёр»). Камера сама показывает главное: натиск конницы — ещё до удара и с замедлением, первые сшибки, бегство, гибель полководцев, самую гущу сечи; время от времени — общий план. N — следующий план. Тронули камеру — она ваша, а через 10 с покоя режиссёр вернётся.\n" +
             "• <color=#f6d792><b>Облёт.</b></color> Медленный облёт над центром боя.";

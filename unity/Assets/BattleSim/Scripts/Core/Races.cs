@@ -235,7 +235,7 @@ namespace BattleSim.Core
         {
             var hd = Races[team].Hero;
             var mine = Squads.Where(s => s.Team == team && !s.Special && s.Alive > 0).ToList();
-            if (hd == null || mine.Count < 3) return;
+            if (hd == null || mine.Count < 3 || HeroTitle[team] == "") return;
             var c = Commander.Center(mine).Value;
             float fwd = team == 0 ? 1 : -1, yaw = team == 0 ? 0 : M.PI;
             // перед центром, на свободном месте
@@ -249,7 +249,7 @@ namespace BattleSim.Core
             var u = new Unit(new UnitPlan { Type = hd.Id, Team = team, X = p.x, Z = p.z, Yaw = yaw, Squad = -1 }, World);
             u.PrevPos = u.Pos; u.PrevYaw = u.Yaw;
             var names = Races[team].HeroNames;
-            var sq = new Squad("hero" + team, hd.Id, team, yaw) { Title = names[(int)(Rng.Rand() * names.Length)] };
+            var sq = new Squad("hero" + team, hd.Id, team, yaw) { Title = HeroTitle[team] ?? names[(int)(Rng.Rand() * names.Length)] };
             sq.Units.Add(u); u.Squad = sq; sq.Size = 1;
             Units.Add(u); Squads.Add(sq);
             Heroes[team] = u;

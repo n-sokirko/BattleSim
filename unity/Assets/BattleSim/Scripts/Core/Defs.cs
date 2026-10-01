@@ -314,7 +314,7 @@ namespace BattleSim.Core
         {
             new MapDef { Type = MapType.Field, Key = "field", Name = "Поле", Note = "холмы, овраг и каменные ограды" },
             new MapDef { Type = MapType.Forest, Key = "forest", Name = "Лес", Note = "рощи прячут отряды и глушат болты, кони вязнут в чаще" },
-            new MapDef { Type = MapType.Mountains, Key = "mountains", Name = "Горы", Note = "террасы и обрывы, серпантины, ущелье с рекой и мосты" },
+            new MapDef { Type = MapType.Mountains, Key = "mountains", Name = "Горы", Note = "цепь скал с узкими ущельями, холмы и одиночные горы" },
             new MapDef { Type = MapType.Swamp, Key = "swamp", Name = "Болото", Note = "топи, островки и камыш — глубокую воду не перейти" },
             new MapDef { Type = MapType.City, Key = "city", Name = "Город", Note = "крепостные стены с башнями и воротами, детинец на холме, тесные кварталы" },
         };

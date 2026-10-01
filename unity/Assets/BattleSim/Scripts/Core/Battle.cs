@@ -234,21 +234,21 @@ namespace BattleSim.Core
         /// Осада города: красные — гарнизон (пехота у ворот и на улицах, стрелки у южной стены,
         /// конница в резерве у площади), синие — штурмуют с юга через двое ворот и пролом.
         /// </summary>
-        void SiegeArmies(int size, int[] front, int[] xbow, int[] cav, int lines)
+        void SiegeArmies(int size, int[] front, int[] xbow, int[] cav, int lines, bool attackers = true)
         {
             var town = World.Town;
             int Pick(int[] ab) => ab[0] + (int)(Rng.Rand() * (ab[1] - ab[0] + 1));
             // Штурм: как обычная армия, но на треть больше пехоты
             float z0 = town.CZ + 17; // за рекой, что течёт вдоль южной стены
-            for (int line = 0; line < lines; line++)
+            for (int line = 0; line < lines && attackers; line++)
             {
                 int n = Pick(front) + 1;
                 for (int i = 0; i < n; i++)
                     PlaceSquad(Ty(0, Rng.Rand() < 0.55f ? 0 : 1), 0, (i - (n - 1) / 2f) * 10 + (Rng.Rand() - 0.5f) * 2, -(z0 + line * 8 + Rng.Rand() * 2), 0);
             }
-            int xr = Pick(xbow);
+            int xr = attackers ? Pick(xbow) : 0;
             for (int i = 0; i < xr; i++) PlaceSquad(Ty(0, 2), 0, (i - (xr - 1) / 2f) * 11, -(z0 - 5), 0); // стрелки впереди, у берега
-            int cv = Pick(cav);
+            int cv = attackers ? Pick(cav) : 0;
             for (int i = 0; i < cv; i++)
             {
                 float side = i % 2 == 1 ? -1 : 1;
@@ -645,7 +645,7 @@ namespace BattleSim.Core
                 if (roaring) sq.Morale = MathF.Max(sq.Morale, 60);
                 if ((o.Mode != Mode.Rout || sq.Feigning) && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
                 {
-                    sq.Feigning = false;
+                    sq.Feigning = false; sq.Player = false;
                     ApplyOrder(sq, new Order(OrderKind.Rout, Mode.Rout));
                     sq.Pending = null;
                     AddLog(sq.Team, $"{Defs.Cap(sq.Name)} дрогнули и бегут!");
@@ -664,7 +664,7 @@ namespace BattleSim.Core
                         if (e.Team != sq.Team && !e.Special && e.Alive > 0 && D2d(e.Center, sq.Center) < 16) e.Morale -= 4;
                 }
                 // Бегущих рядом — добивать: конница бросается в погоню
-                if (sq.T.Mount && !sq.T.Ranged && !sq.Engaged && o.Mode != Mode.Charge && o.Mode != Mode.Rout && sq.Morale > sq.T.RoutAt + 20)
+                if (sq.T.Mount && !sq.T.Ranged && !sq.Engaged && !sq.Player && o.Mode != Mode.Charge && o.Mode != Mode.Rout && sq.Morale > sq.T.RoutAt + 20)
                 {
                     Squad prey = null; float best = 45;
                     foreach (var e in Squads)

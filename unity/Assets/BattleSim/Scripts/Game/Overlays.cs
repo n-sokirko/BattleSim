@@ -97,6 +97,50 @@ namespace BattleSim
             if (n > 0) Flush(n);
         }
 
+        /// <summary>
+        /// Поход: золотые кольца под выбранным отрядом, куда он идёт (метка и пунктир) или по кому бьёт (красные кольца),
+        /// а при расстановке — золотая черта, ниже которой ставятся свои полки.
+        /// </summary>
+        public void DrawStory(Battle b, Squad sel, World w, float zoneZ, bool setup)
+        {
+            int n = 0;
+            var gold = new Vector4(1f, 0.8f, 0.3f, 1);
+            var red = new Vector4(1f, 0.32f, 0.22f, 1);
+            void Put(float x, float y, float z, float k, Vector4 c)
+            {
+                rm[n] = Matrix4x4.TRS(Conv.U(x, y, z), Quaternion.identity, new Vector3(k, 1, k));
+                rc[n] = c;
+                if (++n == CrowdModel.Batch) { Flush(n); n = 0; }
+            }
+            if (setup)
+                for (float x = -w.Field + 2; x <= w.Field - 2; x += 2.4f) Put(x, w.GroundAt(x, zoneZ) + 0.12f, zoneZ, 0.5f, gold);
+            if (sel != null && sel.Alive > 0)
+            {
+                foreach (var u in sel.Units)
+                    if (u.Alive) { var p = u.RenderPos(GameMain.Alpha); Put(p.x, p.y + 0.1f, p.z, u.T.Radius * 1.8f, gold); }
+                var o = sel.Order;
+                if (o.Mode == Mode.Charge && o.Target != null && o.Target.Alive > 0)
+                {
+                    foreach (var u in o.Target.Units)
+                        if (u.Alive) { var p = u.RenderPos(GameMain.Alpha); Put(p.x, p.y + 0.1f, p.z, u.T.Radius * 1.8f, red); }
+                }
+                else if (o.HasPos && (o.Mode == Mode.Move || o.Mode == Mode.Hold))
+                {
+                    float gy = w.GroundAt(o.X, o.Z);
+                    Put(o.X, gy + 0.14f, o.Z, 2.4f, gold);
+                    Put(o.X, gy + 0.14f, o.Z, 1.3f, gold);
+                    var c = sel.Center;
+                    float dx = o.X - c.x, dz = o.Z - c.z, d = M.Hypot(dx, dz);
+                    for (float t = 3; t < d - 2.6f; t += 2.6f)
+                    {
+                        float x = c.x + dx * t / d, z = c.z + dz * t / d;
+                        Put(x, w.GroundAt(x, z) + 0.14f, z, 0.35f, gold);
+                    }
+                }
+            }
+            if (n > 0) Flush(n);
+        }
+
         void Flush(int n)
         {
             mpb.Clear();
