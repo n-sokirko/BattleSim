@@ -5,24 +5,24 @@ extends Node3D
 enum S { IDLE, MOVE, ATTACK, DEAD }
 
 const KINDS := {
-	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.3,  "name": "Каэл Вейн"},
-	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.0,  "name": "Ополченец"},
-	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 0.95, "name": "Стрелок"},
-	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.0,  "name": "Налётчик"},
-	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 0.95, "name": "Лучник"},
-	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.05, "name": "Разведчик"},
-	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 1.5,  "name": "Хан Кобек"},
+	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.25, "name": "Каэл Вейн"},
+	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.15, "name": "Ополченец"},
+	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 1.1, "name": "Стрелок"},
+	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.15, "name": "Налётчик"},
+	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 1.1, "name": "Лучник"},
+	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.1, "name": "Разведчик"},
+	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 1.7,  "name": "Хан Кобек"},
 }
 
 
 const LOOKS := {
-	"hero": {"file": "Knight", "show": {"handslot_r": ["1H_Sword"], "handslot_l": ["Round_Shield"], "head": ["Knight_Helmet"], "chest": ["Knight_Cape"]}, "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"footman": {"file": "Knight", "show": {"handslot_r": ["1H_Sword"], "handslot_l": ["Rectangle_Shield"], "head": ["Knight_Helmet"]}, "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
-	"archer": {"file": "Rogue_Hooded", "show": {"handslot_r": ["1H_Crossbow"], "chest": ["Rogue_Cape"]}, "attacks": ["1H_Ranged_Shoot"]},
-	"raider": {"file": "Barbarian", "show": {"handslot_r": ["1H_Axe"], "handslot_l": ["Barbarian_Round_Shield"], "head": ["Barbarian_Hat"]}, "tint": Color(1.0, 0.5, 0.45), "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"rarcher": {"file": "Rogue", "show": {"handslot_r": ["1H_Crossbow"], "chest": ["Rogue_Cape"]}, "tint": Color(1.0, 0.5, 0.45), "attacks": ["1H_Ranged_Shoot"]},
-	"rider": {"file": "Rogue", "show": {"handslot_r": ["Knife"], "handslot_l": ["Knife_Offhand"], "chest": ["Rogue_Cape"]}, "tint": Color(1.0, 0.55, 0.3), "attacks": ["Dualwield_Melee_Attack_Slice", "Dualwield_Melee_Attack_Stab"]},
-	"boss": {"file": "Barbarian", "show": {"handslot_r": ["2H_Axe"], "head": ["Barbarian_Hat"], "chest": ["Barbarian_Cape"]}, "tint": Color(0.85, 0.35, 0.3), "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
+	"hero": {"dir": "own", "file": "hero_kael", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"footman": {"dir": "own", "file": "erland_militia", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
+	"archer": {"dir": "own", "file": "erland_archer", "attacks": ["1H_Ranged_Shoot"]},
+	"raider": {"dir": "own", "file": "nomad_raider", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"rarcher": {"dir": "own", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
+	"rider": {"dir": "own", "file": "nomad_archer", "tint": Color(1.0, 0.85, 0.7), "attacks": ["1H_Ranged_Shoot"]},
+	"boss": {"dir": "own", "file": "nomad_khan", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
 }
 static var models := {}
 static var lib: AnimationLibrary
@@ -109,7 +109,7 @@ func setup(k: String, t: int, g) -> void:
 	is_boss = k == "boss"
 	load_shared()
 	var cfg: Dictionary = LOOKS[k]
-	model = (load("res://assets/kk/%s.glb" % cfg["file"]) as PackedScene).instantiate()
+	model = (load("res://assets/%s/%s.glb" % [cfg.get("dir", "kk"), cfg["file"]]) as PackedScene).instantiate()
 	model.scale = Vector3.ONE * d["scale"]
 	radius = 0.55 * d["scale"]
 	add_child(model)
@@ -392,7 +392,7 @@ static func _dress(model: Node, cfg: Dictionary) -> void:
 ## Готовая одетая модель бойца вида k (для портрета в интерфейсе).
 static func make_model(k: String) -> Node3D:
 	var cfg: Dictionary = LOOKS[k]
-	var m := (load("res://assets/kk/%s.glb" % cfg["file"]) as PackedScene).instantiate() as Node3D
+	var m := (load("res://assets/%s/%s.glb" % [cfg.get("dir", "kk"), cfg["file"]]) as PackedScene).instantiate() as Node3D
 	_dress(m, cfg)
 	_tint(m, cfg.get("tint", Color(1, 1, 1)))
 	var ap := m.find_child("AnimationPlayer", true, false) as AnimationPlayer
