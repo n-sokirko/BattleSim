@@ -60,8 +60,8 @@ func _ready() -> void:
 		elif a.begins_with("--speed="):
 			Engine.time_scale = float(a.substr(8))
 	seed(7)
-	_build_world()
 	_build_camps()
+	_build_world()
 	_build_party()
 	_build_hud()
 	_toast("Каэл со своим отрядом. ПКМ — идти и бить. Q W E R — способности. Лагеря спят, пока не подойдёшь.", 8.0)
@@ -81,7 +81,7 @@ func _build_world() -> void:
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.9
+	e.ambient_light_energy = 0.55
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.75, 0.82, 0.9)
@@ -92,7 +92,7 @@ func _build_world() -> void:
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 35, 0)
-	sun.light_energy = 1.25
+	sun.light_energy = 1.0
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
 	add_child(sun)
@@ -117,43 +117,42 @@ func _build_world() -> void:
 	gm.roughness = 1.0
 	ground.material_override = gm
 	add_child(ground)
-	# деревья и камни
-	var trunk_m := StandardMaterial3D.new(); trunk_m.albedo_color = Color(0.32, 0.22, 0.13)
-	var leaf_m := StandardMaterial3D.new(); leaf_m.albedo_color = Color(0.13, 0.34, 0.16)
-	var leaf_m2 := StandardMaterial3D.new(); leaf_m2.albedo_color = Color(0.2, 0.42, 0.18)
-	var rock_m := StandardMaterial3D.new(); rock_m.albedo_color = Color(0.45, 0.45, 0.47)
+	# деревья, кусты, камни, цветы и трава (Quaternius, CC0)
 	var rng := RandomNumberGenerator.new(); rng.seed = 11
-	for i in 330:
-		var p := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if _near_poi(p, 16.0):
-			continue
-		var s := rng.randf_range(0.8, 1.7)
-		var tree := Node3D.new()
-		tree.position = p
-		tree.rotation.y = rng.randf() * TAU
-		var tr := MeshInstance3D.new(); var cm := CylinderMesh.new()
-		cm.top_radius = 0.18 * s; cm.bottom_radius = 0.26 * s; cm.height = 1.6 * s
-		tr.mesh = cm; tr.position.y = 0.8 * s; tr.material_override = trunk_m
-		tree.add_child(tr)
-		for j in 3:
-			var lf := MeshInstance3D.new(); var co := CylinderMesh.new()
-			co.top_radius = 0.0; co.bottom_radius = (1.7 - j * 0.45) * s; co.height = 2.0 * s
-			lf.mesh = co; lf.position.y = (1.7 + j * 1.0) * s
-			lf.material_override = leaf_m if (i % 2 == 0) else leaf_m2
-			tree.add_child(lf)
-		add_child(tree)
-	for i in 70:
+	var trees := _scenes(["pine_tree_1", "pine_tree_2", "pine_tree_3", "pine_tree_4", "pine_tree_5", "normal_tree_1", "normal_tree_2", "normal_tree_3", "normal_tree_4", "birch_tree_1", "birch_tree_2", "birch_tree_3", "maple_tree_1", "maple_tree_2"])
+	var dead := _scenes(["dead_tree_1", "dead_tree_2", "dead_tree_3", "dead_tree_4"])
+	var bushes := _scenes(["bush", "bush_large", "bush_small", "bush_flowers", "bush_large_flowers"])
+	var rocks := _scenes(["rock_1", "rock_2", "rock_3", "rock_4", "rock_5"])
+	var flowers := _scenes(["flower_1_clump", "flower_2_clump", "flower_3_clump", "flower_4_clump", "flower_5_clump", "plant_1", "plant_2"])
+	var grass := _scenes(["grass_large", "grass_small"])
+	var woods: Array[Vector3] = []
+	for i in 16:
+		var c := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if not _near_poi(c, 28.0):
+			woods.append(c)
+	for w in woods:
+		for j in 26:
+			var a := rng.randf() * TAU
+			var r := sqrt(rng.randf()) * 17.0
+			var p := w + Vector3(cos(a) * r, 0, sin(a) * r)
+			if _near_poi(p, 14.0) or absf(p.x) > FIELD or absf(p.z) > FIELD:
+				continue
+			_put(trees[rng.randi() % trees.size()], p, rng.randf_range(1.0, 1.7), rng)
+	for i in 40:
+		var p1 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if not _near_poi(p1, 14.0):
+			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, rng.randf_range(1.0, 1.6), rng)
+	for i in 120:
 		var p2 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if _near_poi(p2, 10.0):
-			continue
-		var r := MeshInstance3D.new(); var sm := SphereMesh.new()
-		var rs := rng.randf_range(0.5, 1.6)
-		sm.radius = rs; sm.height = rs * 1.3
-		r.mesh = sm; r.position = p2 + Vector3(0, rs * 0.3, 0)
-		r.rotation.y = rng.randf() * TAU
-		r.scale = Vector3(1, 0.7, rng.randf_range(0.8, 1.3))
-		r.material_override = rock_m
-		add_child(r)
+		if not _near_poi(p2, 8.0):
+			_put(bushes[rng.randi() % bushes.size()], p2, rng.randf_range(1.0, 1.6), rng)
+	for i in 70:
+		var p3 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if not _near_poi(p3, 9.0):
+			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6), rng)
+	for i in 260:
+		var p4 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		_put(flowers[rng.randi() % flowers.size()] if i % 3 == 0 else grass[rng.randi() % grass.size()], p4, rng.randf_range(1.2, 2.2), rng)
 	# камера
 	pivot = Node3D.new()
 	add_child(pivot)
@@ -222,8 +221,8 @@ func _build_camps() -> void:
 		var pos := Vector3(c[1].x * FIELD, 0, c[1].y * FIELD)
 		var node := Node3D.new()
 		node.position = pos
-		var crate := (load("res://assets/props/Prop_Crate.gltf") as PackedScene).instantiate()
-		crate.scale = Vector3.ONE * 1.6
+		var crate := (load("res://assets/hex/crate_open.gltf") as PackedScene).instantiate()
+		crate.scale = Vector3.ONE * 2.6
 		node.add_child(crate)
 		var gl := OmniLight3D.new(); gl.light_color = Color(1, 0.85, 0.4); gl.light_energy = 1.6; gl.omni_range = 6.0
 		gl.position.y = 1.5
@@ -243,28 +242,18 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 	var em := StandardMaterial3D.new(); em.albedo_color = Color(1, 0.5, 0.15); em.emission_enabled = true; em.emission = Color(1, 0.45, 0.1); em.emission_energy_multiplier = 3.0
 	ember.material_override = em
 	add_child(ember)
-	for i in (7 if is_boss else 4):
-		var a := i * 1.7 + 0.3
-		var node := Node3D.new()
-		var src := "res://assets/props/Prop_Crate.gltf" if i % 3 != 0 else "res://assets/props/Prop_WoodenFence_Single.gltf"
-		if is_boss and i == 0:
-			src = "res://assets/props/Prop_Wagon.gltf"
-		node.add_child((load(src) as PackedScene).instantiate())
-		node.position = pos + Vector3(cos(a) * 7.0, 0, sin(a) * 7.0)
-		node.rotation.y = a
-		node.scale = Vector3.ONE * 1.5
-		add_child(node)
-	# красный стяг
-	var pole := MeshInstance3D.new(); var pcm := CylinderMesh.new(); pcm.top_radius = 0.06; pcm.bottom_radius = 0.08; pcm.height = 5.0
-	pole.mesh = pcm; pole.position = pos + Vector3(2.5, 2.5, -2.5)
-	var pm := StandardMaterial3D.new(); pm.albedo_color = Color(0.3, 0.2, 0.12)
-	pole.material_override = pm
-	add_child(pole)
-	var flag := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(1.4, 0.9, 0.05)
-	flag.mesh = bm; flag.position = pos + Vector3(3.2, 4.4, -2.5)
-	var fm := StandardMaterial3D.new(); fm.albedo_color = Color(0.7, 0.1, 0.08)
-	flag.material_override = fm
-	add_child(flag)
+	var S := 4.2
+	var ring := ["tent", "crate_A_big", "weaponrack", "barrel", "tent", "sack", "crate_B_big", "wheelbarrow"]
+	var n := 8 if is_boss else 5
+	for i in n:
+		var a := i * (TAU / n) + 0.4
+		var rr := 8.5 if ring[i % ring.size()] == "tent" else 6.5
+		_hex(ring[i % ring.size()], pos + Vector3(cos(a) * rr, 0, sin(a) * rr), S, -a + PI / 2)
+	_hex("flag_red", pos + Vector3(2.8, 0, -2.8), S * 1.4)
+	if is_boss:
+		_hex("building_tower_A_red", pos + Vector3(-11, 0, 4), 3.2, 0.6)
+		_hex("fence_wood_straight", pos + Vector3(0, 0, 13), 3.0)
+		_hex("fence_wood_straight", pos + Vector3(7, 0, 12), 3.0)
 
 
 func _build_party() -> void:
@@ -834,4 +823,31 @@ func _count(team: int) -> int:
 	var n := 0
 	for u in units:
 		if u.team == team and u.state != Unit.S.DEAD: n += 1
+	return n
+
+
+# ---------------------------------------------------------------- украшения
+
+func _scenes(names: Array) -> Array:
+	var out := []
+	for n in names:
+		out.append(load("res://assets/nature/prefabs/%s.tscn" % n))
+	return out
+
+
+func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator) -> Node3D:
+	var n := ps.instantiate() as Node3D
+	n.position = p
+	n.rotation.y = rng.randf() * TAU
+	n.scale = Vector3.ONE * s
+	add_child(n)
+	return n
+
+
+func _hex(name: String, p: Vector3, s: float, yaw := 0.0) -> Node3D:
+	var n := (load("res://assets/hex/%s.gltf" % name) as PackedScene).instantiate() as Node3D
+	n.position = p
+	n.rotation.y = yaw
+	n.scale = Vector3.ONE * s
+	add_child(n)
 	return n
