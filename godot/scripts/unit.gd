@@ -5,7 +5,7 @@ extends Node3D
 enum S { IDLE, MOVE, ATTACK, DEAD }
 
 const KINDS := {
-	"hero":    {"model": "Male_Ranger",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.3,  "name": "Каэл Вейн"},
+	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.3,  "name": "Каэл Вейн"},
 	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.0,  "name": "Ополченец"},
 	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 0.95, "name": "Стрелок"},
 	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.0,  "name": "Налётчик"},
@@ -14,6 +14,16 @@ const KINDS := {
 	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 1.5,  "name": "Хан Кобек"},
 }
 
+
+const LOOKS := {
+	"hero": {"file": "Knight", "show": {"handslot_r": ["1H_Sword"], "handslot_l": ["Round_Shield"], "head": ["Knight_Helmet"], "chest": ["Knight_Cape"]}, "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"footman": {"file": "Knight", "show": {"handslot_r": ["1H_Sword"], "handslot_l": ["Rectangle_Shield"], "head": ["Knight_Helmet"]}, "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
+	"archer": {"file": "Rogue_Hooded", "show": {"handslot_r": ["1H_Crossbow"], "chest": ["Rogue_Cape"]}, "attacks": ["1H_Ranged_Shoot"]},
+	"raider": {"file": "Barbarian", "show": {"handslot_r": ["1H_Axe"], "handslot_l": ["Barbarian_Round_Shield"], "head": ["Barbarian_Hat"]}, "tint": Color(1.0, 0.5, 0.45), "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"rarcher": {"file": "Rogue", "show": {"handslot_r": ["1H_Crossbow"], "chest": ["Rogue_Cape"]}, "tint": Color(1.0, 0.5, 0.45), "attacks": ["1H_Ranged_Shoot"]},
+	"rider": {"file": "Rogue", "show": {"handslot_r": ["Knife"], "handslot_l": ["Knife_Offhand"], "chest": ["Rogue_Cape"]}, "tint": Color(1.0, 0.55, 0.3), "attacks": ["Dualwield_Melee_Attack_Slice", "Dualwield_Melee_Attack_Stab"]},
+	"boss": {"file": "Barbarian", "show": {"handslot_r": ["2H_Axe"], "head": ["Barbarian_Hat"], "chest": ["Barbarian_Cape"]}, "tint": Color(0.85, 0.35, 0.3), "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
+}
 static var models := {}
 static var lib: AnimationLibrary
 static var bar_shader: Shader
@@ -98,25 +108,22 @@ func setup(k: String, t: int, g) -> void:
 	is_hero = k == "hero"
 	is_boss = k == "boss"
 	load_shared()
-	var path := "res://assets/chars/%s.gltf" % d["model"]
-	model = (load(path) as PackedScene).instantiate()
+	var cfg: Dictionary = LOOKS[k]
+	model = (load("res://assets/kk/%s.glb" % cfg["file"]) as PackedScene).instantiate()
 	model.scale = Vector3.ONE * d["scale"]
 	radius = 0.55 * d["scale"]
 	add_child(model)
-	var tint := Color(1, 1, 1)
-	match k:
-		"hero": tint = Color(0.55, 0.7, 1.0)
-		"footman": tint = Color(0.45, 0.6, 1.0)
-		"archer": tint = Color(0.5, 0.65, 1.0)
-		"raider": tint = Color(1.0, 0.45, 0.35)
-		"rarcher": tint = Color(1.0, 0.5, 0.3)
-		"rider": tint = Color(1.0, 0.55, 0.25)
-		"boss": tint = Color(0.7, 0.2, 0.2)
-	_tint(model, tint)
-	anim = AnimationPlayer.new()
-	model.add_child(anim)
-	anim.add_animation_library("", lib)
-	anim.root_node = anim.get_path_to(model)
+	_dress(model, cfg)
+	_tint(model, cfg.get("tint", Color(1, 1, 1)))
+	anim = model.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	for n in ["Idle", "Idle_Combat", "Running_A", "Running_B", "Walking_A", "2H_Melee_Idle"]:
+		if anim.has_animation(n):
+			anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+	a_idle = cfg.get("idle", "Idle")
+	a_run = cfg.get("run", "Running_A")
+	a_attacks = cfg.get("attacks", ["1H_Melee_Attack_Slice_Diagonal"])
+	a_hit = "Hit_A"
+	a_die = "Death_A"
 	# кольцо под ногами: цвет армии
 	ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
@@ -141,10 +148,10 @@ func setup(k: String, t: int, g) -> void:
 	bar.material_override = sm
 	add_child(bar)
 	home = position
-	play("Sword_Idle" if not ranged else "Idle")
+	play(a_idle)
 
 
-func _tint(n: Node, c: Color) -> void:
+static func _tint(n: Node, c: Color) -> void:
 	if n is MeshInstance3D:
 		var mi := n as MeshInstance3D
 		for i in mi.mesh.get_surface_count():
@@ -169,7 +176,7 @@ func set_selected(v: bool) -> void:
 
 
 func play(n: String, restart := false, spd := 1.0) -> void:
-	if not lib.has_animation(n):
+	if not anim.has_animation(n):
 		return
 	if cur == n and not restart:
 		return
@@ -181,12 +188,12 @@ func play(n: String, restart := false, spd := 1.0) -> void:
 # ---------------------------------------------------------------- приказы
 
 func order_move(p: Vector3, amove := false) -> void:
-	goal = p; has_goal = true; attack_move = amove
+	goal = p; has_goal = true; attack_move = amove; hold = false
 	target = null; forced = false
 
 
 func order_attack(t: Unit) -> void:
-	target = t; forced = true; has_goal = false; attack_move = false
+	target = t; forced = true; has_goal = false; attack_move = false; hold = false
 
 
 func order_stop() -> void:
@@ -210,7 +217,7 @@ func hurt(amount: float, src: Unit) -> void:
 	if src != null and not forced and not has_goal and target == null and not asleep:
 		target = src
 	if state == S.IDLE and swing < 0.0 and stun <= 0.0 and randf() < 0.35:
-		play("Hit_Chest", true)
+		play(a_hit, true)
 		cur = "hit"
 
 
@@ -219,7 +226,7 @@ func die(src: Unit) -> void:
 	kill_by = src
 	hp = 0.0
 	target = null
-	play("Death01", true)
+	play(a_die, true)
 	ring.visible = false
 	bar.visible = false
 	if selected:
@@ -245,7 +252,7 @@ func tick(dt: float) -> void:
 	(bar.material_override as ShaderMaterial).set_shader_parameter("ratio", clampf(hp / max_hp, 0.0, 1.0))
 	if stun > 0.0:
 		stun -= dt
-		play("Idle")
+		play(a_idle)
 		return
 	# атака в разгаре: ждём момента удара
 	if swing >= 0.0:
@@ -257,7 +264,7 @@ func tick(dt: float) -> void:
 			return
 	if asleep and not has_goal:
 		state = S.IDLE
-		play("Sword_Idle" if not ranged else "Idle")
+		play(a_idle)
 		return
 	if taunt_t > 0.0 and taunt_by != null and taunt_by.state != S.DEAD:
 		target = taunt_by; forced = true
@@ -268,6 +275,7 @@ func tick(dt: float) -> void:
 		var r := 9.0
 		if team == 1: r = 14.0
 		if attack_move: r = 16.0
+		if hold: r = reach + 1.5
 		target = game.nearest_enemy(self, r)
 	if target != null:
 		var d := _dist(target)
@@ -278,11 +286,15 @@ func tick(dt: float) -> void:
 			if cd <= 0.0:
 				cd = cooldown * randf_range(0.9, 1.1)
 				swing = 0.0
-				play("Sword_Attack" if not ranged else "Spell_Simple_Shoot", true)
+				play(a_attack(), true)
 				cur = "atk"
 			elif cur != "atk":
-				play("Sword_Idle" if not ranged else "Idle")
+				play(a_idle)
 		else:
+			if hold and not forced:
+				target = null
+				play(a_idle)
+				return
 			state = S.MOVE
 			_walk_to(target.global_position, dt, need * 0.85)
 		# не гнаться бесконечно за недосягаемым (лагерь на привязи)
@@ -300,7 +312,7 @@ func tick(dt: float) -> void:
 			return
 	state = S.IDLE
 	if cur != "hit" and cur != "atk":
-		play("Sword_Idle" if not ranged else "Idle")
+		play(a_idle)
 	elif not anim.is_playing():
 		cur = ""
 
@@ -334,7 +346,7 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 	var dir := Vector3(p.x - global_position.x, 0.0, p.z - global_position.z)
 	var dist := dir.length()
 	if dist <= stop:
-		play("Sword_Idle" if not ranged else "Idle")
+		play(a_idle)
 		return
 	dir /= dist
 	# расталкиваемся с соседями
@@ -352,4 +364,46 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 	global_position += v * dt
 	global_position.y = 0.0
 	_face(global_position + v, dt)
-	play("Jog_Fwd", false, clampf(speed / 4.6, 0.8, 1.4))
+	play(a_run, false, clampf(speed / 4.6, 0.8, 1.4))
+
+
+var a_idle := "Idle"
+var a_run := "Running_A"
+var a_hit := "Hit_A"
+var a_die := "Death_A"
+var a_attacks: Array = ["1H_Melee_Attack_Slice_Diagonal"]
+
+
+func a_attack() -> String:
+	return a_attacks[randi() % a_attacks.size()]
+
+
+## Показать только нужное оружие и одежду: в моделях KayKit все предметы лежат на костях сразу.
+static func _dress(model: Node, cfg: Dictionary) -> void:
+	var skel := model.find_child("Skeleton3D", true, false) as Skeleton3D
+	var show: Dictionary = cfg.get("show", {})
+	for att in skel.get_children():
+		if att is BoneAttachment3D:
+			var keep: Array = show.get(att.name, [])
+			for m in att.get_children():
+				m.visible = m.name in keep
+
+
+## Готовая одетая модель бойца вида k (для портрета в интерфейсе).
+static func make_model(k: String) -> Node3D:
+	var cfg: Dictionary = LOOKS[k]
+	var m := (load("res://assets/kk/%s.glb" % cfg["file"]) as PackedScene).instantiate() as Node3D
+	_dress(m, cfg)
+	_tint(m, cfg.get("tint", Color(1, 1, 1)))
+	var ap := m.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	if ap and ap.has_animation("Idle"):
+		ap.get_animation("Idle").loop_mode = Animation.LOOP_LINEAR
+		ap.play(cfg.get("idle", "Idle"))
+	return m
+
+
+var hold := false
+
+func order_hold() -> void:
+	target = null; forced = false; has_goal = false; attack_move = false
+	hold = true

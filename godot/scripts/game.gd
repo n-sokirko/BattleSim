@@ -18,10 +18,9 @@ var selection: Array[Unit] = []
 var cam: Camera3D
 var pivot: Node3D
 var cam_yaw := 0.0
-var cam_zoom := 17.0
+var cam_zoom := 14.0
 var ab_ready := [0.0, 0.0, 0.0, 0.0]
 var t_game := 0.0
-var attack_cmd := false
 var finished := false
 var boss: Unit
 var projectiles: Array = []
@@ -355,13 +354,14 @@ func _end(win: bool) -> void:
 	if finished:
 		return
 	finished = true
-	lbl_big.text = ("Победа!\nКобек повержен, пленные свободны." if win else "Каэл пал.") + "\nНажмите Enter — начать заново"
-	lbl_big.visible = true
+	ui.big.text = ("Победа!\nКобек повержен, пленные свободны." if win else "Каэл пал.") + "\nНажмите Enter — начать заново"
+	ui.big.visible = true
 	_log("RESULT %s t=%.0f level=%d" % ["WIN" if win else "LOSE", t_game, hero.level])
 
 
 func _toast(s: String, sec := 3.0) -> void:
-	toasts.append([s, sec])
+	if ui != null:
+		ui.toast(s, sec)
 
 
 func _log(s: String) -> void:
@@ -444,6 +444,8 @@ func _input(ev: InputEvent) -> void:
 		return
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
+		if mb.pressed and ui.over_ui(mb.position) and mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+			return
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			cam_zoom = clampf(cam_zoom - 2.5, 10.0, 55.0)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
@@ -453,7 +455,7 @@ func _input(ev: InputEvent) -> void:
 				drag_from = mb.position; dragging = true
 			elif dragging:
 				dragging = false
-				selbox.visible = false
+				ui.selbox.visible = false
 				if drag_from.distance_to(mb.position) < 6.0:
 					_click_select(mb.position)
 				else:
@@ -463,9 +465,9 @@ func _input(ev: InputEvent) -> void:
 	elif ev is InputEventMouseMotion and dragging:
 		var mm := ev as InputEventMouseMotion
 		if drag_from.distance_to(mm.position) > 6.0:
-			selbox.visible = true
-			selbox.set("a", drag_from); selbox.set("b", mm.position)
-			selbox.queue_redraw()
+			ui.selbox.visible = true
+			ui.selbox.set("a", drag_from); ui.selbox.set("b", mm.position)
+			ui.selbox.queue_redraw()
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 			cam_yaw -= mm.relative.x * 0.005
 	elif ev is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
@@ -483,17 +485,24 @@ func _input(ev: InputEvent) -> void:
 				if ev.ctrl_pressed:
 					_select_all()
 				else:
-					attack_cmd = true
-			KEY_ESCAPE: attack_cmd = false
+					cmd_mode = "attack"
+			KEY_M: cmd_mode = "move"
+			KEY_H: order_hold()
+			KEY_ESCAPE: cmd_mode = ""
 
 
 func _click_select(pos: Vector2) -> void:
-	if attack_cmd:
-		attack_cmd = false
+	if cmd_mode != "":
+		var mode := cmd_mode
+		cmd_mode = ""
 		var g = _screen_ground(pos)
 		if g != null:
-			for u in selection:
-				u.order_move(g, true)
+			if mode == "move":
+				order_selection_move(g)
+			else:
+				for u in selection:
+					u.order_move(g, true)
+			fx_ring(g, 1.0, Color(0.4, 1, 0.4))
 		return
 	var u := _unit_at(pos, 0)
 	_clear_sel()
@@ -541,7 +550,7 @@ func _order_stop() -> void:
 
 
 func _right_click(pos: Vector2) -> void:
-	attack_cmd = false
+	cmd_mode = ""
 	var foe := _unit_at(pos, 1)
 	if foe != null:
 		for u in selection:
@@ -562,105 +571,39 @@ func _right_click(pos: Vector2) -> void:
 
 # ---------------------------------------------------------------- интерфейс
 
-class SelBox extends Control:
-	var a := Vector2.ZERO
-	var b := Vector2.ZERO
-	func _draw() -> void:
-		var r := Rect2(a, b - a).abs()
-		draw_rect(r, Color(0.3, 1, 0.4, 0.12), true)
-		draw_rect(r, Color(0.3, 1, 0.4, 0.9), false, 2.0)
-
-
-func _label(parent: Control, text: String, size := 18) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	l.add_theme_constant_override("outline_size", 5)
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(l)
-	return l
+var ui: Hud
+var cmd_mode := ""
 
 
 func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
-	var root := Control.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(root)
-	selbox = SelBox.new()
-	selbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	selbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	selbox.visible = false
-	root.add_child(selbox)
-	lbl_goal = _label(root, "", 20)
-	lbl_goal.position = Vector2(16, 12)
-	lbl_hero = _label(root, "", 18)
-	lbl_hero.position = Vector2(16, 66)
-	lbl_sel = _label(root, "", 16)
-	lbl_sel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	lbl_sel.position = Vector2(16, -80)
-	lbl_msg = _label(root, "", 20)
-	lbl_msg.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	lbl_msg.position = Vector2(-500, 130)
-	lbl_msg.size = Vector2(1000, 60)
-	lbl_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_big = _label(root, "", 44)
-	lbl_big.set_anchors_preset(Control.PRESET_CENTER)
-	lbl_big.position = Vector2(-500, -100)
-	lbl_big.size = Vector2(1000, 200)
-	lbl_big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_big.visible = false
-	var row := HBoxContainer.new()
-	row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	row.position = Vector2(-300, -110)
-	row.add_theme_constant_override("separation", 10)
-	root.add_child(row)
-	for i in 4:
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(140, 90)
-		b.focus_mode = Control.FOCUS_NONE
-		b.pressed.connect(cast.bind(i))
-		row.add_child(b)
-		ab_buttons.append(b)
+	ui = Hud.new()
+	ui.game = self
+	hud.add_child(ui)
 
 
 func _update_hud(dt: float) -> void:
-	var left := 0
-	for c in camps:
-		if not c["cleared"]: left += 1
-	lbl_goal.text = "Задача: победить хана Кобека\nЛагерей осталось: %d из %d" % [left, camps.size()]
-	var nxt: float = XP_AT[hero.level] if hero.level < XP_AT.size() else hero.xp
-	lbl_hero.text = "%s · ур. %d · здоровье %d/%d · опыт %d/%d" % [hero.title, hero.level, hero.hp, hero.max_hp, hero.xp, nxt]
-	var names := {}
+	ui.refresh(dt)
+
+
+func select_only(u: Unit) -> void:
+	_clear_sel()
+	_select(u)
+
+
+func order_selection_move(g: Vector3) -> void:
+	var n := selection.size()
+	for i in n:
+		var a := i * 2.4
+		var r := 0.0 if n == 1 else 1.6 + 0.5 * (i / 6)
+		var off := Vector3(cos(a) * r, 0, sin(a) * r) if i > 0 else Vector3.ZERO
+		selection[i].order_move(g + off)
+
+
+func order_hold() -> void:
 	for u in selection:
-		names[u.title] = names.get(u.title, 0) + 1
-	var parts: PackedStringArray = []
-	for k in names:
-		parts.append("%s ×%d" % [k, names[k]])
-	lbl_sel.text = "Выбрано: " + (", ".join(parts) if parts.size() > 0 else "никого") + ("\n[атака с движением: кликните точку]" if attack_cmd else "")
-	for i in 4:
-		var b := ab_buttons[i]
-		var open: bool = hero.level >= ABILITY_LEVEL[i]
-		var cdl: float = maxf(0.0, ab_ready[i] - t_game)
-		if not open:
-			b.text = "%s\n%s\nур. %d" % [ABILITY_KEYS[i], ABILITY_NAMES[i], ABILITY_LEVEL[i]]
-			b.disabled = true
-		elif cdl > 0.0:
-			b.text = "%s\n%s\n%d с" % [ABILITY_KEYS[i], ABILITY_NAMES[i], ceili(cdl)]
-			b.disabled = true
-		else:
-			b.text = "%s\n%s" % [ABILITY_KEYS[i], ABILITY_NAMES[i]]
-			b.disabled = false
-	# сообщения
-	if toasts.size() > 0:
-		toasts[0][1] -= dt
-		lbl_msg.text = toasts[0][0]
-		if toasts[0][1] <= 0.0:
-			toasts.pop_front()
-	else:
-		lbl_msg.text = ""
+		u.order_hold()
 
 
 # ---------------------------------------------------------------- кадр
