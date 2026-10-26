@@ -59,6 +59,10 @@ namespace BattleSim
         public int StoryStars;
         /// <summary>Отряд, которому игрок отдаёт приказ.</summary>
         public Squad Selected;
+        /// <summary>Управление героем пальцами (джойстик, способности).</summary>
+        public readonly HeroPad Pad = new HeroPad();
+        /// <summary>В бою ведётся герой игрока — показать джойстик и кнопки способностей.</summary>
+        public bool HeroMode => Phase == Phase.Fight && Battle != null && Battle.HeroControl && Battle.PlayerHero != null && Menu == Ui.None;
         /// <summary>Реплика на экране и сколько ей ещё висеть.</summary>
         public Line Speech;
         public float SpeechT;
@@ -226,6 +230,33 @@ namespace BattleSim
             Speed = 2;
             Perf.Clear();
             if (directed) SetDirector(true);
+            if (Story != null && Arg("-hero") != null)
+            { // проверка героя: идёт вперёд джойстиком, у врага сам дерётся, жмёт способности; лог и снимки
+                Speed = 1;
+                var hlog = new System.Text.StringBuilder();
+                int shotN = 0;
+                float nextLog = 0;
+                Pad.Forced = new Vector2(0, 1);
+                while (BattleTime < 120 && Phase == Phase.Fight)
+                {
+                    var hh = Battle.PlayerHero;
+                    if (hh == null) break;
+                    bool foeNear = false;
+                    foreach (var e in Battle.Teams[1]) if (e.Alive && M.Hypot(e.Pos.x - hh.Pos.x, e.Pos.z - hh.Pos.z) < 12) { foeNear = true; break; }
+                    Pad.Forced = foeNear || BattleTime > 60 ? Vector2.zero : new Vector2(0, 1);
+                    if (foeNear) for (int a = 0; a < 4; a++) if (Battle.AbilityOpen(a) && Battle.AbilityLeft(a) <= 0) { hlog.AppendLine($"{BattleTime:F1} cast {a}: {Battle.Cast(a) ?? "ok"}"); break; }
+                    if (BattleTime >= nextLog)
+                    {
+                        nextLog += 5;
+                        hlog.AppendLine($"{BattleTime:F0}s hero hp {hh.Hp:F0}/{hh.T.Hp:F0} alive {hh.Alive} lvl {Battle.HeroLevel} xp {Battle.HeroXp:F0} pos {hh.Pos.x:F1},{hh.Pos.z:F1} foeNear {foeNear} cam {Rig.Target.x:F0},{Rig.Target.z:F0} cine {Rig.Cinematic} alive {Battle.Alive[0]}/{Battle.Alive[1]}");
+                    }
+                    if (BattleTime > 3 + shotN * 12 && shotN < 8) { ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{tag}_hero{shotN:00}.png")); shotN++; }
+                    yield return null;
+                }
+                hlog.AppendLine($"end {BattleTime:F0}s lvl {Battle.HeroLevel} xp {Battle.HeroXp:F0}");
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, tag + "_hero.txt"), hlog.ToString());
+                Pad.Forced = null;
+            }
             if (Story != null && !directed)
             { // приказ игрока: выбрать отряд и послать вперёд-вбок — снимок с метками
                 while (BattleTime < 5 && Phase == Phase.Fight) yield return null;
@@ -430,6 +461,14 @@ namespace BattleSim
             Chronicle.Clear();
             Battle.StartFight();
             Run = Story != null ? new StoryRun(Story, Battle) : null;
+            if (Battle.HeroControl && Battle.PlayerHero != null)
+            {
+                var hp0 = Battle.PlayerHero.Pos;
+                Rig.LookAt(hp0.x, hp0.z, 0, 40 * M.DEG, 40, true); // ближе к герою: его видно
+            }
+            if (Battle.HeroControl && Battle.PlayerHero != null)
+                ShowToast(Application.isMobilePlatform ? "Каэл с золотым кольцом: левый палец — идти, справа — способности. Коснитесь земли — герой пойдёт, врага — ударит"
+                    : "Каэл с золотым кольцом: коснитесь земли — идёт, врага — бьёт; WASD — вести; 1–4 — способности", 7f);
             Selected = null; Speech = null; speechQ.Clear();
             Director.Reset();
             SlowMo = 1;
@@ -511,6 +550,8 @@ namespace BattleSim
             Battle.ClearAll();
             NewMap(c.Seed, c.Biome, c.Time);
             Campaign.Prepare(Battle, c);
+            Battle.HeroStartLevel = Mathf.Max(PlayerPrefs.GetInt("heroLv" + c.No, 1), int.TryParse(Arg("-herolevel"), out int hl) ? hl : 1);
+            Battle.HeroStartXp = PlayerPrefs.GetFloat("heroXp" + c.No, 0);
             Roster = (int[])c.Mine.Clone();
             Team = 0; Eraser = false;
             Type = Mathf.Max(0, System.Array.FindIndex(Roster, n => n > 0));
@@ -569,6 +610,7 @@ namespace BattleSim
             foreach (var u in Battle.Units)
             {
                 if (!u.Alive || u.Team != team || u.Squad == null || u.Squad.Special) continue;
+                if (Battle.HeroControl && u == Battle.PlayerHero) continue; // героя ведёт джойстик, не приказы
                 float d = M.Hypot(u.Pos.x - p.x, u.Pos.z - p.z);
                 if (d < bd) { bd = d; best = u.Squad; }
             }
@@ -580,6 +622,18 @@ namespace BattleSim
         {
             var own = PickSquad(p, 0);
             if (own != null) { Selected = own == Selected ? null : own; return; }
+            if (Selected == null && Battle.HeroMode_())
+            { // как в Warcraft: земля — герой идёт, враг — герой бьёт
+                Unit hf = null; float bd = 4f;
+                foreach (var e in Battle.Teams[1])
+                {
+                    if (!e.Alive || e.T.Special == Special.Messenger) continue;
+                    float d = M.Hypot(e.Pos.x - p.x, e.Pos.z - p.z);
+                    if (d < bd) { bd = d; hf = e; }
+                }
+                if (hf != null) Battle.HeroAttack(hf); else Battle.HeroMove(new V2(p.x, p.z));
+                return;
+            }
             if (Selected == null) { ShowToast("Коснитесь своего отряда, чтобы отдать приказ"); return; }
             var foe = PickSquad(p, 1, 4f);
             if (foe != null) GiveOrder(Cmd.Attack, default, foe);
@@ -607,6 +661,12 @@ namespace BattleSim
             StoryStars = Run.Stars(Winner == 0);
             string key = "story" + Story.No;
             if (StoryStars > PlayerPrefs.GetInt(key, 0)) { PlayerPrefs.SetInt(key, StoryStars); PlayerPrefs.Save(); }
+            if (Winner == 0 && Battle.HeroControl)
+            { // герой приходит в следующую главу с тем же уровнем и опытом
+                PlayerPrefs.SetInt("heroLv" + (Story.No + 1), Battle.HeroLevel);
+                PlayerPrefs.SetFloat("heroXp" + (Story.No + 1), Battle.HeroXp);
+                PlayerPrefs.Save();
+            }
         }
 
         void OnTap(Vector2 screen)
@@ -672,6 +732,19 @@ namespace BattleSim
             // Расчёт боя — ровными шагами по 1/30 с (не зависит от частоты кадров);
             // между шагами солдаты рисуются плавно (Alpha — доля пути до следующего шага).
             // SlowMo — замедление от режиссёра в ударные мгновения (эффекты и анимации замедляются вместе с боем)
+            // герой игрока: джойстик, способности, камера за ним
+            Rig.HeroKeys = HeroMode;
+            if (HeroMode && !HelpOpen)
+            {
+                int cast = Pad.Update(dt, false);
+                if (cast >= 0) { var err = Battle.Cast(cast); if (err != null) ShowToast(err, 1.6f); }
+                float jx = Pad.Stick.x, jy = Pad.Stick.y, yaw = Rig.Yaw;
+                float fx = Mathf.Sin(yaw), fz = Mathf.Cos(yaw);
+                Battle.JoyX = -fz * jx + fx * jy;
+                Battle.JoyZ = fx * jx + fz * jy;
+                while (Battle.HeroEvents.Count > 0) ShowToast(Battle.HeroEvents.Dequeue(), 3.5f);
+            }
+            else { Pad.Reset(); if (Battle != null) Battle.JoyX = Battle.JoyZ = 0; }
             float simDt = Phase == Phase.Setup || Paused ? 0 : dt * Speed * SlowMo;
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (simDt <= 0) { Battle.Tick(0); simAcc = 0; Alpha = 1; }
@@ -734,6 +807,8 @@ namespace BattleSim
 
             // Режиссёр читает события боя этого кадра и, если ему доверена камера, ставит её
             // до отрисовки толпы — чтобы отсечение по видимости уже видело новый ракурс
+            if (HeroMode && !Rig.Cinematic && Battle.PlayerHero.Alive && Time.unscaledTime - Rig.InputT > 2.5f)
+                Rig.Follow(Battle.PlayerHero.Pos.x, Battle.PlayerHero.Pos.z, Time.unscaledDeltaTime);
             Director.Update(dt, simDt);
             Rig.Directed = Director.Driving;
             SlowMo = Director.TimeScale;

@@ -30,6 +30,7 @@ namespace BattleSim
         {
             var p = new Vector2(screenPos.x, Screen.height - screenPos.y);
             foreach (var r in blockers) if (r.Contains(p)) return true;
+            if (Game != null && Game.HeroMode && Game.Pad.Blocks(screenPos)) return true;
             return Game != null && (Game.HelpOpen || Game.Phase == Phase.Loading || Game.Menu != GameMain.Ui.None);
         }
 
@@ -170,7 +171,7 @@ namespace BattleSim
             if (Game.Phase == Phase.Setup) { if (story) DrawStorySetup(); else DrawSetup(); }
             else DrawFight();
             if (Game.Phase != Phase.Setup) DrawChronicle();
-            if (Game.Phase == Phase.Fight) { DrawCaption(); if (story) DrawOrders(); }
+            if (Game.Phase == Phase.Fight) { DrawCaption(); if (story) DrawOrders(); if (Game.HeroMode) DrawHeroPad(); }
             DrawSpeech();
             if (Game.Phase == Phase.Result) { if (story) DrawStoryResult(); else DrawResult(); }
             DrawToast();

@@ -30,6 +30,7 @@ namespace BattleSim.Core
         public string PlayerOrder(Squad sq, Cmd cmd, V2 at = default, Squad target = null)
         {
             if (sq == null || sq.Alive == 0 || sq.Special) return "некому приказывать";
+            if (HeroControl && sq == Heroes[0]?.Squad) return "героем вы управляете сами";
             if (sq.Order.Mode == Mode.Rout && !sq.Feigning) return $"{Defs.Cap(sq.Name)} бегут и приказов не слышат";
             bool ranged = sq.T.Ranged;
             Order o;
@@ -94,6 +95,7 @@ namespace BattleSim.Core
             foreach (var sq in Squads.ToList())
             {
                 if (sq.Team != team || sq.Special || sq.Alive == 0 || (sq.Order.Mode == Mode.Rout && !sq.Feigning)) continue;
+                if (HeroControl && sq == Heroes[0]?.Squad) continue;
                 if (cmd == Cmd.Free) { if (sq.Player) { sq.Player = false; sq.NextDecision = 0; n++; } continue; }
                 var saved = OnLog; OnLog = null; int logN = Log.Count; // одной строкой, а не по строке на отряд
                 if (PlayerOrder(sq, cmd) == null) n++;
@@ -243,7 +245,7 @@ namespace BattleSim.Core
                     sq.Feigning = false; sq.Player = false;
                     ApplyOrder(sq, new Order(OrderKind.Rout, Mode.Rout));
                 }
-            AddLog(1 - team, $"{Races[team].Name} сломлена — остатки бегут с поля");
+            AddLog(1 - team, $"Армия «{Races[team].Name}» сломлена — остатки бегут с поля");
         }
 
         /// <summary>Гарнизон города для сюжета: только защитники (как в осаде), штурмующих расставит игрок.</summary>

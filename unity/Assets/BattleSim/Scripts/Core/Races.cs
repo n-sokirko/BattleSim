@@ -253,6 +253,7 @@ namespace BattleSim.Core
             sq.Units.Add(u); u.Squad = sq; sq.Size = 1;
             Units.Add(u); Squads.Add(sq);
             Heroes[team] = u;
+            if (team == 0 && HeroControl) { sq.Player = true; HeroInit(); }
             AddLog(team, $"{hd.Name} {sq.Title} выходит перед строем {(team == 0 ? "синих" : "красных")}");
         }
 

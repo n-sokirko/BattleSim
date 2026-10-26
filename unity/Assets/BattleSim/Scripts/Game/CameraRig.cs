@@ -65,6 +65,17 @@ namespace BattleSim
             if (World != null && cam != null) UpdateCamera(0);
         }
 
+        /// <summary>Герой ведётся с клавиатуры: WASD не двигают камеру (она идёт за героем, стрелки — сдвиг).</summary>
+        public bool HeroKeys;
+
+        /// <summary>Камера плавно идёт за точкой (герой), не считаясь вводом игрока.</summary>
+        public void Follow(float x, float z, float dt)
+        {
+            float k = 1 - Mathf.Exp(-5f * dt);
+            gTarget.x += (x - gTarget.x) * k;
+            gTarget.z += (z - gTarget.z) * k;
+        }
+
         /// <summary>Игрок двигает карту: облёт и режиссёр отдают ему камеру.</summary>
         void Took() { Cinematic = false; InputT = Time.unscaledTime; }
 
@@ -129,10 +140,10 @@ namespace BattleSim
             bool overUI = IsOverUI != null && IsOverUI(mp);
             float fx = Mathf.Sin(gYaw), fz = Mathf.Cos(gYaw);
             float mx = 0, mz = 0;
-            if (InputBridge.Held(K.W) || InputBridge.Held(K.Up)) mz += 1;
-            if (InputBridge.Held(K.S) || InputBridge.Held(K.Down)) mz -= 1;
-            if (InputBridge.Held(K.D) || InputBridge.Held(K.Right)) mx += 1;
-            if (InputBridge.Held(K.A) || InputBridge.Held(K.Left)) mx -= 1;
+            if ((!HeroKeys && InputBridge.Held(K.W)) || InputBridge.Held(K.Up)) mz += 1;
+            if ((!HeroKeys && InputBridge.Held(K.S)) || InputBridge.Held(K.Down)) mz -= 1;
+            if ((!HeroKeys && InputBridge.Held(K.D)) || InputBridge.Held(K.Right)) mx += 1;
+            if ((!HeroKeys && InputBridge.Held(K.A)) || InputBridge.Held(K.Left)) mx -= 1;
             if (mx != 0 || mz != 0)
             {
                 float sp = (gDist * 0.9f + 10) * dt;

@@ -248,27 +248,27 @@ namespace BattleSim.Core
 
         public static readonly RaceDef Rus = new RaceDef
         {
-            Key = "rus", Name = "Русь", Cry = "За Русь!", Units = { [0] = Types[0], [1] = Types[1], [2] = Types[2], [3] = Types[3] },
+            Key = "rus", Name = "Эрланд", Cry = "За Эрланд!", Units = { [0] = Types[0], [1] = Types[1], [2] = Types[2], [3] = Types[3] },
             Cmd = Commander, Msg = Messenger, Cap = Captain, HoodHue = 215, HoodSat = 0.08f, HoodLit = 0.95f, // капюшон под шишаком — как кольчужный капор
-            Hero = RusHero, HeroNames = new[] { "Пересвет", "Илья Муромец", "Добрыня Никитич", "Алёша Попович", "Святогор", "Микула Селянинович" },
+            Hero = RusHero, HeroNames = new[] { "Каэл Вейн", "Дорн", "Альд", "Гаррет", "Торн", "Вейланд" },
         };
         public static readonly RaceDef Orcs = new RaceDef
         {
-            Key = "orcs", Name = "Орда", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
+            Key = "orcs", Name = "Чёрный Клык", Cry = "ВААГХ!", Units = { [0] = OrcGoblin, [1] = OrcBrute, [2] = OrcBomber, [3] = OrcRider },
             Cmd = OrcWarlord, Msg = OrcRunner, Cap = OrcChief, SkinHue = 100, SkinSat = 0.55f, SkinLit = 0.62f, MetalHue = 30, MetalSat = 0.08f, HoodHue = 28, HoodSat = 0.4f, HoodLit = 0.6f, HorseTint = 0.45f, Rage = true,
             Names = new[] { "Грызь", "Хряк", "Шмяк", "Гнилозуб", "Рвач", "Бугай", "Кривоклык", "Жрун" },
             Hero = OrcHero, HeroNames = new[] { "Гнилобрюх", "Камнелоб", "Кровохлёб", "Жмыхарь", "Костолом" },
         };
         public static readonly RaceDef Nav = new RaceDef
         {
-            Key = "nav", Name = "Навь", Cry = "Навь идёт!", Units = { [0] = NavDead, [1] = NavGhoul, [2] = NavNecro, [3] = NavRider },
+            Key = "nav", Name = "Легион Пепла", Cry = "Легион идёт!", Units = { [0] = NavDead, [1] = NavGhoul, [2] = NavNecro, [3] = NavRider },
             Cmd = NavKing, Msg = NavHerald, Cap = NavLord, SkinHue = 80, SkinSat = 0.07f, SkinLit = 0.82f, MetalHue = 25, MetalSat = 0.3f, HoodHue = 272, HoodSat = 0.28f, HoodLit = 0.42f, HorseTint = 0.45f, Undead = true,
-            Names = new[] { "Кощей", "Мара", "Морок", "Карачун", "Вий", "Лихо", "Мор", "Чернава" },
+            Names = new[] { "Мор Дракар", "Слейн", "Варг", "Малакар", "Зорн", "Кейн", "Нокс", "Ильза" },
             Hero = NavHero, HeroNames = new[] { "Вурдалак", "Могильщик", "Упырь-исполин", "Костяной Змей" },
         };
         public static readonly RaceDef Steppe = new RaceDef
         {
-            Key = "steppe", Name = "Степь", Cry = "Урагх!", Units = { [0] = StNuker, [1] = StBatyr, [2] = StArcher, [3] = StHorseArcher },
+            Key = "steppe", Name = "Кочевники", Cry = "Урагх!", Units = { [0] = StNuker, [1] = StBatyr, [2] = StArcher, [3] = StHorseArcher },
             Cmd = StKhan, Msg = StMessenger, Cap = StMurza, SkinHue = 24, SkinSat = 0.45f, SkinLit = 0.85f, MetalHue = 38, MetalSat = 0.45f, HoodHue = 36, HoodSat = 0.55f, HoodLit = 0.9f, Feign = true,
             Names = new[] { "Кончак", "Боняк", "Тугоркан", "Шарукан", "Итларь", "Котян", "Кобяк", "Гзак" },
             Hero = StHero, HeroNames = new[] { "Челубей", "Тугарин Змеевич", "Идолище", "Калин" },
@@ -329,8 +329,8 @@ namespace BattleSim.Core
 
         public static readonly string[][] CmdNames =
         {
-            new[] { "Ратибор", "Ярополк", "Мстислав", "Добрыня", "Святослав", "Вышата", "Путята", "Любомир" },
-            new[] { "Всеслав", "Изяслав", "Горислав", "Судислав", "Братислав", "Ставр", "Радим", "Твердислав" },
+            new[] { "Орвин", "Эдрик", "Торвин", "Брен", "Валтер", "Кассий", "Ренар", "Оррик" },
+            new[] { "Лорт", "Кварн", "Дейл", "Марек", "Ставр", "Рейн", "Хальд", "Бёрн" },
         };
 
         public static string WingName(WingKey k) => k == WingKey.Left ? "левое крыло" : k == WingKey.Center ? "центр" : "правое крыло";

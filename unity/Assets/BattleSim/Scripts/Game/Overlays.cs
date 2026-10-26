@@ -138,6 +138,19 @@ namespace BattleSim
                     }
                 }
             }
+            var hero = b.PlayerHero;
+            if (!setup && hero != null && hero.Alive)
+            { // герой игрока: золотое кольцо под ногами, цель и точка назначения
+                var hp = hero.RenderPos(GameMain.Alpha);
+                Put(hp.x, hp.y + 0.12f, hp.z, 3.4f, gold);
+                Put(hp.x, hp.y + 0.12f, hp.z, 2.9f, gold);
+                if (b.HeroFoe != null && b.HeroFoe.Alive) { var fp = b.HeroFoe.RenderPos(GameMain.Alpha); Put(fp.x, fp.y + 0.12f, fp.z, 2.4f, red); }
+                else if (b.HeroGoal.HasValue)
+                {
+                    var g = b.HeroGoal.Value; float gy = w.GroundAt(g.x, g.z);
+                    Put(g.x, gy + 0.14f, g.z, 2.4f, gold); Put(g.x, gy + 0.14f, g.z, 1.3f, gold);
+                }
+            }
             if (n > 0) Flush(n);
         }
 

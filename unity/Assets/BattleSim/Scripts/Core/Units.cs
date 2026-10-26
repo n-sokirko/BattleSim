@@ -98,6 +98,8 @@ namespace BattleSim.Core
         public float FeignUntil, FeignT = -99;
         /// <summary>Имя отряда вместо «мечники II» (богатырь — по имени).</summary>
         public string Title;
+        /// <summary>Способности героя: до BuffUntil отряд бьёт сильнее (клич), до GuardUntil — получает меньше урона и не бежит (непоколебимые).</summary>
+        public float BuffUntil, GuardUntil;
 
         public Squad(string id, int type, int team, float yaw)
         {
@@ -185,6 +187,9 @@ namespace BattleSim.Core
         public bool Risen, CastNew;
         /// <summary>Богатырь в поединке: с кем бьётся один на один (остальные расступаются и не лезут).</summary>
         public Unit Duel;
+        /// <summary>Вызов героя: до TauntUntil боец бьёт только TauntBy.</summary>
+        public float TauntUntil;
+        public Unit TauntBy;
         public int Kills;
         public Unit LosTarget;
         public Carry Carry;

@@ -553,6 +553,7 @@ namespace BattleSim.Core
                 if ((foesT -= dt) <= 0) { foesT = 0.8f; UpdateFoes(); World.Nav.DecayCrowd(0.93f); }
                 Lap(1);
                 UpdateSquads(dt);
+                HeroTick(dt);
                 foreach (var c in Commanders) c?.Tick(dt);
                 foreach (var list in Captains) foreach (var c in list) c.Tick(dt);
                 Lap(2);
@@ -737,6 +738,7 @@ namespace BattleSim.Core
                 Steer(u, 0, 0, dt, false);
                 return;
             }
+            if (u == PlayerHero) { ThinkPlayerHero(u, dt); return; }
             if (o.Mode == Mode.Rout) { Flee(u, dt); return; }
 
 #if PROF
@@ -748,6 +750,8 @@ namespace BattleSim.Core
                 u.Target = PickTarget(u);
             }
             if (t.Hero) { var ht = HeroTarget(u); if (ht != null) u.Target = ht; } // богатырь ищет поединка
+            bool taunted = u.TauntUntil > Time && u.TauntBy != null && u.TauntBy.Alive;
+            if (taunted) u.Target = u.TauntBy; // «Вызов» героя
 #if PROF
             SubLap(0);
 #endif
@@ -763,6 +767,7 @@ namespace BattleSim.Core
             if (sq.Front != null && !u.IsLeader)
                 engageR = u.Row <= 0 ? t.Radius * 2 + t.Reach + 0.8f : 0; // строй держит линию: только выпад первой шеренги
             if (t.Hero && tg != null && tg.T.Hero) engageR = 30; // к вражескому богатырю — через всё поле
+            if (taunted) engageR = 40;
             if (t.Skirmish && Skirmish(u, tg, dt, out dx, out dz)) { wantSlot = false; tg = null; }
             if (tg != null)
             {
@@ -786,7 +791,7 @@ namespace BattleSim.Core
                 }
                 // стрелок бросается врукопашную, только если враг рядом и на одном с ним уровне —
                 // не бежит со стены к тем, кто стоит под ней
-                else if (d <= engageR && MayChase(u, tg) && (!t.Ranged || (d <= contact + 3 && MathF.Abs(tg.Pos.y - u.Pos.y) < 1.8f)))
+                else if (d <= engageR && (taunted || MayChase(u, tg)) && (!t.Ranged || (d <= contact + 3 && MathF.Abs(tg.Pos.y - u.Pos.y) < 1.8f)))
                 {
                     wantSlot = false; chasing = true;
                     if (d > 6)
@@ -1190,6 +1195,8 @@ namespace BattleSim.Core
             if (Time - u.Squad.FirstStrikeT < 2.5f) dmg *= 1.6f;               // удар из засады
             if (Time < u.Squad.RushUntil) dmg *= 1.25f;                        // удар с разбега после клича
             if (u.Duel == tg) dmg *= 2.5f;                                     // поединок богатырей — недолгий
+            if (Time < u.Squad.BuffUntil) dmg *= 1.2f;                         // боевой клич героя
+            if (u == PlayerHero) dmg *= HeroDmgMul;                            // уровни героя
             bool charge = u.T.Charge > 1 && u.ChargeT > 0.8f;
             if (charge) { dmg *= u.T.Charge; u.ChargeT = 0; Trample(u, tg); }
             float kb = (charge ? 5 : 1.3f) * u.T.KnockMul / tg.T.Mass;
@@ -1240,6 +1247,8 @@ namespace BattleSim.Core
             if (arrow && !rear && t.Squad != null && t.Squad.ShieldWall) amount *= 0.3f; // стена щитов
             if (arrow && t.Pos.y > World.HeightAt(t.Pos.x, t.Pos.z) + 3) amount *= 0.55f; // за зубцами стены
             amount *= 1 - t.T.Armor;
+            if (t.Squad != null && Time < t.Squad.GuardUntil) amount *= 0.7f;   // «Непоколебимые»
+            if (t == PlayerHero) { amount *= HeroDefMul; if (Time < HeroGuardUntil) amount *= 0.6f; }
             t.Hp -= amount;
             t.LastKnock = new V3(t.Knock.x + kx, 0, t.Knock.z + kz);
             t.FlashT = Time;
@@ -1261,6 +1270,7 @@ namespace BattleSim.Core
             {
                 if (src != null && Races[src.Team].Rage && Time >= RoarUntil[src.Team]) Rage[src.Team] += src.T.Slot == 0 ? 0.5f : 1f;
                 if (src != null) src.Kills++;
+                if (HeroControl && src != null && src.Team == 0 && t.Team == 1) HeroKillXp(t, src);
                 Kill(t);
                 return;
             }

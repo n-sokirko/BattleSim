@@ -54,7 +54,7 @@ namespace BattleSim
             var note = new GUIStyle(small) { alignment = TextAnchor.MiddleCenter };
             var bst = new GUIStyle(big) { fontSize = Mathf.RoundToInt(21 * s) };
             if (Button(new Rect(x, y, w, bh), "Поход: " + Campaign.Name, false, bst, Brass)) Game.OpenChapters();
-            GUI.Label(new Rect(x, y + bh + 2 * s, w, 20 * s), $"{Campaign.Chapters.Length} глав за Русь · звёзд {total} из {Campaign.Chapters.Length * 3}", note);
+            GUI.Label(new Rect(x, y + bh + 2 * s, w, 20 * s), $"{Campaign.Chapters.Length} глав за Эрланд · звёзд {total} из {Campaign.Chapters.Length * 3}", note);
             y += bh + 34 * s;
             if (Button(new Rect(x, y, w, bh * 0.85f), "Вольная битва")) Game.StartSandbox();
             GUI.Label(new Rect(x, y + bh * 0.85f + 2 * s, w, 20 * s), "любые армии и местность — ставьте и смотрите", note);
@@ -249,7 +249,8 @@ namespace BattleSim
                 total += widths[i] + (i > 0 ? gap : 0);
             }
             float pw = Mathf.Max(total, 300 * s) + 16 * s, ph = BtnH + 56 * s;
-            var panel = new Rect(safe.xMax - Pad - pw, safe.yMax - Pad - ph, pw, ph);
+            float reserve = Game.HeroMode ? Game.Pad.RightReserve : 0; // справа внизу — кнопки способностей
+            var panel = new Rect(safe.xMax - Pad - reserve - pw, safe.yMax - Pad - ph, pw, ph);
             Box(panel, new Color(0.047f, 0.06f, 0.08f, 0.88f));
             if (sel != null) Fill(new Rect(panel.x, panel.y + 8 * s, 4 * s, 40 * s), Gold);
             GUI.Label(new Rect(panel.x + 12 * s, panel.y + 4 * s, pw - 20 * s, 22 * s), $"<b>{head}</b>", label);
