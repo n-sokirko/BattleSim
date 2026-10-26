@@ -228,7 +228,7 @@ func _build_panel() -> void:
 	panel.add_child(kf)
 	var cmds := [
 		["move", "Идти", "M"], ["stop", "Стоять", "S"], ["hold", "Держать", "H"], ["attack", "Атака", "A"],
-		["a0", "Боевой\nклич", "Q"], ["a1", "Удар\nо землю", "W"], ["a2", "Вызов", "E"], ["a3", "Непоко-\nлебимые", "R"],
+		["a0", "Клич", "Q"], ["a1", "Удар", "W"], ["a2", "Вызов", "E"], ["a3", "Стена", "R"],
 	]
 	for i in cmds.size():
 		var b := Button.new()
@@ -355,7 +355,7 @@ func refresh(dt: float) -> void:
 		var b: Button = cmd_buttons["a%d" % i]
 		var open: bool = game.hero.level >= game.ABILITY_LEVEL[i]
 		var cdl: float = maxf(0.0, game.ab_ready[i] - game.t_game)
-		var nm: String = ["Боевой\nклич", "Удар\nо землю", "Вызов", "Непоко-\nлебимые"][i]
+		var nm: String = ["Клич", "Удар", "Вызов", "Стена"][i]
 		if not open:
 			b.text = "%s\nур. %d" % [nm.replace("\n", " "), game.ABILITY_LEVEL[i]]
 			b.disabled = true
