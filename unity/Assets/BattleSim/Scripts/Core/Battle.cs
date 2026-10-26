@@ -34,7 +34,7 @@ namespace BattleSim.Core
         public float LastHitT;
 
         /// <summary>Армии разошлись: 50 с никто не пал — поле за тем, у кого больше войск.</summary>
-        public bool Disengaged => Fighting && Time > 60 && Time - LastKillT > 50;
+        public bool Disengaged => Fighting && !CampMode && Time > 60 && Time - LastKillT > 50;
         public float LastKillT;
         float foesT;
         CmdSpec[] cmdSpec;
@@ -74,9 +74,10 @@ namespace BattleSim.Core
 
         // ---------------------------------------------------------------- расстановка
 
-        public int PlaceSquad(int type, int team, float cx, float cz, float yaw)
+        public int PlaceSquad(int type, int team, float cx, float cz, float yaw, int cols = 0, int rows = 0, int max = 0)
         {
             var t = Defs.All[type];
+            int nc = cols > 0 ? cols : t.Cols, nr = rows > 0 ? rows : t.Rows;
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
             int id = ++squadSeq;
             var sq = new Squad(id.ToString(), type, team, yaw);
@@ -85,11 +86,11 @@ namespace BattleSim.Core
             var nav = World.Nav; int cls = t.Mount ? 1 : 0, ci = nav.Idx(cx, cz);
             int region = ci >= 0 && nav.Speed[cls][ci] > 0 ? nav.Region[cls][ci] : -1;
             float cy = World.GroundAt(cx, cz);
-            for (int r = 0; r < t.Rows; r++)
-                for (int c = 0; c < t.Cols; c++)
+            for (int r = 0; r < nr; r++)
+                for (int c = 0; c < nc; c++)
                 {
-                    if (Units.Count >= MaxUnits) break;
-                    float ox = (c - (t.Cols - 1) / 2f) * t.Spacing, oz = -(r - (t.Rows - 1) / 2f) * t.Spacing;
+                    if (Units.Count >= MaxUnits || (max > 0 && sq.Units.Count >= max)) break;
+                    float ox = (c - (nc - 1) / 2f) * t.Spacing, oz = -(r - (nr - 1) / 2f) * t.Spacing;
                     float jx = ox + (Rng.Rand() - 0.5f) * 0.2f, jz = oz + (Rng.Rand() - 0.5f) * 0.2f;
                     float x = cx + jx * cos + jz * sin, z = cz - jx * sin + jz * cos;
                     if (!World.InField(x, z, 1) || !World.Walkable(x, z, t.Radius) || Occupied(x, z, t.Radius)) continue;
@@ -142,7 +143,7 @@ namespace BattleSim.Core
             Time = 0; Log = new List<LogEntry>(); GlareLogged = new bool[2];
         }
 
-        public void ClearAll() { ClearUnits(); Plan = new List<UnitPlan>(); cmdSpec = null; Recount(); }
+        public void ClearAll() { ClearUnits(); Plan = new List<UnitPlan>(); cmdSpec = null; CampMode = false; HeroControl = false; Camps.Clear(); Chests.Clear(); Recount(); }
 
         public void ResetToPlan()
         {
@@ -387,6 +388,7 @@ namespace BattleSim.Core
             foreach (var sq in Squads) { sq.Order = new Order(OrderKind.Advance, Mode.Advance); sq.Morale = 100; }
             Heroes[0] = Heroes[1] = null;
             for (int team = 0; team < 2; team++) SpawnHero(team);
+            if (CampMode) SkirmishStart();
             if (!UseCommanders) { AddLog(-1, "Полководцев нет — каждый отряд бьётся сам по себе"); return; }
             for (int team = 0; team < 2; team++) SpawnCommander(team);
         }
@@ -554,6 +556,7 @@ namespace BattleSim.Core
                 Lap(1);
                 UpdateSquads(dt);
                 HeroTick(dt);
+                CampTick(dt);
                 foreach (var c in Commanders) c?.Tick(dt);
                 foreach (var list in Captains) foreach (var c in list) c.Tick(dt);
                 Lap(2);
@@ -644,7 +647,7 @@ namespace BattleSim.Core
 
                 bool roaring = Time < RoarUntil[sq.Team];
                 if (roaring) sq.Morale = MathF.Max(sq.Morale, 60);
-                if ((o.Mode != Mode.Rout || sq.Feigning) && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
+                if (!CampMode && (o.Mode != Mode.Rout || sq.Feigning) && sq.Morale < sq.T.RoutAt && !sq.T.Fearless && !roaring)
                 {
                     sq.Feigning = false; sq.Player = false;
                     ApplyOrder(sq, new Order(OrderKind.Rout, Mode.Rout));
@@ -978,6 +981,7 @@ namespace BattleSim.Core
         /// </summary>
         Unit PickTarget(Unit u)
         {
+            if (u.Squad.Asleep) return null; // лагерь спит — ни в кого не целится
             var o = u.Squad.Order;
             bool ranged = u.T.Ranged;
             float gx = o.HasPos ? o.X : u.Pos.x, gz = o.HasPos ? o.Z : u.Pos.z, leash = o.HasLeash ? o.Leash : u.T.Mount ? 16 : 10;

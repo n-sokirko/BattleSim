@@ -69,6 +69,11 @@ namespace BattleSim.Core
         {
             float a = dead.T.Hero ? 80 : dead.T.Special != Special.None ? 6 : 1;
             if (src == PlayerHero) a *= 1.5f;
+            HeroGainXp(a);
+        }
+
+        void HeroGainXp(float a)
+        {
             HeroXp += a;
             while (HeroLevel < MaxLevel && HeroXp >= XpAt[HeroLevel])
             {

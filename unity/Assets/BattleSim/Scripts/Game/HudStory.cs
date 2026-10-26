@@ -137,7 +137,7 @@ namespace BattleSim
             GUI.EndScrollView();
 
             float by = r.yMax - BtnH - 16 * s;
-            if (Button(new Rect(r.xMax - 220 * s, by, 196 * s, BtnH), "К расстановке", false, btnGold, Brass)) Game.Menu = GameMain.Ui.None;
+            if (Button(new Rect(r.xMax - 220 * s, by, 196 * s, BtnH), c.Camps ? "В поход" : "К расстановке", false, btnGold, Brass)) { Game.Menu = GameMain.Ui.None; if (c.Camps) Game.StartBattle(); }
             if (Button(new Rect(r.x + 24 * s, by, 130 * s, BtnH), "Главы")) Game.OpenChapters();
         }
 
@@ -224,7 +224,7 @@ namespace BattleSim
                 string morale = sel.T.Fearless ? "не знают страха" : $"дух {Mathf.RoundToInt(sel.Morale)}%";
                 string doing = o.Mode == Mode.Move && sel.Player ? (o.Kind == OrderKind.Withdraw ? "отходят" : "идут на место")
                     : o.Mode == Mode.Charge && o.Target != null ? "бьют «" + o.Target.Name + "»" : Defs.OrderText(o.Kind).ToLowerInvariant();
-                sub = $"{sel.Alive} из {sel.Size} · {morale} · {(sel.Player ? "ваш приказ" : "воевода")}: {doing}";
+                sub = (Game.Group.Count > 0 ? $"выбрано отрядов: {Game.Group.Count + 1} · " : "") + $"{sel.Alive} из {sel.Size} · {morale} · {(sel.Player ? "ваш приказ" : "воевода")}: {doing}";
                 bool mine = sel.Player;
                 cmds.Add(("В атаку", () => Game.GiveOrder(Cmd.Advance), mine && o.Mode == Mode.Advance));
                 cmds.Add(("Стоять", () => Game.GiveOrder(Cmd.Hold), mine && o.Mode == Mode.Hold));
@@ -239,7 +239,7 @@ namespace BattleSim
                 sub = "Коснитесь своего отряда — потом земли или врага";
                 cmds.Add(("Все в атаку", () => Game.OrderAll(Cmd.Advance), false));
                 cmds.Add(("Все стоять", () => Game.OrderAll(Cmd.Hold), false));
-                cmds.Add(("Воле воеводы", () => Game.OrderAll(Cmd.Free), false));
+                if (Game.Battle.CampMode) cmds.Add(("Всё войско", () => Game.SelectAll(), false)); else cmds.Add(("Воле воеводы", () => Game.OrderAll(Cmd.Free), false));
             }
             float gap = 6 * s, total = 0;
             var widths = new float[cmds.Count];

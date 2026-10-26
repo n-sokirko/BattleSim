@@ -39,6 +39,14 @@ namespace BattleSim
             Fill(xb, new Color(1, 1, 1, 0.08f));
             Fill(new Rect(xb.x, xb.y, xb.width * Mathf.Clamp01(b.XpFrac), xb.height), Brass);
 
+            if (b.CampMode)
+            { // задача и сколько лагерей осталось
+                var q = new Rect(r.x, r.yMax + 6 * s, w, 44 * s);
+                Box(q, Panel);
+                string goal = b.BossName != null ? $"Победить: {b.BossName}" : Game.Story?.GoalText ?? "";
+                GUI.Label(new Rect(q.x + 10 * s, q.y + 2 * s, q.width - 20 * s, 22 * s), $"<b>{goal}</b>", nm);
+                GUI.Label(new Rect(q.x + 10 * s, q.y + 22 * s, q.width - 20 * s, 18 * s), $"Лагерей осталось: {b.CampsLeft} из {b.Camps.Count}", small);
+            }
             if (!h.Alive)
             {
                 var dead = new GUIStyle(caption) { fontSize = Mathf.RoundToInt(22 * s) };

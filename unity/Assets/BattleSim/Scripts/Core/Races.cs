@@ -260,6 +260,7 @@ namespace BattleSim.Core
         /// <summary>Богатырь высматривает вражеского богатыря: сошлись вплотную — поединок.</summary>
         Unit HeroTarget(Unit u)
         {
+            if (u.Squad != null && u.Squad.Asleep) return null;
             if (u.Duel != null) return u.Duel.Alive ? u.Duel : null;
             var e = Heroes[1 - u.Team];
             if (e == null || !e.Alive || e.Duel != null || e.Squad.Order.Mode == Mode.Rout) return null;

@@ -58,7 +58,10 @@ namespace BattleSim
         public int[] Roster = new int[4];
         public int StoryStars;
         /// <summary>Отряд, которому игрок отдаёт приказ.</summary>
-        public Squad Selected;
+        Squad selected;
+        public Squad Selected { get => selected; set { selected = value; if (value == null) Group.Clear(); } }
+        /// <summary>Остальные выбранные отряды (в походе приказ получают все выбранные).</summary>
+        public readonly List<Squad> Group = new List<Squad>();
         /// <summary>Управление героем пальцами (джойстик, способности).</summary>
         public readonly HeroPad Pad = new HeroPad();
         /// <summary>В бою ведётся герой игрока — показать джойстик и кнопки способностей.</summary>
@@ -197,11 +200,12 @@ namespace BattleSim
                 ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_intro.png"));
                 yield return new WaitForSeconds(0.5f);
                 Menu = Ui.None;
-                Roster[0]--; // один отряд — касанием, как игрок: проверка черты и запаса
+                if (Story.Camps) { Menu = Ui.None; StartBattle(); }
+                else { Roster[0]--; // один отряд — касанием, как игрок
                 AutoPlace();
                 Roster[0]++;
                 var wp = World.WalkableNear(-8, ZoneZ - 5);
-                StoryTap(new V3(wp.x, 0, wp.z));
+                StoryTap(new V3(wp.x, 0, wp.z)); }
                 yield return new WaitForSeconds(1f);
             }
             ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, tag + "_0setup.png"));
@@ -226,7 +230,7 @@ namespace BattleSim
                     yield return new WaitForSeconds(0.4f);
                 }
             }
-            StartBattle();
+            if (Phase == Phase.Setup) StartBattle();
             Speed = 2;
             Perf.Clear();
             if (directed) SetDirector(true);
@@ -235,15 +239,16 @@ namespace BattleSim
                 Speed = 1;
                 var hlog = new System.Text.StringBuilder();
                 int shotN = 0;
-                float nextLog = 0;
-                Pad.Forced = new Vector2(0, 1);
-                while (BattleTime < 120 && Phase == Phase.Fight)
+                float nextLog = 0, nextAll = 0;
+
+                while (BattleTime < 240 && Phase == Phase.Fight)
                 {
                     var hh = Battle.PlayerHero;
                     if (hh == null) break;
                     bool foeNear = false;
                     foreach (var e in Battle.Teams[1]) if (e.Alive && M.Hypot(e.Pos.x - hh.Pos.x, e.Pos.z - hh.Pos.z) < 12) { foeNear = true; break; }
-                    Pad.Forced = foeNear || BattleTime > 60 ? Vector2.zero : new Vector2(0, 1);
+                    if (!foeNear && Battle.HeroGoal == null) { Camp nc = null; float nd = 1e9f; foreach (var cp in Battle.Camps) if (!cp.Cleared) { float dd = M.Hypot(cp.X - hh.Pos.x, cp.Z - hh.Pos.z); if (dd < nd) { nd = dd; nc = cp; } } if (nc != null) Battle.HeroMove(new V2(nc.X, nc.Z - 6)); }
+                    if (foeNear && BattleTime > nextAll) { nextAll = BattleTime + 20; OrderAll(Cmd.Advance); }
                     if (foeNear) for (int a = 0; a < 4; a++) if (Battle.AbilityOpen(a) && Battle.AbilityLeft(a) <= 0) { hlog.AppendLine($"{BattleTime:F1} cast {a}: {Battle.Cast(a) ?? "ok"}"); break; }
                     if (BattleTime >= nextLog)
                     {
@@ -620,8 +625,14 @@ namespace BattleSim
         /// <summary>В бою: касание своего отряда — выбрать (ещё раз — снять выбор), земли — идти туда, вражеского отряда — ударить.</summary>
         void FightTap(V3 p)
         {
+            if (Battle.HeroMode_() && M.Hypot(Battle.PlayerHero.Pos.x - p.x, Battle.PlayerHero.Pos.z - p.z) < 2.5f) { Selected = null; return; } // коснулись героя — снять выбор отрядов
             var own = PickSquad(p, 0);
-            if (own != null) { Selected = own == Selected ? null : own; return; }
+            if (own != null)
+            {
+                if (Battle.CampMode && Selected != null && own != Selected) { if (!Group.Remove(own)) Group.Add(own); return; } // добавить/убрать из выбранных
+                Selected = own == Selected ? null : own;
+                return;
+            }
             if (Selected == null && Battle.HeroMode_())
             { // как в Warcraft: земля — герой идёт, враг — герой бьёт
                 Unit hf = null; float bd = 4f;
@@ -643,9 +654,32 @@ namespace BattleSim
         public void GiveOrder(Cmd cmd, V2 at = default, Squad target = null)
         {
             if (Selected == null) return;
-            var err = Battle.PlayerOrder(Selected, cmd, at, target);
-            if (err != null) ShowToast(err);
+            var all = new List<Squad> { Selected };
+            all.AddRange(Group);
+            for (int i = 0; i < all.Count; i++)
+            {
+                var to = at;
+                if (cmd == Cmd.Move && all.Count > 1)
+                { // группа встаёт вокруг точки, а не в одну кучу
+                    float a = i * 2.4f, r = i == 0 ? 0 : 3.2f + i * 0.5f;
+                    to = new V2(at.x + Mathf.Cos(a) * r, at.z + Mathf.Sin(a) * r);
+                }
+                var err = Battle.PlayerOrder(all[i], cmd, to, target);
+                if (err != null && i == 0) ShowToast(err);
+            }
             if (cmd == Cmd.Free) Selected = null;
+        }
+
+        /// <summary>Выбрать все отряды (кроме героя).</summary>
+        public void SelectAll()
+        {
+            Selected = null;
+            foreach (var q in Battle.Squads)
+                if (q.Team == 0 && !q.Special && q.Alive > 0 && !(Battle.HeroControl && q == Battle.PlayerHero?.Squad))
+                {
+                    if (Selected == null) selected = q; else Group.Add(q);
+                }
+            if (Selected == null) ShowToast("Отрядов нет");
         }
 
         public void OrderAll(Cmd cmd)
@@ -766,9 +800,26 @@ namespace BattleSim
             SpeechT -= Time.unscaledDeltaTime;
             if (SpeechT <= 0 && speechQ.Count > 0) { Speech = speechQ.Dequeue(); SpeechT = Mathf.Clamp(2.2f + Speech.Text.Length * 0.05f, 3.5f, 6.5f); }
             if (Selected != null && (Selected.Alive == 0 || Phase != Phase.Fight)) Selected = null;
+            Group.RemoveAll(q => q.Alive == 0);
             if (Phase == Phase.Fight)
             {
                 BattleTime += simDt;
+                if (Battle.CampMode)
+                { // поход: победа — вожак повержен, поражение — герой пал или войско погибло
+                    var hh = Battle.PlayerHero;
+                    bool lost = (hh != null && !hh.Alive) || Battle.Alive[0] == 0;
+                    if (Battle.CampWon || lost)
+                    {
+                        if ((resultDelay += simDt) > 2f)
+                        {
+                            Winner = lost ? 1 : 0;
+                            Phase = Phase.Result;
+                            Rig.Cinematic = true;
+                            OnResult();
+                        }
+                    }
+                }
+                else
                 if (Battle.Disengaged && Battle.Alive[0] > 0 && Battle.Alive[1] > 0)
                 {
                     Winner = Battle.Alive[0] > Battle.Alive[1] ? 0 : Battle.Alive[1] > Battle.Alive[0] ? 1 : -1;
@@ -823,7 +874,7 @@ namespace BattleSim
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (Phase == Phase.Fight && !Paused) Perf.Add(Time.unscaledDeltaTime * 1000, (t1 - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency, (t2 - t1) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
             overlays.DrawRings(Battle, Phase == Phase.Setup);
-            if (Story != null && Menu == Ui.None) overlays.DrawStory(Battle, Selected, World, ZoneZ, Phase == Phase.Setup);
+            if (Story != null && Menu == Ui.None) overlays.DrawStory(Battle, Selected, World, ZoneZ, Phase == Phase.Setup, Group);
             overlays.DrawGhost();
             overlays.DrawBolts(Battle, Lib);
             Sound?.Update(Battle, Cam.transform.position, Conv.U(Rig.Target), SlowMo, Paused || Phase == Phase.Setup, Phase == Phase.Fight);

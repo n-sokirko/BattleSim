@@ -212,7 +212,7 @@ namespace BattleSim.Core
         /// <summary>Два пехотных строя сошлись — заводим сцепку (если оба ещё свободны, на одной высоте и между ними нет стены).</summary>
         void TryEngage(Squad a, Squad b)
         {
-            if (!LineSquad(a) || !LineSquad(b) || b.Front != null || a.Team == b.Team) return;
+            if (CampMode || !LineSquad(a) || !LineSquad(b) || b.Front != null || a.Team == b.Team) return;
             float d = V2.Dist(a.C, b.C);
             if (d > 14 || MathF.Abs(a.Center.y - b.Center.y) > 2) return;
             // фронты сблизились (или уже рубятся)

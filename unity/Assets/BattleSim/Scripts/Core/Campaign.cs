@@ -45,6 +45,11 @@ namespace BattleSim.Core
         public float ReinfT;
         public string ReinfWho;
         public Line[] Lines = new Line[0];
+        /// <summary>Поход с лагерями (как в Warcraft 3): враги стоят лагерями, свой отряд — группы по Party {место, сколько бойцов}.</summary>
+        public bool Camps;
+        public (string name, float fx, float fz, int[] slots, bool boss, float xp)[] CampList;
+        public (string name, float fx, float fz, float xp)[] ChestList;
+        public int[][] Party;
     }
 
     public static class Campaign
@@ -60,26 +65,40 @@ namespace BattleSim.Core
         {
             new Chapter
             {
-                No = 1, Title = "Дым над заставой", Map = MapType.Field, Seed = 1101, Biome = 3, Time = 0,
+                No = 1, Title = "Дым над заставой", Map = MapType.Field, Seed = 1101, Biome = 3, Time = 0, Big = true,
                 Foe = Defs.Steppe, FoeCmd = "Кобек", FoeTrait = Trait.Fierce,
-                Mine = new[] { 3, 1, 2, 1 }, Foes = new[] { 2, 0, 1, 2 },
-                Hero = "Каэл Вейн",
+                Mine = new[] { 2, 0, 1, 1 }, Foes = new[] { 0, 0, 0, 0 },
+                Hero = "Каэл Вейн", FoeHero = "Хан Кобек",
+                Camps = true,
+                Party = new[] { new[] { 0, 6 }, new[] { 0, 6 }, new[] { 2, 4 }, new[] { 3, 2 } },
+                CampList = new[]
+                {
+                    ("Дозорные", -0.35f, -0.30f, new[] { 3, 0, 0, 0 }, false, 15f),
+                    ("Лучники у камней", 0.45f, -0.05f, new[] { 0, 0, 3, 0 }, false, 20f),
+                    ("Конный разъезд", -0.45f, 0.25f, new[] { 0, 0, 0, 3 }, false, 25f),
+                    ("Лагерь погонщиков", 0.35f, 0.45f, new[] { 3, 1, 2, 0 }, false, 40f),
+                    ("Стан Кобека", -0.05f, 0.80f, new[] { 4, 2, 2, 2 }, true, 0f),
+                },
+                ChestList = new[]
+                {
+                    ("Брошенный обоз", 0.62f, -0.45f, 30f),
+                    ("Тайник у холма", -0.62f, 0.55f, 40f),
+                },
                 Intro = new[]
                 {
-                    "Над пограничной заставой поднялся дым: кочевники хана Кобека сожгли её и уводят пленных в степь. Каэл Вейн служил на этой заставе.",
-                    "Командир Орвин перехватил набег в поле, пока тот не ушёл за реку. Кочевники быстры и бьют из луков на скаку — прижмите их пехотой, а арбалетчиков держите за спинами мечников. Каэл — ваш герой, ведите его сами.",
+                    "Над пограничной заставой поднялся дым: кочевники хана Кобека сожгли её и уводят пленных. Каэл Вейн служил на этой заставе.",
+                    "Враги рассыпались по полю лагерями. Лагерь стоит на месте, пока к нему не подойдёшь, — но, проснувшись, дерётся с вами целиком. Берите их по одному и не лезьте во все сразу.",
                 },
-                Tip = "Герой: левый палец — джойстик, справа — способности. Коснитесь своего отряда, потом земли — отряд пойдёт туда; врага — ударит по нему. Остальными распоряжается Орвин.",
-                Goal = Goal.FewLosses, GoalText = "потери меньше трети",
-                Win = "Набег отбит, пленные освобождены. Раненый кочевник проговорился: Кобек шёл не сам — его нанял кто-то с севера, «тот, кто командует чёрными всадниками».",
-                Lose = "Кочевники ушли с пленными. Соберите полки и попробуйте снова.",
+                Tip = "Ведите героя касанием земли и выбирайте отряды касанием. Идите к лагерю, подведите отряды, и только потом начинайте бой. В сундуках — опыт и лечение.",
+                Goal = Goal.HeroAlive, GoalText = "Каэл Вейн жив",
+                Win = "Кобек повержен, пленные свободны. Раненый кочевник проговорился: хана нанял кто-то с севера — «тот, кто командует чёрными всадниками».",
+                Lose = "Каэл пал. Соберитесь с силами и попробуйте снова.",
                 Lines = new[]
                 {
-                    L(Cue.Time, "Орвин", "Держать строй! Пусть сами лезут на мечи. Каэл, ты — впереди!", 1.5f),
-                    E(Cue.Time, "Кобек", "Эти стоят как пни. Засыпать их стрелами!", 6),
-                    L(Cue.Contact, "Орвин", "Сошлись! Арбалетчики — бить по конным!"),
-                    L(Cue.FoeRout, "Орвин", "Дрогнули! Рыцари — вдогон, не дать уйти с пленными!"),
-                    L(Cue.OwnRout, "Орвин", "Не робеть! Все к знамени!"),
+                    L(Cue.Time, "Орвин", "Каэл, враг рассыпан по полю. Берите лагерь за лагерем — не лезьте во все сразу.", 1.5f),
+                    L(Cue.Contact, "Орвин", "Лагерь проснулся! Держите отряды рядом с героем."),
+                    L(Cue.FoeHeroDown, "Каэл Вейн", "Кобек повержен. Идём освобождать пленных."),
+                    L(Cue.HeroDown, "Орвин", "Каэл пал…"),
                 },
             },
             new Chapter
@@ -265,12 +284,13 @@ namespace BattleSim.Core
         {
             b.Races[0] = Defs.Rus; b.Races[1] = c.Foe;
             b.UseCommanders = true;
-            if (c.Garrison > 0) b.GarrisonOnly(c.Garrison);
+            if (c.Camps) b.BuildSkirmish(c.CampList, c.ChestList, c.Party, c.FoeHero);
+            else if (c.Garrison > 0) b.GarrisonOnly(c.Garrison);
             else { b.ClearAll(); b.PlaceArmy(1, c.Foes); }
             b.SetCommander(0, Cmd, CmdTrait);
             b.SetCommander(1, c.FoeCmd, c.FoeTrait);
             b.HeroTitle[0] = c.Hero ?? "";
-            b.HeroTitle[1] = c.FoeHero ?? "";
+            b.HeroTitle[1] = c.Camps ? "" : c.FoeHero ?? "";
             b.HeroControl = !string.IsNullOrEmpty(c.Hero); // героем в сюжете правит игрок
         }
 

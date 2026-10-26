@@ -101,7 +101,7 @@ namespace BattleSim
         /// Поход: золотые кольца под выбранным отрядом, куда он идёт (метка и пунктир) или по кому бьёт (красные кольца),
         /// а при расстановке — золотая черта, ниже которой ставятся свои полки.
         /// </summary>
-        public void DrawStory(Battle b, Squad sel, World w, float zoneZ, bool setup)
+        public void DrawStory(Battle b, Squad sel, World w, float zoneZ, bool setup, List<Squad> group = null)
         {
             int n = 0;
             var gold = new Vector4(1f, 0.8f, 0.3f, 1);
@@ -136,6 +136,26 @@ namespace BattleSim
                         float x = c.x + dx * t / d, z = c.z + dz * t / d;
                         Put(x, w.GroundAt(x, z) + 0.14f, z, 0.35f, gold);
                     }
+                }
+            }
+            if (group != null)
+                foreach (var gs in group)
+                    foreach (var u in gs.Units)
+                        if (u.Alive) { var p = u.RenderPos(GameMain.Alpha); Put(p.x, p.y + 0.1f, p.z, u.T.Radius * 1.8f, gold); }
+            if (b.CampMode && !setup)
+            { // лагеря врага и нетронутые сундуки видны на карте
+                foreach (var c in b.Camps)
+                {
+                    if (c.Cleared) continue;
+                    float gy = w.GroundAt(c.X, c.Z) + 0.15f;
+                    Put(c.X, gy, c.Z, c.Boss ? 6.5f : 5.0f, c.Awake ? red : new Vector4(0.8f, 0.2f, 0.2f, 0.7f));
+                    Put(c.X, gy, c.Z, c.Boss ? 5.8f : 4.4f, c.Awake ? red : new Vector4(0.8f, 0.2f, 0.2f, 0.7f));
+                }
+                foreach (var ch in b.Chests)
+                {
+                    if (ch.Opened) continue;
+                    float gy = w.GroundAt(ch.X, ch.Z) + 0.15f;
+                    Put(ch.X, gy, ch.Z, 2.2f, gold); Put(ch.X, gy, ch.Z, 1.2f, gold);
                 }
             }
             var hero = b.PlayerHero;
