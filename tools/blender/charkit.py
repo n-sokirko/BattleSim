@@ -362,7 +362,7 @@ def build(name, render):
 
 def preview(arm, name, pose="Idle", scale=2.7, zc=0.85):
     sc = bpy.context.scene
-    act = bpy.data.actions.get(pose)
+    act = bpy.data.actions.get(pose) if pose else None
     if act:
         arm.animation_data_create()
         arm.animation_data.action = act

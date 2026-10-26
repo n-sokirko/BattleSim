@@ -80,7 +80,7 @@ func _build_world() -> void:
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.55
+	e.ambient_light_energy = 0.95
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.fog_enabled = true
 	e.fog_light_color = Color(0.75, 0.82, 0.9)
@@ -91,7 +91,7 @@ func _build_world() -> void:
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 35, 0)
-	sun.light_energy = 1.0
+	sun.light_energy = 1.35
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
 	add_child(sun)

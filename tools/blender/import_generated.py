@@ -8,7 +8,7 @@ import bpy, bmesh, os, sys, math
 from mathutils import Vector
 
 SRC = r"O:\BattleSim\art\generated"
-OUT = r"O:\BattleSim\godot\assets\gen"
+OUT = r"O:\BattleSim\art\generated\static"
 TRIS = 22000
 HEIGHT = 1.7
 TEX = 1024

@@ -16,13 +16,13 @@ const KINDS := {
 
 
 const LOOKS := {
-	"hero": {"dir": "gen", "static": true, "file": "hero_kael"},
-	"footman": {"dir": "gen", "static": true, "file": "erland_militia"},
-	"archer": {"dir": "gen", "static": true, "file": "erland_archer"},
-	"raider": {"dir": "gen", "static": true, "file": "nomad_raider"},
-	"rarcher": {"dir": "gen", "static": true, "file": "nomad_archer"},
-	"rider": {"dir": "gen", "static": true, "file": "nomad_archer"},
-	"boss": {"dir": "gen", "static": true, "file": "nomad_khan"},
+	"hero": {"dir": "gen", "file": "hero_kael", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"footman": {"dir": "gen", "file": "erland_militia", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
+	"archer": {"dir": "gen", "file": "erland_archer", "attacks": ["1H_Ranged_Shoot"]},
+	"raider": {"dir": "gen", "file": "nomad_raider", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"rarcher": {"dir": "gen", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
+	"rider": {"dir": "gen", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
+	"boss": {"dir": "gen", "file": "nomad_khan", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
 }
 static var models := {}
 static var lib: AnimationLibrary

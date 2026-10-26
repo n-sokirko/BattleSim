@@ -294,6 +294,13 @@ func _portrait(kind: String) -> Texture2D:
 		cam.fov = 38.0
 		vp.add_child(cam)
 		add_child(vp)
+		var box := _aabb(m, vp)
+		if box.size.y > 0.1:
+			var cx := box.position.x + box.size.x * 0.5
+			var top := box.position.y + box.size.y
+			cam.position = Vector3(cx, top - box.size.y * 0.24, box.size.y * 1.05 + 0.4)
+			cam.rotation_degrees = Vector3(-4, 0, 0)
+			cam.fov = 34.0
 		portrait_vp[kind] = vp
 	return portrait_vp[kind].get_texture()
 
@@ -423,3 +430,20 @@ func _layout() -> void:
 	lbl_msg.size = Vector2(1000, 60)
 	big.position = Vector2(vp.x / 2 - 500, vp.y / 2 - 180)
 	big.size = Vector2(1000, 200)
+
+
+func _aabb(n: Node, root: Node) -> AABB:
+	var out := AABB()
+	var first := true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		var t := Transform3D.IDENTITY
+		var p: Node = m
+		while p != null and p != root:
+			if p is Node3D:
+				t = (p as Node3D).transform * t
+			p = p.get_parent()
+		var a := t * m.get_aabb()
+		out = a if first else out.merge(a)
+		first = false
+	return out
