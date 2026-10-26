@@ -5,24 +5,24 @@ extends Node3D
 enum S { IDLE, MOVE, ATTACK, DEAD }
 
 const KINDS := {
-	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.25, "name": "Каэл Вейн"},
-	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.15, "name": "Ополченец"},
-	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 1.1, "name": "Стрелок"},
-	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.15, "name": "Налётчик"},
-	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 1.1, "name": "Лучник"},
-	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.1, "name": "Разведчик"},
-	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 1.7,  "name": "Хан Кобек"},
+	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.6,  "name": "Каэл Вейн"},
+	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.5,  "name": "Ополченец"},
+	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 1.45, "name": "Стрелок"},
+	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.5,  "name": "Налётчик"},
+	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 1.45, "name": "Лучник"},
+	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.45, "name": "Разведчик"},
+	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 2.1,  "name": "Хан Кобек"},
 }
 
 
 const LOOKS := {
-	"hero": {"dir": "own", "file": "hero_kael", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"footman": {"dir": "own", "file": "erland_militia", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
-	"archer": {"dir": "own", "file": "erland_archer", "attacks": ["1H_Ranged_Shoot"]},
-	"raider": {"dir": "own", "file": "nomad_raider", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"rarcher": {"dir": "own", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
-	"rider": {"dir": "own", "file": "nomad_archer", "tint": Color(1.0, 0.85, 0.7), "attacks": ["1H_Ranged_Shoot"]},
-	"boss": {"dir": "own", "file": "nomad_khan", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
+	"hero": {"dir": "gen", "static": true, "file": "hero_kael"},
+	"footman": {"dir": "gen", "static": true, "file": "erland_militia"},
+	"archer": {"dir": "gen", "static": true, "file": "erland_archer"},
+	"raider": {"dir": "gen", "static": true, "file": "nomad_raider"},
+	"rarcher": {"dir": "gen", "static": true, "file": "nomad_archer"},
+	"rider": {"dir": "gen", "static": true, "file": "nomad_archer"},
+	"boss": {"dir": "gen", "static": true, "file": "nomad_khan"},
 }
 static var models := {}
 static var lib: AnimationLibrary
@@ -114,10 +114,12 @@ func setup(k: String, t: int, g) -> void:
 	radius = 0.55 * d["scale"]
 	add_child(model)
 	_dress(model, cfg)
-	_tint(model, cfg.get("tint", Color(1, 1, 1)))
+	if not cfg.get("static", false):
+		_tint(model, cfg.get("tint", Color(1, 1, 1)))
+	is_static = cfg.get("static", false)
 	anim = model.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	for n in ["Idle", "Idle_Combat", "Running_A", "Running_B", "Walking_A", "2H_Melee_Idle"]:
-		if anim.has_animation(n):
+		if anim != null and anim.has_animation(n):
 			anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
 	a_idle = cfg.get("idle", "Idle")
 	a_run = cfg.get("run", "Running_A")
@@ -141,7 +143,7 @@ func setup(k: String, t: int, g) -> void:
 	var q := QuadMesh.new()
 	q.size = Vector2(1.5 if (is_hero or is_boss) else 1.1, 0.16)
 	bar.mesh = q
-	bar.position.y = 2.6 * d["scale"] + 0.2
+	bar.position.y = (2.0 if is_static else 2.6) * d["scale"] + 0.25
 	var sm := ShaderMaterial.new()
 	sm.shader = bar_shader
 	sm.set_shader_parameter("col", Color(0.3, 0.85, 0.35) if team == 0 else Color(0.9, 0.3, 0.25))
@@ -176,6 +178,9 @@ func set_selected(v: bool) -> void:
 
 
 func play(n: String, restart := false, spd := 1.0) -> void:
+	if anim == null:
+		cur = n
+		return
 	if not anim.has_animation(n):
 		return
 	if cur == n and not restart:
@@ -218,6 +223,7 @@ func hurt(amount: float, src: Unit) -> void:
 		target = src
 	if state == S.IDLE and swing < 0.0 and stun <= 0.0 and randf() < 0.35:
 		play(a_hit, true)
+		hit_t = 0.18
 		cur = "hit"
 
 
@@ -237,6 +243,12 @@ func die(src: Unit) -> void:
 # ---------------------------------------------------------------- шаг
 
 func tick(dt: float) -> void:
+	_tick_logic(dt)
+	if is_static:
+		_proc(dt)
+
+
+func _tick_logic(dt: float) -> void:
 	if state == S.DEAD:
 		dead_t += dt
 		if dead_t > 8.0:
@@ -313,7 +325,7 @@ func tick(dt: float) -> void:
 	state = S.IDLE
 	if cur != "hit" and cur != "atk":
 		play(a_idle)
-	elif not anim.is_playing():
+	elif anim != null and not anim.is_playing():
 		cur = ""
 
 
@@ -381,6 +393,8 @@ func a_attack() -> String:
 ## Показать только нужное оружие и одежду: в моделях KayKit все предметы лежат на костях сразу.
 static func _dress(model: Node, cfg: Dictionary) -> void:
 	var skel := model.find_child("Skeleton3D", true, false) as Skeleton3D
+	if skel == null:
+		return
 	var show: Dictionary = cfg.get("show", {})
 	for att in skel.get_children():
 		if att is BoneAttachment3D:
@@ -407,3 +421,41 @@ var hold := false
 func order_hold() -> void:
 	target = null; forced = false; has_goal = false; attack_move = false
 	hold = true
+
+
+# ---------------------------------------------------------------- движения статичной модели (без скелета)
+
+var is_static := false
+var pt := 0.0
+var hit_t := 0.0
+
+
+func _proc(dt: float) -> void:
+	pt += dt
+	var m := model
+	if state == S.DEAD:
+		var f := clampf(dead_t / 0.45, 0.0, 1.0)
+		m.rotation.x = lerpf(0.0, -PI / 2.0, f)
+		m.position.y = lerpf(0.0, 0.22, f)
+		m.position.z = lerpf(0.0, -0.3, f)
+		return
+	if hit_t > 0.0:
+		hit_t -= dt
+	var rx := 0.0
+	var rz := 0.0
+	var py := sin(pt * 2.2) * 0.012
+	var pz := 0.0
+	if swing >= 0.0:
+		var f := clampf(swing / 0.38, 0.0, 1.0)
+		rx = 0.38 * sin(f * PI)
+		pz = 0.32 * sin(f * PI)
+	elif cur == a_run:
+		py = absf(sin(pt * 11.0)) * 0.10
+		rz = sin(pt * 5.5) * 0.07
+		rx = 0.10
+	if hit_t > 0.0:
+		rx -= 0.22
+	m.rotation.x = lerpf(m.rotation.x, rx, clampf(dt * 18.0, 0.0, 1.0))
+	m.rotation.z = lerpf(m.rotation.z, rz, clampf(dt * 14.0, 0.0, 1.0))
+	m.position.y = py
+	m.position.z = lerpf(m.position.z, pz, clampf(dt * 20.0, 0.0, 1.0))
