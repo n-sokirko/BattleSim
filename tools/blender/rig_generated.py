@@ -129,7 +129,44 @@ def fix_weights(mesh, arm):
     print("WEIGHTED", len(mesh.data.vertices))
 
 
-def fit_handslots(mesh, arm):
+GLOVE = {"hero_kael": (0.26, 0.28, 0.32), "erland_militia": (0.34, 0.22, 0.13), "erland_archer": (0.30, 0.22, 0.15),
+         "nomad_raider": (0.24, 0.16, 0.11), "nomad_archer": (0.50, 0.38, 0.24), "nomad_khan": (0.18, 0.18, 0.20)}
+
+
+def add_fist(mesh, side, c, name):
+    """Кулак поверх открытой кисти: оружие выходит из сжатой руки, пальцы не торчат."""
+    import bmesh
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.bevel(bm, geom=list(bm.edges), offset=0.2, segments=2, affect="EDGES")
+    for v in bm.verts:
+        v.co = Vector((v.co.x * 0.10, v.co.y * 0.115, v.co.z * 0.10)) + c
+    me = bpy.data.meshes.new("fist")
+    bm.to_mesh(me)
+    bm.free()
+    col = tuple(c ** 2.2 for c in GLOVE.get(name, (0.3, 0.25, 0.2)))   # sRGB -> линейный
+    m = bpy.data.materials.new("glove_" + name + side)
+    m.use_nodes = True
+    m.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (col[0], col[1], col[2], 1)
+    m.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.8
+    m.node_tree.nodes["Principled BSDF"].inputs["Emission Color"].default_value = (0, 0, 0, 1)
+    m.node_tree.nodes["Principled BSDF"].inputs["Emission Strength"].default_value = 0.0
+    m.node_tree.nodes["Principled BSDF"].inputs["Specular IOR Level"].default_value = 0.1
+    me.materials.append(m)
+    for p in me.polygons:
+        p.use_smooth = True
+    ob = bpy.data.objects.new("fist_" + side, me)
+    bpy.context.scene.collection.objects.link(ob)
+    vg = ob.vertex_groups.new(name="hand." + side)
+    vg.add(list(range(len(me.vertices))), 1.0, "REPLACE")
+    bpy.ops.object.select_all(action="DESELECT")
+    ob.select_set(True)
+    mesh.select_set(True)
+    bpy.context.view_layer.objects.active = mesh
+    bpy.ops.object.join()
+
+
+def fit_handslots(mesh, arm, name=""):
     """Точка хвата (handslot) ставится в центр настоящей кисти модели: среднее вершин, привязанных к кисти."""
     vgs = {g.index: g.name for g in mesh.vertex_groups}
     print("VG", len(vgs), list(vgs.values())[:5], "verts", len(mesh.data.vertices), "withgroups", sum(1 for v in mesh.data.vertices if v.groups))
@@ -162,6 +199,8 @@ def fit_handslots(mesh, arm):
         eb.tail = c + d
         print("HANDSLOT", side, [round(x, 3) for x in c], "hand verts", len(pts))
     bpy.ops.object.mode_set(mode='OBJECT')
+    for side, c in centers.items():
+        add_fist(mesh, side, c, name)
 
 
 def arm_angles(mesh, arm):
@@ -311,7 +350,7 @@ def rig(name, render):
     md = mesh.modifiers.new("Armature", 'ARMATURE')
     md.object = arm
     mesh.parent = arm
-    fit_handslots(mesh, arm)
+    fit_handslots(mesh, arm, name)
     # экспорт
     bpy.ops.object.select_all(action='DESELECT')
     arm.select_set(True)
