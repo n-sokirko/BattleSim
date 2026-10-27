@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://de0m4ya6m8sjs"
-path="res://.godot/imported/nomad_raider_texture_pbr_20250901.png-130cce9628181062544a6d882d3399c5.ctex"
+uid="uid://dk5eblq7gg6fu"
+path="res://.godot/imported/hero_kael_hero_kael_nrm.png-98b345752db5f2f885446a98fc400514.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "f024dcb0f969b428391be874b3b7023f"
+"md5": "fd31c5ba67667a4c7e7924063fe53950"
 }
 
 [deps]
 
-source_file="res://assets/gen/nomad_raider_texture_pbr_20250901.png"
-dest_files=["res://.godot/imported/nomad_raider_texture_pbr_20250901.png-130cce9628181062544a6d882d3399c5.ctex"]
+source_file="res://assets/gen/hero_kael_hero_kael_nrm.png"
+dest_files=["res://.godot/imported/hero_kael_hero_kael_nrm.png-98b345752db5f2f885446a98fc400514.ctex"]
 
 [params]
 

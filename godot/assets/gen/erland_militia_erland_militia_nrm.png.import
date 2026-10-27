@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cgdo6x0qqnuuk"
-path="res://.godot/imported/nomad_archer_texture_pbr_20250901.png-96f5a6dacb0af0b7f38e9ae2d1466993.ctex"
+uid="uid://pt2wes313t1s"
+path="res://.godot/imported/erland_militia_erland_militia_nrm.png-5bf5ae59d04c659dcf49d652e3aa8e10.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "015cf4781c97a591aeeb3c798b19900a"
+"md5": "fc4b761e6805e30e36aa355e72bb11eb"
 }
 
 [deps]
 
-source_file="res://assets/gen/nomad_archer_texture_pbr_20250901.png"
-dest_files=["res://.godot/imported/nomad_archer_texture_pbr_20250901.png-96f5a6dacb0af0b7f38e9ae2d1466993.ctex"]
+source_file="res://assets/gen/erland_militia_erland_militia_nrm.png"
+dest_files=["res://.godot/imported/erland_militia_erland_militia_nrm.png-5bf5ae59d04c659dcf49d652e3aa8e10.ctex"]
 
 [params]
 

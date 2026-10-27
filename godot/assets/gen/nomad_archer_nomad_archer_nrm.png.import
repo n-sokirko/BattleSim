@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cji3ert2edjhk"
-path="res://.godot/imported/erland_archer_texture_pbr_20250901.png-597576068e5c012bdd8de9859c9550f4.ctex"
+uid="uid://cij3quyi1byj4"
+path="res://.godot/imported/nomad_archer_nomad_archer_nrm.png-22809cb6b6f3a10c8295a91bdf2669c2.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "67aa35f70749e7659bc48b742c20aa3b"
+"md5": "971d7185dc6efbcfc9bce382eb7571f0"
 }
 
 [deps]
 
-source_file="res://assets/gen/erland_archer_texture_pbr_20250901.png"
-dest_files=["res://.godot/imported/erland_archer_texture_pbr_20250901.png-597576068e5c012bdd8de9859c9550f4.ctex"]
+source_file="res://assets/gen/nomad_archer_nomad_archer_nrm.png"
+dest_files=["res://.godot/imported/nomad_archer_nomad_archer_nrm.png-22809cb6b6f3a10c8295a91bdf2669c2.ctex"]
 
 [params]
 

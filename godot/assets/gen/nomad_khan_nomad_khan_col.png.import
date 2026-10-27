@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://clykk8dumucxa"
-path="res://.godot/imported/hero_kael_texture_pbr_20250901.png-e8a52a40ccf25e934e41682847c20431.ctex"
+uid="uid://16bmchrdbopm"
+path="res://.godot/imported/nomad_khan_nomad_khan_col.png-a2a578724a5f6915e9e6b78177532666.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "3704bd08617b8cbd0b97442bf7eb3766"
+"md5": "8809bfbf5782a506fa28870ce18673ff"
 }
 
 [deps]
 
-source_file="res://assets/gen/hero_kael_texture_pbr_20250901.png"
-dest_files=["res://.godot/imported/hero_kael_texture_pbr_20250901.png-e8a52a40ccf25e934e41682847c20431.ctex"]
+source_file="res://assets/gen/nomad_khan_nomad_khan_col.png"
+dest_files=["res://.godot/imported/nomad_khan_nomad_khan_col.png-a2a578724a5f6915e9e6b78177532666.ctex"]
 
 [params]
 

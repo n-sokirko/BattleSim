@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cqatqfgxs2fvb"
-path="res://.godot/imported/nomad_archer_texture_pbr_20250901_metallic-texture_pbr_20250901_roughness.png-db975c0955bf1785fb3676f321a95022.ctex"
+uid="uid://bgvebqynnvvq4"
+path="res://.godot/imported/hero_kael_hero_kael_col.png-f7894b2c33871c7e0c4ce7ebc99456ff.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "70f32799c61cad815797e096b01127d1"
+"md5": "0917eb1552c9042308987692c9fed996"
 }
 
 [deps]
 
-source_file="res://assets/gen/nomad_archer_texture_pbr_20250901_metallic-texture_pbr_20250901_roughness.png"
-dest_files=["res://.godot/imported/nomad_archer_texture_pbr_20250901_metallic-texture_pbr_20250901_roughness.png-db975c0955bf1785fb3676f321a95022.ctex"]
+source_file="res://assets/gen/hero_kael_hero_kael_col.png"
+dest_files=["res://.godot/imported/hero_kael_hero_kael_col.png-f7894b2c33871c7e0c4ce7ebc99456ff.ctex"]
 
 [params]
 

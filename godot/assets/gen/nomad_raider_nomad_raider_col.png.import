@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bcosfeaggdf25"
-path="res://.godot/imported/nomad_khan_texture_pbr_20250901_normal.png-293cc9870f270c21f968ac46bbafd21b.ctex"
+uid="uid://8t73ijs5s216"
+path="res://.godot/imported/nomad_raider_nomad_raider_col.png-9eb00f8d3d11594d39b52a6c368df0a4.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "b98b7ba6b3a81741de22878ee4cc5fc5"
+"md5": "12b750f64287ce079f44295b83c87274"
 }
 
 [deps]
 
-source_file="res://assets/gen/nomad_khan_texture_pbr_20250901_normal.png"
-dest_files=["res://.godot/imported/nomad_khan_texture_pbr_20250901_normal.png-293cc9870f270c21f968ac46bbafd21b.ctex"]
+source_file="res://assets/gen/nomad_raider_nomad_raider_col.png"
+dest_files=["res://.godot/imported/nomad_raider_nomad_raider_col.png-9eb00f8d3d11594d39b52a6c368df0a4.ctex"]
 
 [params]
 

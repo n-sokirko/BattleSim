@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b2ra7ersaca4h"
-path="res://.godot/imported/nomad_raider_texture_pbr_20250901_normal.png-7c9c885e7880696561a0021e4095e0a2.ctex"
+uid="uid://d4bkt6uegrgbh"
+path="res://.godot/imported/erland_militia_erland_militia_col.png-1ccb31cfb1872f5edff4322f72b858d8.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "e5d3763196cebb8e0e51bd50f94ac7fc"
+"md5": "eea36a2cb8bb8018bbae0ecf6d3accde"
 }
 
 [deps]
 
-source_file="res://assets/gen/nomad_raider_texture_pbr_20250901_normal.png"
-dest_files=["res://.godot/imported/nomad_raider_texture_pbr_20250901_normal.png-7c9c885e7880696561a0021e4095e0a2.ctex"]
+source_file="res://assets/gen/erland_militia_erland_militia_col.png"
+dest_files=["res://.godot/imported/erland_militia_erland_militia_col.png-1ccb31cfb1872f5edff4322f72b858d8.ctex"]
 
 [params]
 
