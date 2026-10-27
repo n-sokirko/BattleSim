@@ -13,7 +13,7 @@ import charkit as ck
 GEN = r"O:\BattleSim\godot\assets\gen"
 SRC = r"O:\BattleSim\art\generated\static"
 SCALE = 1.1            # во сколько раз увеличить скелет под фигуру
-ARM_DOWN = math.radians(55)   # на сколько опущены руки в A-позе (от горизонтали)
+ARM_DOWN = math.radians(70)   # на сколько опущены руки в A-позе (от горизонтали)
 DEFORM = ["hips", "spine", "chest", "head", "upperarm.l", "lowerarm.l", "wrist.l", "hand.l", "upperarm.r", "lowerarm.r", "wrist.r", "hand.r",
           "upperleg.l", "lowerleg.l", "foot.l", "toes.l", "upperleg.r", "lowerleg.r", "foot.r", "toes.r"]
 

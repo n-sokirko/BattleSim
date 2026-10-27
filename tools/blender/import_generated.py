@@ -4,7 +4,7 @@
 уменьшает текстуры, ставит ноги на ноль и экспортирует в godot/assets/gen/<имя>.glb.
 Запуск: blender -b -P import_generated.py [-- имя ...]
 """
-import bpy, bmesh, os, sys, math
+import bpy, bmesh, os, sys, math, glob
 from mathutils import Vector
 
 SRC = r"O:\BattleSim\art\generated"
@@ -13,13 +13,14 @@ TRIS = 22000
 HEIGHT = 1.7
 TEX = 1024
 
+SRC = r"O:\BattleSim\art\generated\raw2"
 FILES = {
-    "hero_kael":      ("4e789a85188878595dcf5a5c17e2aa43.glb", False),   # один персонаж, видов нет
-    "erland_militia": ("0880add0f4075b5f7655fff777c01bb4.glb", True),
-    "erland_archer":  ("9881be9995abc4a86978e07c04b31ab8.glb", True),
-    "nomad_raider":   ("816fe42c5d8dfc30ff76a2398d019299.glb", True),
-    "nomad_archer":   ("899ee7ed1598fc91b89aa554c655a0dd.glb", True),
-    "nomad_khan":     ("06ba3cc96bc6b0afa8d3d7e797f3c005.glb", True),
+    "hero_kael":      ("d1d51daa", False),
+    "erland_militia": ("f4cb0697", False),
+    "erland_archer":  ("d21b5174", False),
+    "nomad_raider":   ("0fc9bad7", False),
+    "nomad_archer":   ("066597b9", False),
+    "nomad_khan":     ("1c8f35e5", False),
 }
 
 
@@ -52,7 +53,7 @@ def islands(me):
 def process(name):
     fn, three = FILES[name]
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.gltf(filepath=os.path.join(SRC, fn))
+    bpy.ops.import_scene.gltf(filepath=glob.glob(os.path.join(SRC, fn + "*.glb"))[0])
     ob = [o for o in bpy.data.objects if o.type == 'MESH'][0]
     me = ob.data
     print("LOADED", name, len(me.polygons), "polys")

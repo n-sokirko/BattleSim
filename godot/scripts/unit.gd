@@ -16,13 +16,13 @@ const KINDS := {
 
 
 const LOOKS := {
-	"hero": {"dir": "gen", "file": "hero_kael", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"footman": {"dir": "gen", "file": "erland_militia", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
-	"archer": {"dir": "gen", "file": "erland_archer", "attacks": ["1H_Ranged_Shoot"]},
-	"raider": {"dir": "gen", "file": "nomad_raider", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"rarcher": {"dir": "gen", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
-	"rider": {"dir": "gen", "file": "nomad_archer", "attacks": ["1H_Ranged_Shoot"]},
-	"boss": {"dir": "gen", "file": "nomad_khan", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
+	"hero": {"dir": "gen", "file": "hero_kael", "weapon_r": "sword_knight", "weapon_l": "shield_tower", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"footman": {"dir": "gen", "file": "erland_militia", "weapon_r": "sword_short", "weapon_l": "shield_rect", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
+	"archer": {"dir": "gen", "file": "erland_archer", "weapon_r": "crossbow", "attacks": ["1H_Ranged_Shoot"]},
+	"raider": {"dir": "gen", "file": "nomad_raider", "weapon_r": "saber", "weapon_l": "shield_sun", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
+	"rarcher": {"dir": "gen", "file": "nomad_archer", "weapon_r": "bow", "attacks": ["1H_Ranged_Shoot"]},
+	"rider": {"dir": "gen", "file": "nomad_archer", "weapon_r": "bow", "attacks": ["1H_Ranged_Shoot"]},
+	"boss": {"dir": "gen", "file": "nomad_khan", "weapon_r": "axe2", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
 }
 static var models := {}
 static var lib: AnimationLibrary
@@ -114,6 +114,7 @@ func setup(k: String, t: int, g) -> void:
 	radius = 0.55 * d["scale"]
 	add_child(model)
 	_dress(model, cfg)
+	_equip(model, cfg)
 	if not cfg.get("static", false):
 		_tint(model, cfg.get("tint", Color(1, 1, 1)))
 	is_static = cfg.get("static", false)
@@ -143,7 +144,7 @@ func setup(k: String, t: int, g) -> void:
 	var q := QuadMesh.new()
 	q.size = Vector2(1.5 if (is_hero or is_boss) else 1.1, 0.16)
 	bar.mesh = q
-	bar.position.y = (2.0 if is_static else 2.6) * d["scale"] + 0.25
+	bar.position.y = 1.95 * d["scale"] + 0.2
 	var sm := ShaderMaterial.new()
 	sm.shader = bar_shader
 	sm.set_shader_parameter("col", Color(0.3, 0.85, 0.35) if team == 0 else Color(0.9, 0.3, 0.25))
@@ -408,6 +409,7 @@ static func make_model(k: String) -> Node3D:
 	var cfg: Dictionary = LOOKS[k]
 	var m := (load("res://assets/%s/%s.glb" % [cfg.get("dir", "kk"), cfg["file"]]) as PackedScene).instantiate() as Node3D
 	_dress(m, cfg)
+	_equip(m, cfg)
 	_tint(m, cfg.get("tint", Color(1, 1, 1)))
 	var ap := m.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if ap and ap.has_animation("Idle"):
@@ -459,3 +461,23 @@ func _proc(dt: float) -> void:
 	m.rotation.z = lerpf(m.rotation.z, rz, clampf(dt * 14.0, 0.0, 1.0))
 	m.position.y = py
 	m.position.z = lerpf(m.position.z, pz, clampf(dt * 20.0, 0.0, 1.0))
+
+
+## Оружие и щиты — отдельные модели на костях рук (хват как у KayKit: те же смещения относительно handslot).
+const HAND_R := Transform3D(Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, -1)), Vector3(0, 0.0333, 0))
+const HAND_L := Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)), Vector3(0, 0.017, 0.156))
+
+
+static func _equip(m: Node, cfg: Dictionary) -> void:
+	var skel := m.find_child("Skeleton3D", true, false) as Skeleton3D
+	if skel == null:
+		return
+	for slot in [["weapon_r", "handslot.r", HAND_R], ["weapon_l", "handslot.l", HAND_L]]:
+		if not cfg.has(slot[0]):
+			continue
+		var att := BoneAttachment3D.new()
+		att.bone_name = slot[1]
+		skel.add_child(att)
+		var prop := (load("res://assets/gen/props/%s.glb" % cfg[slot[0]]) as PackedScene).instantiate() as Node3D
+		prop.transform = slot[2]
+		att.add_child(prop)
