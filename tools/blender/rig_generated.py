@@ -55,8 +55,30 @@ def rot_about(point, axis, ang):
 
 
 
+def fill_missing(mesh, arm):
+    """Вершинам без весов (после автоматических) — ближайшая кость; затем нормализация."""
+    vg = {g.name: g for g in mesh.vertex_groups}
+    segs = {b.name: (arm.matrix_world @ b.head_local, arm.matrix_world @ b.tail_local) for b in arm.data.bones if b.name in vg}
+
+    def dist(p, a, b):
+        ab = b - a
+        t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.length_squared, 1e-9)))
+        return (p - (a + ab * t)).length
+
+    n = 0
+    for v in mesh.data.vertices:
+        if not any(g.weight > 0.001 for g in v.groups):
+            best = min(segs, key=lambda k: dist(v.co, *segs[k]))
+            vg[best].add([v.index], 1.0, 'REPLACE')
+            n += 1
+    print("FILLED", n)
+
+
 def fix_weights(mesh, arm):
-    """Веса по расстоянию до костей: ближайшие 4 кости, вес ~ 1/расстояние^4 (сетка рваная, связность не используем)."""
+    """
+    Веса по расстоянию до костей. Тело (голова, торс, ноги) считается по костям тела, рука — по костям своей руки;
+    вершина у плеча смешивает те и другие по расстоянию от оси тела (a=0 у середины груди, a=1 у наружного края руки).
+    """
     for g in list(mesh.vertex_groups):
         mesh.vertex_groups.remove(g)
     vg = {}
@@ -65,18 +87,45 @@ def fix_weights(mesh, arm):
         if b.use_deform:
             vg[b.name] = mesh.vertex_groups.new(name=b.name)
             segs[b.name] = (arm.matrix_world @ b.head_local, arm.matrix_world @ b.tail_local)
+    arm_bones = {s: [f"upperarm.{s}", f"lowerarm.{s}", f"wrist.{s}", f"hand.{s}"] for s in ("l", "r")}
+    all_arm = set(arm_bones["l"] + arm_bones["r"])
+    body = [n for n in segs if n not in all_arm]
+    cx = segs["hips"][0].x
 
     def dist(p, a, b):
         ab = b - a
         t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.length_squared, 1e-9)))
         return (p - (a + ab * t)).length
 
+    def weights(p, cand, k=3, power=3):
+        ds = sorted(((dist(p, *segs[n]), n) for n in cand))[:k]
+        ws = [1.0 / (d + 0.03) ** power for d, n in ds]
+        t = sum(ws)
+        return {n: w / t for (d, n), w in zip(ds, ws)}
+
+    def smooth(x0, x1, x):
+        t = max(0.0, min(1.0, (x - x0) / (x1 - x0)))
+        return t * t * (3 - 2 * t)
+
     for v in mesh.data.vertices:
-        ds = sorted(((dist(v.co, *segs[n]), n) for n in segs))[:4]
-        ws = [1.0 / (d + 0.03) ** 4 for d, n in ds]
-        tot = sum(ws)
-        for (d, n), w in zip(ds, ws):
-            vg[n].add([v.index], w / tot, 'REPLACE')
+        p = v.co
+        side = "l" if p.x > cx else "r"
+        wb = weights(p, body)
+        da = min(dist(p, *segs[n]) for n in arm_bones[side])
+        lateral = abs(p.x - cx)
+        a = smooth(0.20, 0.34, lateral) if da < 0.17 else 0.0
+        if a > 0:
+            wa = weights(p, arm_bones[side])
+            mix = {}
+            for n, w in wb.items():
+                mix[n] = mix.get(n, 0) + w * (1 - a)
+            for n, w in wa.items():
+                mix[n] = mix.get(n, 0) + w * a
+        else:
+            mix = wb
+        for n, w in mix.items():
+            if w > 0.002:
+                vg[n].add([v.index], w, 'REPLACE')
     print("WEIGHTED", len(mesh.data.vertices))
 
 
