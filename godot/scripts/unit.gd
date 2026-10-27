@@ -5,25 +5,16 @@ extends Node3D
 enum S { IDLE, MOVE, ATTACK, DEAD }
 
 const KINDS := {
-	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.6,  "name": "Каэл Вейн"},
-	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.5,  "name": "Ополченец"},
-	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 1.45, "name": "Стрелок"},
-	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.5,  "name": "Налётчик"},
-	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 1.45, "name": "Лучник"},
-	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.45, "name": "Разведчик"},
-	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 2.1,  "name": "Хан Кобек"},
+	"hero":    {"model": "x",  "hp": 650.0, "dmg": 34.0, "reach": 1.9,  "ranged": false, "speed": 5.0, "cd": 1.0, "scale": 1.4,  "name": "Каэл Вейн"},
+	"footman": {"model": "Male_Peasant", "hp": 150.0, "dmg": 14.0, "reach": 1.7,  "ranged": false, "speed": 4.3, "cd": 1.1, "scale": 1.3,  "name": "Ополченец"},
+	"archer":  {"model": "Male_Ranger",  "hp": 85.0,  "dmg": 13.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.7, "scale": 1.25, "name": "Стрелок"},
+	"raider":  {"model": "Male_Peasant", "hp": 110.0, "dmg": 11.0, "reach": 1.7,  "ranged": false, "speed": 4.4, "cd": 1.1, "scale": 1.3,  "name": "Налётчик"},
+	"rarcher": {"model": "Male_Ranger",  "hp": 70.0,  "dmg": 11.0, "reach": 15.0, "ranged": true,  "speed": 4.2, "cd": 1.8, "scale": 1.25, "name": "Лучник"},
+	"rider":   {"model": "Male_Ranger",  "hp": 120.0, "dmg": 12.0, "reach": 1.8,  "ranged": false, "speed": 6.5, "cd": 0.9, "scale": 1.25, "name": "Разведчик"},
+	"boss":    {"model": "Male_Ranger",  "hp": 800.0, "dmg": 36.0, "reach": 2.0,  "ranged": false, "speed": 4.6, "cd": 1.0, "scale": 1.7,  "name": "Хан Кобек"},
 }
 
 
-const LOOKS := {
-	"hero": {"dir": "gen", "file": "hero_kael", "weapon_r": "sword_knight", "weapon_l": "shield_tower", "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"footman": {"dir": "gen", "file": "erland_militia", "weapon_r": "sword_short", "weapon_l": "shield_rect", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
-	"archer": {"dir": "gen", "file": "erland_archer", "weapon_r": "crossbow", "attacks": ["1H_Ranged_Shoot"]},
-	"raider": {"dir": "gen", "file": "nomad_raider", "weapon_r": "saber", "weapon_l": "shield_sun", "attacks": ["1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Horizontal"]},
-	"rarcher": {"dir": "gen", "file": "nomad_archer", "weapon_r": "bow", "attacks": ["1H_Ranged_Shoot"]},
-	"rider": {"dir": "gen", "file": "nomad_archer", "weapon_r": "bow", "attacks": ["1H_Ranged_Shoot"]},
-	"boss": {"dir": "gen", "file": "nomad_khan", "weapon_r": "axe2", "idle": "2H_Melee_Idle", "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
-}
 static var models := {}
 static var lib: AnimationLibrary
 static var bar_shader: Shader
@@ -109,24 +100,19 @@ func setup(k: String, t: int, g) -> void:
 	is_boss = k == "boss"
 	load_shared()
 	var cfg: Dictionary = LOOKS[k]
-	model = (load("res://assets/%s/%s.glb" % [cfg.get("dir", "kk"), cfg["file"]]) as PackedScene).instantiate()
+	model = (load("res://assets/hy/%s.glb" % cfg["file"]) as PackedScene).instantiate()
 	model.scale = Vector3.ONE * d["scale"]
 	radius = 0.55 * d["scale"]
 	add_child(model)
-	_dress(model, cfg)
-	_equip(model, cfg)
-	if not cfg.get("static", false):
-		_tint(model, cfg.get("tint", Color(1, 1, 1)))
-	is_static = cfg.get("static", false)
-	anim = model.find_child("AnimationPlayer", true, false) as AnimationPlayer
-	for n in ["Idle", "Idle_Combat", "Running_A", "Running_B", "Walking_A", "2H_Melee_Idle"]:
-		if anim != null and anim.has_animation(n):
-			anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
-	a_idle = cfg.get("idle", "Idle")
-	a_run = cfg.get("run", "Running_A")
-	a_attacks = cfg.get("attacks", ["1H_Melee_Attack_Slice_Diagonal"])
-	a_hit = "Hit_A"
-	a_die = "Death_A"
+	# проигрыватель анимаций: клипы KayKit, перенесённые на этот скелет (res://assets/hy/anims_<имя>.res)
+	anim = AnimationPlayer.new()
+	model.add_child(anim)
+	var al := load("res://assets/hy/anims_%s.res" % cfg["file"]) as AnimationLibrary
+	for n in al.get_animation_list():
+		if n in ["Idle", "2H_Melee_Idle", "Walking_A", "Running_A", "Running_B"]:
+			al.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+	anim.add_animation_library("kk", al)
+	_equip_default()
 	# кольцо под ногами: цвет армии
 	ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
@@ -188,7 +174,7 @@ func play(n: String, restart := false, spd := 1.0) -> void:
 		return
 	cur = n
 	anim.speed_scale = spd
-	anim.play(n, 0.12)
+	anim.play(n, 0.15)
 
 
 # ---------------------------------------------------------------- приказы
@@ -224,7 +210,6 @@ func hurt(amount: float, src: Unit) -> void:
 		target = src
 	if state == S.IDLE and swing < 0.0 and stun <= 0.0 and randf() < 0.35:
 		play(a_hit, true)
-		hit_t = 0.18
 		cur = "hit"
 
 
@@ -245,8 +230,6 @@ func die(src: Unit) -> void:
 
 func tick(dt: float) -> void:
 	_tick_logic(dt)
-	if is_static:
-		_proc(dt)
 
 
 func _tick_logic(dt: float) -> void:
@@ -380,104 +363,133 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 	play(a_run, false, clampf(speed / 4.6, 0.8, 1.4))
 
 
-var a_idle := "Idle"
-var a_run := "Running_A"
-var a_hit := "Hit_A"
-var a_die := "Death_A"
-var a_attacks: Array = ["1H_Melee_Attack_Slice_Diagonal"]
+var a_idle := "kk/Idle"
+var a_run := "kk/Running_A"
+var a_hit := "kk/Hit_A"
+var a_die := "kk/Death_A"
+var a_attacks: Array = ["kk/1H_Melee_Attack_Slice_Diagonal"]
 
 
 func a_attack() -> String:
 	return a_attacks[randi() % a_attacks.size()]
 
 
-## Показать только нужное оружие и одежду: в моделях KayKit все предметы лежат на костях сразу.
-static func _dress(model: Node, cfg: Dictionary) -> void:
-	var skel := model.find_child("Skeleton3D", true, false) as Skeleton3D
-	if skel == null:
-		return
-	var show: Dictionary = cfg.get("show", {})
-	for att in skel.get_children():
-		if att is BoneAttachment3D:
-			var keep: Array = show.get(att.name, [])
-			for m in att.get_children():
-				m.visible = m.name in keep
-
-
-## Готовая одетая модель бойца вида k (для портрета в интерфейсе).
-static func make_model(k: String) -> Node3D:
-	var cfg: Dictionary = LOOKS[k]
-	var m := (load("res://assets/%s/%s.glb" % [cfg.get("dir", "kk"), cfg["file"]]) as PackedScene).instantiate() as Node3D
-	_dress(m, cfg)
-	_equip(m, cfg)
-	_tint(m, cfg.get("tint", Color(1, 1, 1)))
-	var ap := m.find_child("AnimationPlayer", true, false) as AnimationPlayer
-	if ap and ap.has_animation("Idle"):
-		ap.get_animation("Idle").loop_mode = Animation.LOOP_LINEAR
-		ap.play(cfg.get("idle", "Idle"))
-	return m
-
-
 var hold := false
+
 
 func order_hold() -> void:
 	target = null; forced = false; has_goal = false; attack_move = false
 	hold = true
 
 
-# ---------------------------------------------------------------- движения статичной модели (без скелета)
+# ---------------------------------------------------------------- оружие и наборы анимаций
 
-var is_static := false
-var pt := 0.0
-var hit_t := 0.0
+## Оружие: модель, в какой руке, какой набор анимаций оно задаёт (атаки разным оружием работают по-разному).
+const WEAPONS := {
+	"sword":        {"prop": "sword_knight",  "hand": "RightHand", "set": "melee1h"},
+	"sword_short":  {"prop": "sword_short",   "hand": "RightHand", "set": "melee1h"},
+	"saber":        {"prop": "saber",         "hand": "RightHand", "set": "melee1h"},
+	"axe2":         {"prop": "axe2",          "hand": "RightHand", "set": "melee2h"},
+	"crossbow":     {"prop": "crossbow",      "hand": "RightHand", "set": "crossbow"},
+	"bow":          {"prop": "bow",           "hand": "LeftHand",  "set": "bow"},
+	"shield_tower": {"prop": "shield_tower",  "hand": "LeftHand",  "set": ""},
+	"shield_rect":  {"prop": "shield_rect",   "hand": "LeftHand",  "set": ""},
+	"shield_sun":   {"prop": "shield_sun",    "hand": "LeftHand",  "set": ""},
+}
+
+## Наборы анимаций (клипы KayKit, перенесённые на скелет Hunyuan: scripts/retarget.gd).
+const ANIM_SETS := {
+	"unarmed":  {"idle": "Idle", "walk": "Walking_A", "run": "Running_A", "hit": "Hit_A", "die": "Death_A",
+				 "attacks": ["1H_Melee_Attack_Slice_Diagonal"]},
+	"melee1h":  {"idle": "Idle", "walk": "Walking_A", "run": "Running_A", "hit": "Hit_A", "die": "Death_A",
+				 "attacks": ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Stab"]},
+	"melee2h":  {"idle": "2H_Melee_Idle", "walk": "Walking_A", "run": "Running_A", "hit": "Hit_B", "die": "Death_B",
+				 "attacks": ["2H_Melee_Attack_Chop", "2H_Melee_Attack_Slice", "2H_Melee_Attack_Spin"]},
+	"crossbow": {"idle": "Idle", "walk": "Walking_A", "run": "Running_A", "hit": "Hit_A", "die": "Death_A",
+				 "attacks": ["1H_Ranged_Shoot"]},
+	"bow":      {"idle": "Idle", "walk": "Walking_A", "run": "Running_A", "hit": "Hit_A", "die": "Death_A",
+				 "attacks": ["2H_Ranged_Shoot"]},
+}
+
+## Внешний вид и снаряжение по умолчанию: файл модели, оружие в правой и левой руке.
+const LOOKS := {
+	"hero":    {"file": "hero_kael",      "main": "sword",       "off": "shield_tower"},
+	"footman": {"file": "erland_militia", "main": "sword_short", "off": "shield_rect"},
+	"archer":  {"file": "erland_archer",  "main": "crossbow",    "off": ""},
+	"raider":  {"file": "nomad_raider",   "main": "saber",       "off": "shield_sun"},
+	"rarcher": {"file": "nomad_archer",   "main": "bow",         "off": ""},
+	"rider":   {"file": "nomad_archer",   "main": "bow",         "off": ""},
+	"boss":    {"file": "nomad_khan",     "main": "axe2",        "off": ""},
+}
+
+var gear_nodes: Array = []
+var anim_set := "unarmed"
+var main_weapon := ""
+var off_weapon := ""
+static var hand_test := ""
+static var hand_test_l := ""
+const GRIP_R := Vector3(0, 0, -35)
+const GRIP_L := Vector3(0, -90, 0)
 
 
-func _proc(dt: float) -> void:
-	pt += dt
-	var m := model
-	if state == S.DEAD:
-		var f := clampf(dead_t / 0.45, 0.0, 1.0)
-		m.rotation.x = lerpf(0.0, -PI / 2.0, f)
-		m.position.y = lerpf(0.0, 0.22, f)
-		m.position.z = lerpf(0.0, -0.3, f)
-		return
-	if hit_t > 0.0:
-		hit_t -= dt
-	var rx := 0.0
-	var rz := 0.0
-	var py := sin(pt * 2.2) * 0.012
-	var pz := 0.0
-	if swing >= 0.0:
-		var f := clampf(swing / 0.38, 0.0, 1.0)
-		rx = 0.38 * sin(f * PI)
-		pz = 0.32 * sin(f * PI)
-	elif cur == a_run:
-		py = absf(sin(pt * 11.0)) * 0.10
-		rz = sin(pt * 5.5) * 0.07
-		rx = 0.10
-	if hit_t > 0.0:
-		rx -= 0.22
-	m.rotation.x = lerpf(m.rotation.x, rx, clampf(dt * 18.0, 0.0, 1.0))
-	m.rotation.z = lerpf(m.rotation.z, rz, clampf(dt * 14.0, 0.0, 1.0))
-	m.position.y = py
-	m.position.z = lerpf(m.position.z, pz, clampf(dt * 20.0, 0.0, 1.0))
-
-
-## Оружие и щиты — отдельные модели на костях рук (хват как у KayKit: те же смещения относительно handslot).
-const HAND_R := Transform3D(Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, -1)) * Basis(Vector3(1, 0, 0), deg_to_rad(-45.0)), Vector3(0, 0.0333, 0))
-const HAND_L := Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)), Vector3(0, 0.017, 0.07))
-
-
-static func _equip(m: Node, cfg: Dictionary) -> void:
-	var skel := m.find_child("Skeleton3D", true, false) as Skeleton3D
-	if skel == null:
-		return
-	for slot in [["weapon_r", "handslot.r", HAND_R], ["weapon_l", "handslot.l", HAND_L]]:
-		if not cfg.has(slot[0]):
+## Сменить оружие: меняются и модель в руке, и набор анимаций (атаки, простой, раны, смерть).
+func equip(main: String, off := "") -> void:
+	for n in gear_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	gear_nodes.clear()
+	main_weapon = main
+	off_weapon = off
+	var skel := model.find_child("Skeleton3D", true, false) as Skeleton3D
+	for w in [main, off]:
+		if w == "" or not WEAPONS.has(w):
 			continue
+		var wd: Dictionary = WEAPONS[w]
 		var att := BoneAttachment3D.new()
-		att.bone_name = slot[1]
+		att.bone_name = wd["hand"]
 		skel.add_child(att)
-		var prop := (load("res://assets/gen/props/%s.glb" % cfg[slot[0]]) as PackedScene).instantiate() as Node3D
-		prop.transform = slot[2]
+		var prop := (load("res://assets/gen/props/%s.glb" % wd["prop"]) as PackedScene).instantiate() as Node3D
+		prop.scale = Vector3.ONE * 100.0           # скелет Hunyuan в сантиметрах, корень скелета уменьшен в 100 раз
+		prop.transform = Transform3D(_grip(wd["hand"] == "RightHand"), Vector3.ZERO) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
 		att.add_child(prop)
+		gear_nodes.append(att)
+	var set_name := "unarmed"
+	if main != "" and WEAPONS.has(main):
+		set_name = WEAPONS[main]["set"]
+	if main == "bow" or (off == "bow"):
+		set_name = "bow"
+	anim_set = set_name
+	var s: Dictionary = ANIM_SETS[set_name]
+	a_idle = "kk/" + s["idle"]
+	a_run = "kk/" + s["run"]
+	a_hit = "kk/" + s["hit"]
+	a_die = "kk/" + s["die"]
+	a_attacks = []
+	for a in s["attacks"]:
+		a_attacks.append("kk/" + a)
+	cur = ""
+	play(a_idle)
+
+
+## Поворот предмета в кисти (клинок/щит относительно кости руки). Подбирается один раз под скелет Hunyuan.
+func _grip(right: bool) -> Basis:
+	var src := hand_test if right else hand_test_l
+	var e := Vector3(0, 0, 0)
+	if src != "":
+		var p := src.split(",")
+		e = Vector3(float(p[0]), float(p[1]), float(p[2]))
+	else:
+		e = GRIP_R if right else GRIP_L
+	return Basis.from_euler(Vector3(deg_to_rad(e.x), deg_to_rad(e.y), deg_to_rad(e.z)))
+
+
+func _equip_default() -> void:
+	var cfg: Dictionary = LOOKS[kind]
+	equip(cfg["main"], cfg["off"])
+
+
+## Портрет: одетая модель без анимаций.
+static func make_model(k: String) -> Node3D:
+	var cfg: Dictionary = LOOKS[k]
+	var m := (load("res://assets/hy/%s.glb" % cfg["file"]) as PackedScene).instantiate() as Node3D
+	return m

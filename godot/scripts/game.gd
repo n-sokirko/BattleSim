@@ -53,6 +53,10 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			shot_dir = a.substr(7)
+		elif a.begins_with("--handl="):
+			Unit.hand_test_l = a.substr(8)
+		elif a.begins_with("--hand="):
+			Unit.hand_test = a.substr(7)
 		elif a == "--noedge":
 			no_edge = true
 		elif a.begins_with("--zoom="):
