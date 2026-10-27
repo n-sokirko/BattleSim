@@ -129,11 +129,134 @@ def fix_weights(mesh, arm):
     print("WEIGHTED", len(mesh.data.vertices))
 
 
+def fit_handslots(mesh, arm):
+    """Точка хвата (handslot) ставится в центр настоящей кисти модели: среднее вершин, привязанных к кисти."""
+    vgs = {g.index: g.name for g in mesh.vertex_groups}
+    print("VG", len(vgs), list(vgs.values())[:5], "verts", len(mesh.data.vertices), "withgroups", sum(1 for v in mesh.data.vertices if v.groups))
+    centers = {}
+    from collections import Counter
+    cnt = Counter(vgs.get(max(v.groups, key=lambda g: g.weight).group) for v in mesh.data.vertices if v.groups)
+    print("TOP", dict(cnt))
+    for side in ("l", "r"):
+        cand = []
+        for v in mesh.data.vertices:
+            if not v.groups:
+                continue
+            top = max(v.groups, key=lambda g: g.weight)
+            nm = vgs.get(top.group, "")
+            if nm in (f"lowerarm.{side}", f"wrist.{side}", f"hand.{side}"):
+                cand.append(v.co.copy())
+        if cand:
+            far = max(abs(p.x) for p in cand)
+            pts = [p for p in cand if abs(p.x) > far - 0.11]       # кисть — крайние 11 см руки
+            centers[side] = sum(pts, Vector()) / len(pts)
+            print("HANDFIT", side, "arm verts", len(cand), "fist verts", len(pts), "far x", round(far, 3))
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    for side, c in centers.items():
+        eb = arm.data.edit_bones.get(f"handslot.{side}")
+        if eb is None:
+            continue
+        d = eb.tail - eb.head
+        eb.head = c
+        eb.tail = c + d
+        print("HANDSLOT", side, [round(x, 3) for x in c], "hand verts", len(pts))
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def arm_angles(mesh, arm):
+    """Угол опущенных рук у модели (от горизонтали, градусы → радианы): от плеча скелета до самой низкой наружной точки кисти."""
+    out = {}
+    cx = arm.matrix_world.translation.x
+    for side, sg in (("l", 1), ("r", -1)):
+        sh = arm.matrix_world @ arm.pose.bones[f"upperarm.{side}"].head
+        cand = [v.co for v in mesh.data.vertices if sg * (v.co.x - sh.x) > 0.10 and 0.30 < v.co.z < sh.z - 0.05]
+        if not cand:
+            out[side] = math.radians(70)
+            continue
+        zmin = min(c.z for c in cand)
+        low = [c for c in cand if c.z < zmin + 0.12]
+        h = sum(low, Vector()) / len(low)
+        ang = math.atan2(sh.z - h.z, abs(h.x - sh.x))
+        out[side] = max(math.radians(35), min(math.radians(85), ang))
+        print("ARMANGLE", side, round(math.degrees(out[side]), 1), "hand at", [round(x, 2) for x in h], "shoulder", [round(x, 2) for x in sh])
+    return out
+
+
+# высоты суставов для наших персонажей (рост 1.7): подгоняем скелет под них
+JOINT = dict(ankle=0.13, knee=0.50, hip=0.88, spine=0.97, spine_top=1.14, chest_top=1.34, shoulder=1.27, neck=1.36, top=1.64, sx=0.25, lx=0.19)
+
+
+def measure_arm(mesh, side):
+    """Длина опущенной руки (плечо → кисть) и угол от горизонтали по самой модели."""
+    sg = 1 if side == "l" else -1
+    S = Vector((sg * JOINT["sx"], 0, JOINT["shoulder"]))
+    cand = [v.co for v in mesh.data.vertices if sg * (v.co.x - S.x) > 0.08 and 0.25 < v.co.z < S.z - 0.08]
+    if not cand:
+        return 0.6, math.radians(70)
+    zmin = min(c.z for c in cand)
+    low = [c for c in cand if c.z < zmin + 0.10]
+    h = sum(low, Vector()) / len(low)
+    d = h - S
+    L = d.length
+    ang = max(math.radians(35), min(math.radians(88), math.atan2(S.z - h.z, abs(h.x - S.x))))
+    print("MEASURE", side, "arm length", round(L, 2), "angle", round(math.degrees(ang), 1), "hand", [round(x, 2) for x in h])
+    return L, ang
+
+
+def fit_skeleton(arm, arms):
+    """Кости по высотам нашего персонажа; руки — по длине руки модели. Направления костей те же, что у KayKit (сохраняются крены)."""
+    J = JOINT
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    E = arm.data.edit_bones
+
+    def put(name, head, tail):
+        b = E[name]
+        b.use_connect = False
+        b.head = Vector(head)
+        b.tail = Vector(tail)
+
+    put("hips", (0, 0, J["hip"] - 0.08), (0, 0, J["spine"]))
+    put("spine", (0, 0, J["spine"]), (0, 0, J["spine_top"]))
+    put("chest", (0, 0, J["spine_top"]), (0, 0, J["chest_top"]))
+    put("head", (0, 0, J["neck"]), (0, 0, J["top"]))
+    for side, sg in (("l", 1), ("r", -1)):
+        L, _ = arms[side]
+        x0 = J["sx"]
+        z = J["shoulder"]
+        a, b, c, d = 0.46 * L, 0.88 * L, 0.94 * L, 1.0 * L
+        put(f"upperarm.{side}", (sg * x0, 0, z), (sg * (x0 + a), 0, z))
+        put(f"lowerarm.{side}", (sg * (x0 + a), 0, z), (sg * (x0 + b), 0, z))
+        put(f"wrist.{side}", (sg * (x0 + b), 0, z), (sg * (x0 + c), 0, z))
+        put(f"hand.{side}", (sg * (x0 + c), 0, z), (sg * (x0 + d), 0, z))
+        hs = E[f"handslot.{side}"]
+        hs.use_connect = False
+        mid = Vector((sg * (x0 + (c + d) / 2), 0.0, z - 0.02))
+        hs.head = mid
+        hs.tail = mid + Vector((0, -0.11, 0))
+        lx = J["lx"]
+        put(f"upperleg.{side}", (sg * lx, 0, J["hip"]), (sg * lx, 0, J["knee"]))
+        put(f"lowerleg.{side}", (sg * lx, 0, J["knee"]), (sg * lx, 0, J["ankle"]))
+        put(f"foot.{side}", (sg * lx, 0.02, J["ankle"]), (sg * lx, -0.11, 0.04))
+        put(f"toes.{side}", (sg * lx, -0.11, 0.04), (sg * lx, -0.29, 0.04))
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
 def rig(name, render):
     arm, mesh = setup(name)
+    for a_ in bpy.data.actions:
+        a_.use_fake_user = True
+    if arm.animation_data:
+        arm.animation_data.action = None
+    for pb_ in arm.pose.bones:
+        pb_.matrix_basis = Matrix()
     cx, cy = torso_center(mesh)
     arm.scale = (SCALE, SCALE, SCALE)
-    arm.location = (cx, cy, 0)
+    for v in mesh.data.vertices:
+        v.co.x -= cx
+        v.co.y -= cy
+    arm.location = (0, 0, 0)
     bpy.context.view_layer.update()
     for b in arm.data.bones:
         b.use_deform = b.name in DEFORM
@@ -141,14 +264,20 @@ def rig(name, render):
     bpy.context.view_layer.objects.active = arm
     arm.select_set(True)
     bpy.ops.object.transform_apply(location=True, rotation=False, scale=True)   # масштаб скелета запечь в кости
+    arms = {s: measure_arm(mesh, s) for s in ('l', 'r')}
+    fit_skeleton(arm, arms)
     bpy.ops.object.mode_set(mode='POSE')
     # руки в A-позу: левая (x>0) вниз — вращение вокруг +Y по часовой от +X к -Z
     heads = {n: arm.pose.bones[n].head.copy() for n in ("upperarm.l", "upperarm.r")}
-    pose_matrix(arm, "upperarm.l", rot_about(arm.matrix_world @ heads["upperarm.l"], 'Y', ARM_DOWN))
-    pose_matrix(arm, "upperarm.r", rot_about(arm.matrix_world @ heads["upperarm.r"], 'Y', -ARM_DOWN))
+    ang = {s: arms[s][1] for s in arms}
+    pose_matrix(arm, "upperarm.l", rot_about(arm.matrix_world @ heads["upperarm.l"], "Y", ang["l"]))
+    pose_matrix(arm, "upperarm.r", rot_about(arm.matrix_world @ heads["upperarm.r"], "Y", -ang["r"]))
     bpy.context.view_layer.update()
     bpy.ops.pose.armature_apply(selected=False)
     bpy.ops.object.mode_set(mode='OBJECT')
+    for nme in ('upperarm.l','lowerarm.l','wrist.l','hand.l'):
+        bb = arm.data.bones[nme]
+        print('ABONE', nme, [round(x,2) for x in bb.head_local], [round(x,2) for x in bb.tail_local])
     # веса
     bpy.ops.object.select_all(action='DESELECT')
     mesh.select_set(True)
@@ -163,10 +292,10 @@ def rig(name, render):
     # возвращаем T-позу: поворачиваем руки назад в позе и запекаем в сетку
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='POSE')
-    for n, ang in (("upperarm.l", -ARM_DOWN), ("upperarm.r", ARM_DOWN)):
+    for n, ang_n in (("upperarm.l", -ang["l"]), ("upperarm.r", ang["r"])):
         pb = arm.pose.bones[n]
         h = arm.matrix_world @ pb.head
-        pose_matrix(arm, n, rot_about(h, 'Y', ang))
+        pose_matrix(arm, n, rot_about(h, 'Y', ang_n))
     bpy.context.view_layer.update()
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
@@ -182,6 +311,7 @@ def rig(name, render):
     md = mesh.modifiers.new("Armature", 'ARMATURE')
     md.object = arm
     mesh.parent = arm
+    fit_handslots(mesh, arm)
     # экспорт
     bpy.ops.object.select_all(action='DESELECT')
     arm.select_set(True)

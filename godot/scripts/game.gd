@@ -40,6 +40,7 @@ var toasts: Array = []
 
 # автопроверка из командной строки
 var shot_dir := ""
+var no_edge := false
 var auto := false
 var shots_done := 0
 var next_shot := 3.0
@@ -52,6 +53,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			shot_dir = a.substr(7)
+		elif a == "--noedge":
+			no_edge = true
 		elif a.begins_with("--zoom="):
 			cam_zoom = float(a.substr(7))
 		elif a == "--auto":
@@ -617,10 +620,10 @@ func _process(dt: float) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var mp := get_viewport().get_mouse_position()
 	var edge := 8.0
-	if Input.is_key_pressed(KEY_UP) or (mp.y < edge and mp.y >= 0 and DisplayServer.window_is_focused()): mv.z -= 1
-	if Input.is_key_pressed(KEY_DOWN) or (mp.y > vp.y - edge and DisplayServer.window_is_focused()): mv.z += 1
-	if Input.is_key_pressed(KEY_LEFT) or (mp.x < edge and mp.x >= 0 and DisplayServer.window_is_focused()): mv.x -= 1
-	if Input.is_key_pressed(KEY_RIGHT) or (mp.x > vp.x - edge and DisplayServer.window_is_focused()): mv.x += 1
+	if Input.is_key_pressed(KEY_UP) or (not no_edge and mp.y < edge and mp.y >= 0 and DisplayServer.window_is_focused()): mv.z -= 1
+	if Input.is_key_pressed(KEY_DOWN) or (not no_edge and mp.y > vp.y - edge and DisplayServer.window_is_focused()): mv.z += 1
+	if Input.is_key_pressed(KEY_LEFT) or (not no_edge and mp.x < edge and mp.x >= 0 and DisplayServer.window_is_focused()): mv.x -= 1
+	if Input.is_key_pressed(KEY_RIGHT) or (not no_edge and mp.x > vp.x - edge and DisplayServer.window_is_focused()): mv.x += 1
 	if mv != Vector3.ZERO:
 		var m := Basis(Vector3.UP, cam_yaw) * mv.normalized()
 		pivot.position += m * cam_zoom * 1.1 * dt
