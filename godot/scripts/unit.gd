@@ -464,7 +464,7 @@ func _proc(dt: float) -> void:
 
 
 ## Оружие и щиты — отдельные модели на костях рук (хват как у KayKit: те же смещения относительно handslot).
-const HAND_R := Transform3D(Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, -1)), Vector3(0, 0.0333, 0))
+const HAND_R := Transform3D(Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, -1)) * Basis(Vector3(1, 0, 0), deg_to_rad(-55.0)), Vector3(0, 0.0333, 0))
 const HAND_L := Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)), Vector3(0, 0.017, 0.156))
 
 

@@ -10,6 +10,7 @@ from mathutils import Vector
 SRC = r"O:\BattleSim\art\generated"
 OUT = r"O:\BattleSim\art\generated\static"
 TRIS = 22000
+TRIS_BY = {"hero_kael": 50000, "nomad_khan": 50000, "erland_militia": 34000, "erland_archer": 34000, "nomad_raider": 34000, "nomad_archer": 34000}
 HEIGHT = 1.7
 TEX = 1024
 
@@ -90,7 +91,7 @@ def process(name):
     tris = sum(len(p.vertices) - 2 for p in me.polygons)
     md = ob.modifiers.new("dec", 'DECIMATE')
     md.decimate_type = 'COLLAPSE'
-    md.ratio = min(1.0, TRIS / max(tris, 1))
+    md.ratio = min(1.0, TRIS_BY.get(name, TRIS) / max(tris, 1))
     md.use_collapse_triangulate = True
     bpy.ops.object.modifier_apply(modifier="dec")
     print("DECIMATED", name, tris, "->", sum(len(p.vertices) - 2 for p in ob.data.polygons))
