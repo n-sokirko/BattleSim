@@ -540,7 +540,7 @@ const MX_RIFLE := {"packs": ["rifle", "longbow"], "idle": "mx_rifle/idle", "run"
 
 const LOOKS := {
 	"hero":    {"file": "armed_kael",     "main": "sword",       "off": "shield_tower", "baked": true},
-	"footman": {"file": "erland_militia", "main": "sword_short", "off": "shield_rect", "mx": MX_SNS},
+	"footman": {"file": "erland_militia", "main": "sword", "off": "shield_rect", "mx": MX_SNS},
 	"archer":  {"file": "erland_archer",  "main": "crossbow",    "off": "", "mx": MX_RIFLE},
 	"raider":  {"file": "nomad_raider",   "main": "saber",       "off": "shield_sun", "mx": MX_SNS},
 	"rarcher": {"file": "nomad_archer",   "main": "bow",         "off": "", "mx": MX_BOW},
@@ -583,7 +583,11 @@ func equip(main: String, off := "") -> void:
 				sk *= (n as Node3D).scale.x
 			n = n.get_parent()
 		prop.scale = Vector3.ONE / maxf(sk, 0.0001)
-		prop.transform = Transform3D(_grip_for(w, wd["hand"] == "RightHand"), Vector3.ZERO) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
+		var goff := Vector3.ZERO
+		if use_mx_grip:
+			var o: Vector3 = test_off.get(w, GRIP_OFF.get(w, Vector3.ZERO))
+			goff = o / maxf(sk, 0.0001)
+		prop.transform = Transform3D(_grip_for(w, wd["hand"] == "RightHand"), goff) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
 		att.add_child(prop)
 		gear_nodes.append(att)
 	var set_name := "unarmed"
@@ -606,11 +610,16 @@ func equip(main: String, off := "") -> void:
 
 ## Хват под клипы Mixamo (подобран стендом scripts/grip_test.gd): поворот предмета в кости руки, градусы.
 const GRIPS_MX := {
-	"sword": Vector3(0, 0, 270), "sword_short": Vector3(0, 0, 270), "saber": Vector3(0, 0, 270),
+	"sword": Vector3(0, 90, 270), "sword_short": Vector3(0, 0, 270), "saber": Vector3(0, 0, 270),
 	"shield_rect": Vector3(0, 0, 90), "shield_tower": Vector3(0, 0, 90), "shield_sun": Vector3(0, 0, 90),
 	"bow": Vector3(0, 0, 0), "crossbow": Vector3(0, 0, 0), "axe2": Vector3(0, 0, 0),
 }
 var use_mx_grip := false
+## Смещение предмета в кисти (метры, оси кости руки): щит выносится вперёд от предплечья, чтобы рука не торчала сквозь него.
+const GRIP_OFF := {
+	"shield_rect": Vector3(0, 0, -0.11), "shield_tower": Vector3(0, 0, -0.11), "shield_sun": Vector3(0, 0, -0.11),
+}
+static var test_off := {}
 
 
 func _grip_for(w: String, right: bool) -> Basis:

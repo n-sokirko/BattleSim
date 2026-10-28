@@ -23,11 +23,8 @@ var face_vp := {}
 var portrait_kind := ""
 var lbl_name: Label
 var lbl_stats: Label
-var hp_bar: ColorRect
-var hp_back: ColorRect
-var hp_text: Label
-var xp_bar: ColorRect
-var xp_back: ColorRect
+var hp_gbar: GBar
+var xp_gbar: GBar
 var stat_rows := {}
 var lbl_level: Label
 var lbl_buff: Label
@@ -88,6 +85,41 @@ class CmdButton extends Button:
 		body.add_theme_color_override("font_color", Color(0.93, 0.89, 0.8))
 		vb.add_child(body)
 		return pc
+
+## Полоска из нарисованного набора: рамка, цветная заливка, «хвост» недавней потери и число по центру.
+class GBar extends Control:
+	var frame: Texture2D
+	var fill: Texture2D
+	var ratio := 1.0
+	var trail := 1.0
+	var text := ""
+	var tint := Color.WHITE
+	var font_size := 13
+	func _process(dt: float) -> void:
+		if trail > ratio:
+			trail = maxf(ratio, trail - dt * 0.35)
+		else:
+			trail = ratio
+		queue_redraw()
+	func _draw() -> void:
+		var pad := Vector2(size.y * 0.2, size.y * 0.24)
+		var inner := Rect2(pad, size - pad * 2.0)
+		if frame != null:
+			draw_texture_rect(frame, Rect2(Vector2.ZERO, size), false)
+		draw_rect(inner, Color(0.03, 0.02, 0.02, 0.95))
+		if trail > ratio + 0.001:
+			draw_rect(Rect2(inner.position, Vector2(inner.size.x * trail, inner.size.y)), Color(0.95, 0.85, 0.55, 0.75))
+		if ratio > 0.001 and fill != null:
+			var fw := inner.size.x * ratio
+			var src := Rect2(0, 0, fill.get_width() * ratio, fill.get_height())
+			draw_texture_rect_region(fill, Rect2(inner.position, Vector2(fw, inner.size.y)), src, tint)
+			draw_rect(Rect2(inner.position, Vector2(fw, inner.size.y * 0.35)), Color(1, 1, 1, 0.12))
+		if text != "":
+			var f := ThemeDB.fallback_font
+			var ts := f.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+			var pos := Vector2((size.x - ts.x) * 0.5, (size.y + ts.y * 0.62) * 0.5)
+			draw_string_outline(f, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 4, Color(0, 0, 0, 0.9))
+			draw_string(f, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1, 0.97, 0.88))
 
 class Mini extends Control:
 	var game
@@ -283,15 +315,14 @@ func _build_panel() -> void:
 	lbl_name.position = Vector2(6, 137)
 	lbl_name.size = Vector2(138, 20)
 	lbl_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hp_back = ColorRect.new(); hp_back.color = Color(0.02, 0.02, 0.02)
-	hp_back.position = Vector2(16, 160); hp_back.size = Vector2(118, 14)
-	pf.add_child(hp_back)
-	hp_bar = ColorRect.new(); hp_bar.color = Color(0.25, 0.8, 0.3)
-	hp_bar.position = Vector2(17, 161); hp_bar.size = Vector2(116, 12)
-	pf.add_child(hp_bar)
-	hp_text = _label(pf, "", 11)
-	hp_text.position = Vector2(16, 159); hp_text.size = Vector2(118, 16)
-	hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_gbar = GBar.new()
+	hp_gbar.frame = _g("bar_frame")
+	hp_gbar.fill = _g("bar_green")
+	hp_gbar.position = Vector2(10, 158)
+	hp_gbar.size = Vector2(130, 24)
+	hp_gbar.font_size = 13
+	hp_gbar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pf.add_child(hp_gbar)
 	# характеристики и группа
 	var cf := Panel.new()
 	cf.add_theme_stylebox_override("panel", _box("panel_small", 22))
@@ -313,18 +344,20 @@ func _build_panel() -> void:
 	lv_ic.position = Vector2(20, 118)
 	lbl_level = _label(cf, "", 17)
 	lbl_level.position = Vector2(54, 117)
-	xp_back = ColorRect.new(); xp_back.color = Color(0.02, 0.02, 0.02)
-	xp_back.position = Vector2(54, 144); xp_back.size = Vector2(190, 12)
-	cf.add_child(xp_back)
-	xp_bar = ColorRect.new(); xp_bar.color = Color(0.4, 0.75, 0.95)
-	xp_bar.position = Vector2(55, 145); xp_bar.size = Vector2(188, 10)
-	cf.add_child(xp_bar)
+	xp_gbar = GBar.new()
+	xp_gbar.frame = _g("bar_frame")
+	xp_gbar.fill = _g("bar_blue")
+	xp_gbar.position = Vector2(54, 142)
+	xp_gbar.size = Vector2(200, 18)
+	xp_gbar.font_size = 11
+	xp_gbar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cf.add_child(xp_gbar)
 	var xp_ic := _icon(cf, "xp", 18, Color(0.5, 0.8, 1.0))
 	xp_ic.position = Vector2(30, 141)
 	lbl_buff = _label(cf, "", 13, Color(0.6, 0.85, 0.7))
 	lbl_buff.position = Vector2(24, 154)
 	lbl_buff.size = Vector2(250, 18)
-	hero_only = [lv_ic, lbl_level, xp_back, xp_bar, xp_ic]
+	hero_only = [lv_ic, lbl_level, xp_gbar, xp_ic]
 	group_box = GridContainer.new()
 	group_box.columns = 6
 	group_box.position = Vector2(18, 16)
@@ -567,17 +600,21 @@ func refresh(dt: float) -> void:
 		if shown_kind != first.kind:
 			shown_kind = first.kind
 			portrait_rect.texture = _portrait(first.kind)
+		if hp_gbar.has_meta("uid") and hp_gbar.get_meta("uid") != first.get_instance_id():
+			hp_gbar.trail = clampf(first.hp / first.max_hp, 0.0, 1.0)
+		hp_gbar.set_meta("uid", first.get_instance_id())
 		lbl_name.text = first.title if single else "Выбрано: %d" % sel.size()
 		var ratio := clampf(first.hp / first.max_hp, 0.0, 1.0)
-		hp_bar.size.x = 116.0 * ratio
-		hp_bar.color = Color(0.25, 0.8, 0.3) if ratio > 0.5 else (Color(0.9, 0.7, 0.2) if ratio > 0.25 else Color(0.85, 0.25, 0.2))
-		hp_text.text = "%d / %d" % [first.hp, first.max_hp]
+		hp_gbar.ratio = ratio
+		hp_gbar.tint = Color(1, 1, 1) if ratio > 0.5 else (Color(1.5, 1.2, 0.35) if ratio > 0.25 else Color(1.7, 0.4, 0.35))
+		hp_gbar.text = "%d / %d" % [first.hp, first.max_hp]
 	else:
 		portrait_rect.texture = null
 		shown_kind = ""
 		lbl_name.text = "Никто не выбран"
-		hp_bar.size.x = 0
-		hp_text.text = ""
+		hp_gbar.ratio = 0.0
+		hp_gbar.trail = 0.0
+		hp_gbar.text = ""
 	# характеристики или состав группы
 	group_box.visible = sel.size() > 1
 	lbl_stats.visible = sel.size() <= 1
@@ -598,7 +635,9 @@ func refresh(dt: float) -> void:
 			var nxt: float = game.XP_AT[first.level] if first.level < game.XP_AT.size() else first.xp
 			var prev: float = game.XP_AT[first.level - 1]
 			lbl_level.text = "Уровень %d      %d / %d" % [first.level, first.xp, nxt]
-			xp_bar.size.x = 188.0 * clampf((first.xp - prev) / maxf(nxt - prev, 1.0), 0.0, 1.0)
+			xp_gbar.ratio = clampf((first.xp - prev) / maxf(nxt - prev, 1.0), 0.0, 1.0)
+			xp_gbar.trail = xp_gbar.ratio
+			xp_gbar.text = "%d / %d" % [first.xp, nxt]
 		var buffs := ""
 		if first.buff_t > 0.0: buffs += "Клич: +25% урона   "
 		if first.guard_t > 0.0: buffs += "Стена: −30% урона"
