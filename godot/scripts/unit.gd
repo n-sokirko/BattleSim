@@ -104,15 +104,28 @@ func setup(k: String, t: int, g) -> void:
 	model.scale = Vector3.ONE * d["scale"]
 	radius = 0.55 * d["scale"]
 	add_child(model)
-	# проигрыватель анимаций: клипы KayKit, перенесённые на этот скелет (res://assets/hy/anims_<имя>.res)
-	anim = AnimationPlayer.new()
-	model.add_child(anim)
-	var al := load("res://assets/hy/anims_%s.res" % cfg["file"]) as AnimationLibrary
-	for n in al.get_animation_list():
-		if n in ["Idle", "2H_Melee_Idle", "Walking_A", "Running_A", "Running_B"]:
-			al.get_animation(n).loop_mode = Animation.LOOP_LINEAR
-	anim.add_animation_library("kk", al)
-	_equip_default()
+	if cfg.get("baked", false):
+		# оружие слито с моделью, клипы Hunyuan лежат в самом GLB
+		anim = model.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		for n in ["idle", "walk", "run"]:
+			if anim.has_animation(n):
+				anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+		# удары мечом: клипы KayKit, перенесённые на этот скелет (scripts/retarget_a.gd); движение, урон и смерть — Hunyuan
+		anim.add_animation_library("kk", load("res://assets/hy/anims_%s.res" % cfg["file"]) as AnimationLibrary)
+		equip(cfg["main"], "")
+		a_idle = "idle"; a_run = "run"; a_hit = "hit"; a_die = "death"
+		cur = ""
+		play(a_idle)
+	else:
+		# проигрыватель анимаций: клипы KayKit, перенесённые на этот скелет (res://assets/hy/anims_<имя>.res)
+		anim = AnimationPlayer.new()
+		model.add_child(anim)
+		var al := load("res://assets/hy/anims_%s.res" % cfg["file"]) as AnimationLibrary
+		for n in al.get_animation_list():
+			if n in ["Idle", "2H_Melee_Idle", "Walking_A", "Running_A", "Running_B"]:
+				al.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+		anim.add_animation_library("kk", al)
+		_equip_default()
 	# кольцо под ногами: цвет армии
 	ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
@@ -413,7 +426,7 @@ const ANIM_SETS := {
 
 ## Внешний вид и снаряжение по умолчанию: файл модели, оружие в правой и левой руке.
 const LOOKS := {
-	"hero":    {"file": "hero_kael",      "main": "sword",       "off": "shield_tower"},
+	"hero":    {"file": "armed_kael",     "main": "sword",       "off": "shield_tower", "baked": true},
 	"footman": {"file": "erland_militia", "main": "sword_short", "off": "shield_rect"},
 	"archer":  {"file": "erland_archer",  "main": "crossbow",    "off": ""},
 	"raider":  {"file": "nomad_raider",   "main": "saber",       "off": "shield_sun"},
@@ -449,7 +462,14 @@ func equip(main: String, off := "") -> void:
 		att.bone_name = wd["hand"]
 		skel.add_child(att)
 		var prop := (load("res://assets/gen/props/%s.glb" % wd["prop"]) as PackedScene).instantiate() as Node3D
-		prop.scale = Vector3.ONE * 100.0           # скелет Hunyuan в сантиметрах, корень скелета уменьшен в 100 раз
+		# скелеты Hunyuan: сантиметры с корнем ×0.01; модели с запечённым оружием — уже метры. Масштаб предмета считаем по скелету.
+		var sk := 1.0
+		var n: Node = skel
+		while n != null and n != model:
+			if n is Node3D:
+				sk *= (n as Node3D).scale.x
+			n = n.get_parent()
+		prop.scale = Vector3.ONE / maxf(sk, 0.0001)
 		prop.transform = Transform3D(_grip(wd["hand"] == "RightHand"), Vector3.ZERO) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
 		att.add_child(prop)
 		gear_nodes.append(att)

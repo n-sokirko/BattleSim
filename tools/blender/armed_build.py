@@ -17,7 +17,7 @@ def import_fbx(path):
     return [o for o in bpy.data.objects if o not in before]
 
 
-def pin_blade(arm, mesh, bone="RightHand", ahead=0.12, side=0.1):
+def pin_blade(arm, mesh, bone="RightHand", ahead=0.12, side=0.1, cut=True):
     """Клинок и всё, что выступает вперёд от кисти, целиком привязываем к кисти: авто-веса гнут тонкий клинок зигзагом."""
     hand = arm.matrix_world @ arm.data.bones[bone].head_local
     mw = mesh.matrix_world
@@ -37,6 +37,19 @@ def pin_blade(arm, mesh, bone="RightHand", ahead=0.12, side=0.1):
         d = ((p - hand) - axis * t).length
         if d < (0.10 if t < 0.2 else 0.05) and p.y < hand.y + 0.02:
             ids.append(i)
+    if cut:
+        # клинок и гарда удаляются совсем: в игре меч ставится отдельной моделью, в кисти остаётся кулак и рукоять
+        import bmesh
+        kill = [i for i, p in world.items()
+                if p.y < hand.y - 0.10 and hand.x - 0.08 < p.x < hand.x + 0.045 and 0.25 < p.z < hand.z + 0.02]
+        bm = bmesh.new()
+        bm.from_mesh(mesh.data)
+        bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in kill], context='VERTS')
+        bm.to_mesh(mesh.data)
+        bm.free()
+        print("CUT", len(kill), "verts")
+        return
     for g in mesh.vertex_groups:
         if g.name != bone:
             g.remove(ids)
