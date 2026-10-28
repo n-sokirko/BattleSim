@@ -301,7 +301,7 @@ func _tick_logic(dt: float) -> void:
 		if cur != "hit":
 			play(a_idle)
 		return
-	if cur == "hit" and anim != null and not anim.is_playing():
+	if (cur == "hit" or cur == "atk") and anim != null and not anim.is_playing():
 		cur = ""
 	# атака в разгаре: ждём момента удара
 	if swing >= 0.0:
@@ -382,7 +382,7 @@ func _strike() -> void:
 		if heavy:
 			m *= 1.4
 		target.hurt(m * randf_range(0.85, 1.15), self, 70.0 if heavy else 14.0)
-	cur = ""
+	# cur остаётся "atk": клип удара доигрывается до конца, а не обрывается стойкой
 
 
 func _dist(o: Unit) -> float:

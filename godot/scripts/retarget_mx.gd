@@ -125,8 +125,8 @@ func _do(pack: String, ch: String, only: PackedStringArray) -> void:
 			var hp := ska.global_transform * ska.get_bone_global_pose(hips_a).origin
 			if f == 0:
 				hip0 = hp
-			# смещение бёдер в мире: по высоте как есть, по горизонтали ослаблено, чтобы клип не уезжал
-			var dw := Vector3((hp.x - hip0.x) * 0.35, hp.y - a_hip_w.y, (hp.z - hip0.z) * 0.35) * kscale
+			# смещение бёдер: только по высоте; горизонтальный root motion убран, иначе юнит уезжает и телепортируется в конце цикла
+			var dw := Vector3(0.0, hp.y - a_hip_w.y, 0.0) * kscale
 			var dl := skb.global_transform.basis.inverse() * dw
 			out.position_track_insert_key(pos_track, time, skb.get_bone_rest(hips_b).origin + dl)
 		out.loop_mode = Animation.LOOP_NONE
