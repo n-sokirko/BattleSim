@@ -33,7 +33,13 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/hy/anims_%s.res" % ch):
 		ap.add_animation_library("kk", load("res://assets/hy/anims_%s.res" % ch))
 	var vp := get_viewport()
-	var sheet := Image.create(300 * frames.size(), 360 * clips.size(), false, Image.FORMAT_RGBA8)
+	var tw := 300
+	var th := 360
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--tile="):
+			tw = int(a.substr(7))
+			th = int(tw * 1.2)
+	var sheet := Image.create(tw * frames.size(), th * clips.size(), false, Image.FORMAT_RGBA8)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	for ci in clips.size():
@@ -50,7 +56,7 @@ func _ready() -> void:
 			var sx := img.get_width() / 3
 			img.convert(Image.FORMAT_RGBA8)
 			var crop := img.get_region(Rect2i(sx, 0, sx, img.get_height()))
-			crop.resize(300, 360)
-			sheet.blit_rect(crop, Rect2i(0, 0, 300, 360), Vector2i(fi * 300, ci * 360))
+			crop.resize(tw, th)
+			sheet.blit_rect(crop, Rect2i(0, 0, tw, th), Vector2i(fi * tw, ci * th))
 	sheet.save_png("O:/BattleSim/art/previews/clips_%s.png" % (ch + "_" + out_tag))
 	get_tree().quit()

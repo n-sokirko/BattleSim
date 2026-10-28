@@ -13,8 +13,9 @@ HEIGHT = 1.7
 FILES = {
     "hero_kael": "d1d51daa", "erland_militia": "f4cb0697", "erland_archer": "d21b5174",
     "nomad_raider": "0fc9bad7", "nomad_archer": "066597b9", "nomad_khan": "1c8f35e5",
+    "armed_kael": "54c25ab6", "armed_militia": "222ed9ec",
 }
-TRIS = {"hero_kael": 40000, "nomad_khan": 40000}
+TRIS = {"hero_kael": 40000, "nomad_khan": 40000, "armed_kael": 40000}
 VOXEL = 0.0065
 TEX = 2048
 
