@@ -359,6 +359,8 @@ func _tick_logic(dt: float) -> void:
 		else:
 			state = S.MOVE
 			_walk_to(goal, dt, 0.5)
+			if walk_end:
+				has_goal = false; attack_move = false
 			return
 	state = S.IDLE
 	if cur != "hit" and cur != "atk":
@@ -398,13 +400,42 @@ func _face(p: Vector3, dt: float) -> void:
 	rotation.y = lerp_angle(rotation.y, a, clampf(dt * 12.0, 0.0, 1.0))
 
 
+var path_pts := PackedVector3Array()
+var path_i := 0
+var path_goal := Vector3(1e9, 0.0, 1e9)
+var path_t := 0.0
+var walk_end := false     # дошёл до последней доступной точки (цель за препятствием)
+
+
+## Ближайшая точка пути к p: путь пересчитывается при смене цели и раз в полсекунды.
+func _steer_point(p: Vector3, dt: float) -> Vector3:
+	path_t -= dt
+	if path_t <= 0.0 or Vector2(p.x - path_goal.x, p.z - path_goal.z).length() > 1.5:
+		path_t = randf_range(0.4, 0.7)
+		path_goal = p
+		path_pts = game.nav.find(global_position, p)
+		path_i = 0
+	while path_i < path_pts.size() - 1 and Vector2(path_pts[path_i].x - global_position.x, path_pts[path_i].z - global_position.z).length() < 0.8:
+		path_i += 1
+	return path_pts[path_i] if path_i < path_pts.size() else p
+
+
 func _walk_to(p: Vector3, dt: float, stop: float) -> void:
+	walk_end = false
 	var dir := Vector3(p.x - global_position.x, 0.0, p.z - global_position.z)
 	var dist := dir.length()
 	if dist <= stop:
 		play(a_idle)
 		return
 	dir /= dist
+	var sp := _steer_point(p, dt)
+	var to_sp := Vector3(sp.x - global_position.x, 0.0, sp.z - global_position.z)
+	if to_sp.length() > 0.001:
+		dir = to_sp.normalized()
+		if path_i >= path_pts.size() - 1 and to_sp.length() < 0.6:
+			walk_end = true
+			play(a_idle)
+			return
 	# расталкиваемся с соседями
 	var push := Vector3.ZERO
 	for o in game.units:
@@ -419,7 +450,25 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 	var v := (dir + push).limit_length(1.0) * speed
 	if game.terrain.is_deep(global_position.x, global_position.z):
 		v *= 0.6            # глубокая вода замедляет, брод — нет
-	global_position += v * dt
+	var old := global_position
+	var np := old + v * dt
+	if game.nav.is_blocked(np.x, np.z) and not game.nav.is_blocked(old.x, old.z):
+		# упёрся в препятствие: скользим вдоль него или стоим
+		var sx := Vector3(np.x, old.y, old.z)
+		var sz := Vector3(old.x, old.y, np.z)
+		if not game.nav.is_blocked(sx.x, sx.z):
+			np = sx
+		elif not game.nav.is_blocked(sz.x, sz.z):
+			np = sz
+		else:
+			np = old
+	# в гору медленнее, под гору чуть быстрее
+	var step := Vector2(np.x - old.x, np.z - old.z).length()
+	if step > 0.0001:
+		var grade: float = (game.terrain.height(np.x, np.z) - game.terrain.height(old.x, old.z)) / step
+		var k := clampf(1.0 - grade * 0.9, 0.55, 1.2)
+		np = old + (np - old) * k
+	global_position = np
 	global_position.y = game.terrain.height(global_position.x, global_position.z)
 	_face(global_position + v, dt)
 	play(a_run, false, clampf(speed / 4.6, 0.8, 1.4))

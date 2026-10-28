@@ -17,6 +17,7 @@ var flats: Array = []        # [Vector2 центр, радиус, высота]
 var roads: Array = []        # [Vector2 a, Vector2 b]
 var grid_n := 0
 var heights := PackedFloat32Array()
+var fog: Fog
 
 
 func setup(f: float, poi_list: Array, road_list: Array) -> void:
@@ -196,12 +197,15 @@ func build_nodes(parent: Node3D) -> void:
 	nt.color_ramp = grad
 	nt.seamless = true
 	nt.width = 512; nt.height = 512
-	var gm := StandardMaterial3D.new()
-	gm.vertex_color_use_as_albedo = true
-	gm.vertex_color_is_srgb = true
-	gm.albedo_texture = nt
-	gm.roughness = 1.0
-	ground.material_override = gm
+	if fog != null:
+		ground.material_override = fog.ground_material(nt)
+	else:
+		var gm := StandardMaterial3D.new()
+		gm.vertex_color_use_as_albedo = true
+		gm.vertex_color_is_srgb = true
+		gm.albedo_texture = nt
+		gm.roughness = 1.0
+		ground.material_override = gm
 	parent.add_child(ground)
 	# вода
 	var water := MeshInstance3D.new()
@@ -209,12 +213,15 @@ func build_nodes(parent: Node3D) -> void:
 	pm.size = Vector2(extent * 2.0, extent * 2.0)
 	water.mesh = pm
 	water.position.y = WATER_Y
-	var wm := StandardMaterial3D.new()
-	wm.albedo_color = Color(0.16, 0.38, 0.5, 0.68)
-	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	wm.roughness = 0.06
-	wm.metallic = 0.25
-	wm.cull_mode = BaseMaterial3D.CULL_DISABLED
-	water.material_override = wm
+	if fog != null:
+		water.material_override = fog.water_material()
+	else:
+		var wm := StandardMaterial3D.new()
+		wm.albedo_color = Color(0.16, 0.38, 0.5, 0.68)
+		wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wm.roughness = 0.06
+		wm.metallic = 0.25
+		wm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		water.material_override = wm
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(water)

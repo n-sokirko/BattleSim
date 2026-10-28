@@ -74,10 +74,10 @@ class Mini extends Control:
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.16, 0.22, 0.1))
 		for c in game.chests:
-			if not c["opened"]:
+			if not c["opened"] and game.fog.explored(c["pos"]):
 				draw_rect(Rect2(_pt(c["pos"].x, c["pos"].z) - Vector2(3, 3), Vector2(6, 6)), Color(1, 0.85, 0.3))
 		for c in game.camps:
-			if not c["cleared"]:
+			if not c["cleared"] and game.fog.explored(c["pos"]):
 				var col := Color(1, 0.25, 0.2) if c["awake"] else Color(0.75, 0.2, 0.18)
 				draw_circle(_pt(c["pos"].x, c["pos"].z), 6.0 if c["boss"] else 4.5, col)
 		for u in game.units:
@@ -86,7 +86,7 @@ class Mini extends Control:
 			var p := _pt(u.global_position.x, u.global_position.z)
 			if u.team == 0:
 				draw_rect(Rect2(p - Vector2(1.5, 1.5), Vector2(3, 3)), Color(0.45, 0.75, 1.0) if not u.is_hero else Color(1, 1, 1))
-			elif not u.asleep:
+			elif not u.asleep and u.visible:
 				draw_rect(Rect2(p - Vector2(1.5, 1.5), Vector2(3, 3)), Color(1, 0.4, 0.3))
 		# куда смотрит камера
 		var cp: Vector2 = _pt(game.pivot.position.x, game.pivot.position.z)

@@ -73,6 +73,7 @@ func _ready() -> void:
 	_build_world()
 	_build_party()
 	_build_hud()
+	fog.update(0.0, true)
 	_toast("Каэл со своим отрядом. ПКМ — идти и бить. Q W E R — способности. Лагеря спят, пока не подойдёшь.", 8.0)
 
 
@@ -108,6 +109,7 @@ func _build_world() -> void:
 	# земля, река, дороги
 	terrain.build_nodes(self)
 	_scatter()
+	nav.build(terrain, FIELD)
 	# камера
 	pivot = Node3D.new()
 	add_child(pivot)
@@ -142,11 +144,13 @@ func _scatter() -> void:
 			var r := sqrt(rng.randf()) * 16.0
 			var p := w + Vector3(cos(a) * r, 0, sin(a) * r)
 			if _prop_ok(p, 13.0, 0.18):
-				_put(trees[rng.randi() % trees.size()], p, rng.randf_range(1.0, 1.7), rng)
+				var ts := rng.randf_range(1.0, 1.7)
+				_put(trees[rng.randi() % trees.size()], p, ts, rng, 0.3 * ts)
 	for i in 50:
 		var p1 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		if _prop_ok(p1, 14.0, 0.2):
-			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, rng.randf_range(1.0, 1.6), rng)
+			var ts1 := rng.randf_range(1.0, 1.6)
+			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, ts1, rng, 0.3 * ts1)
 	for i in 140:
 		var p2 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		if _prop_ok(p2, 8.0, 0.25):
@@ -156,13 +160,13 @@ func _scatter() -> void:
 		var p3 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		var sl := terrain.slope(p3.x, p3.z)
 		if _prop_ok(p3, 9.0, 1.0) and (sl > 0.09 or rng.randf() < 0.18):
-			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6) * (1.0 + sl * 3.0), rng)
+			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6) * (1.0 + sl * 3.0), rng, -1.0)
 	# скалы по краям карты
 	for i in 90:
 		var e := rng.randf_range(0.9, 1.15) * FIELD
 		var t := rng.randf_range(-1.15, 1.15) * FIELD
 		var pr := Vector3(e, 0, t) if i % 4 == 0 else (Vector3(-e, 0, t) if i % 4 == 1 else (Vector3(t, 0, e) if i % 4 == 2 else Vector3(t, 0, -e)))
-		_put(rocks[rng.randi() % rocks.size()], pr, rng.randf_range(3.0, 7.0), rng)
+		_put(rocks[rng.randi() % rocks.size()], pr, rng.randf_range(3.0, 7.0), rng, -1.0)
 	# берег реки: кусты, камыш и трава
 	for i in 150:
 		var x := rng.randf_range(-FIELD, FIELD)
@@ -194,7 +198,22 @@ func ground(p: Vector3) -> Vector3:
 
 
 var terrain: Terrain
+var nav: Nav
+var fog: Fog
 var pois: Array = []
+
+
+## Радиус непроходимой части предмета по его габаритам (деревья — только ствол).
+func _footprint(n: Node3D) -> float:
+	var box := AABB()
+	var first := true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var b: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	if first:
+		return 0.5
+	return clampf(0.38 * maxf(box.size.x, box.size.z), 0.4, 4.0)
 
 
 ## Ландшафт строится до лагерей: ему нужны поляны под лагеря, сундуки и дороги между ними.
@@ -214,6 +233,10 @@ func _make_terrain() -> void:
 	var mid := Vector3(0, 0, -22)
 	var roads: Array = [[start, ford], [ford, mid], [mid, cp[0]], [mid, cp[1]], [mid, cp[2]], [cp[1], cp[3]], [cp[3], cp[4]], [cp[2], cp[4]]]
 	terrain.setup(FIELD, pl, roads)
+	nav = Nav.new()
+	fog = Fog.new()
+	fog.setup(self, terrain)
+	terrain.fog = fog
 
 
 func _near_poi(p: Vector3, r: float) -> bool:
@@ -288,11 +311,13 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 	fire.light_color = Color(1.0, 0.6, 0.25); fire.light_energy = 2.2; fire.omni_range = 9.0
 	fire.position = pos + Vector3(0, 1.2, 0)
 	add_child(fire)
+	fog.register(fire, pos)
 	var ember := MeshInstance3D.new(); var sm := SphereMesh.new(); sm.radius = 0.35; sm.height = 0.6
 	ember.mesh = sm; ember.position = pos + Vector3(0, 0.3, 0)
 	var em := StandardMaterial3D.new(); em.albedo_color = Color(1, 0.5, 0.15); em.emission_enabled = true; em.emission = Color(1, 0.45, 0.1); em.emission_energy_multiplier = 3.0
 	ember.material_override = em
 	add_child(ember)
+	fog.register(ember, pos)
 	var S := 4.2
 	var ring := ["tent", "crate_A_big", "weaponrack", "barrel", "tent", "sack", "crate_B_big", "wheelbarrow"]
 	var n := 8 if is_boss else 5
@@ -300,7 +325,7 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 		var a := i * (TAU / n) + 0.4
 		var rr := 8.5 if ring[i % ring.size()] == "tent" else 6.5
 		_hex(ring[i % ring.size()], pos + Vector3(cos(a) * rr, 0, sin(a) * rr), S, -a + PI / 2)
-	_hex("flag_red", pos + Vector3(2.8, 0, -2.8), S * 1.4)
+	_hex("flag_red", pos + Vector3(2.8, 0, -2.8), S * 1.4, 0.0, false)
 	if is_boss:
 		_hex("building_tower_A_red", pos + Vector3(-11, 0, 4), 3.2, 0.6)
 		_hex("fence_wood_straight", pos + Vector3(0, 0, 13), 3.0)
@@ -333,6 +358,8 @@ func nearest_enemy(u: Unit, r: float) -> Unit:
 	var bd := r
 	for o in units:
 		if o.team == u.team or o.state == Unit.S.DEAD:
+			continue
+		if u.team == 0 and not fog.seen(o.global_position):
 			continue
 		var d := u._dist(o)
 		if d < bd:
@@ -493,7 +520,7 @@ func _unit_at(pos: Vector2, team: int) -> Unit:
 	var best: Unit = null
 	var bd := 1.6
 	for u in units:
-		if u.team != team or u.state == Unit.S.DEAD:
+		if u.team != team or u.state == Unit.S.DEAD or not u.visible:
 			continue
 		var d := Vector2(u.global_position.x - g.x, u.global_position.z - g.z).length()
 		if d < bd + u.radius * 0.5:
@@ -701,6 +728,7 @@ func _process(dt: float) -> void:
 		_camps_tick(dt)
 		_projectiles_tick(dt)
 		_chests_tick()
+	fog.update(dt)
 	_update_hud(dt)
 	if not auto:
 		_update_cursor(mp)
@@ -902,19 +930,26 @@ func _scenes(names: Array) -> Array:
 	return out
 
 
-func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator) -> Node3D:
+## block: радиус непроходимого круга (0 — проходимо, -1 — по габаритам предмета).
+func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator, block := 0.0) -> Node3D:
 	var n := ps.instantiate() as Node3D
 	n.position = ground(p)
 	n.rotation.y = rng.randf() * TAU
 	n.scale = Vector3.ONE * s
 	add_child(n)
+	fog.register(n, n.position)
+	if block != 0.0:
+		nav.add_circle(n.position, block if block > 0.0 else _footprint(n))
 	return n
 
 
-func _hex(name: String, p: Vector3, s: float, yaw := 0.0) -> Node3D:
+func _hex(name: String, p: Vector3, s: float, yaw := 0.0, block := true) -> Node3D:
 	var n := (load("res://assets/hex/%s.gltf" % name) as PackedScene).instantiate() as Node3D
 	n.position = ground(p)
 	n.rotation.y = yaw
 	n.scale = Vector3.ONE * s
 	add_child(n)
+	fog.register(n, n.position)
+	if block:
+		nav.add_circle(n.position, _footprint(n))
 	return n
