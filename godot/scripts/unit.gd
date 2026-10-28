@@ -59,6 +59,7 @@ var selected := false
 var anim: AnimationPlayer
 var model: Node3D
 var ring: MeshInstance3D
+var hp_trail := 1.0
 var bar: MeshInstance3D
 var cur := ""
 var swing := -1.0
@@ -79,15 +80,35 @@ static func load_shared() -> void:
 	bar_shader.code = """shader_type spatial;
 render_mode unshaded, depth_draw_never, cull_disabled;
 uniform float ratio = 1.0;
+uniform float trail = 1.0;
+uniform float aspect = 7.0;
+uniform float foe = 0.0;
 uniform vec4 col : source_color = vec4(0.3, 0.8, 0.3, 1.0);
 void vertex() {
 	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
 }
 void fragment() {
-	float f = step(UV.x, ratio);
-	vec3 c = mix(vec3(0.07, 0.07, 0.08), col.rgb, f);
-	if (UV.y < 0.15 || UV.y > 0.85 || UV.x < 0.015 || UV.x > 0.985) c = vec3(0.0);
-	ALBEDO = c;
+	vec2 p = (UV - 0.5) * vec2(aspect, 1.0);
+	float r = 0.3;
+	vec2 q = abs(p) - (vec2(aspect * 0.5, 0.5) - vec2(r));
+	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+	if (d > 0.0) discard;
+	vec3 inner = vec3(0.05, 0.04, 0.04);
+	if (UV.x < trail) inner = vec3(0.75, 0.62, 0.35);
+	if (UV.x < ratio) {
+		vec3 c = mix(vec3(0.86, 0.16, 0.14), vec3(0.95, 0.75, 0.15), smoothstep(0.2, 0.42, ratio));
+		c = mix(c, vec3(0.28, 0.78, 0.25), smoothstep(0.5, 0.72, ratio));
+		if (foe > 0.5) c = vec3(0.82, 0.2, 0.17);
+		inner = c * mix(0.95, 0.55, UV.y);
+		inner += vec3(0.07) * smoothstep(0.35, 0.15, UV.y);
+	}
+	float tick = step(abs(fract(UV.x * 4.0 + 0.0) - 0.0), 0.012) + step(0.988, fract(UV.x * 4.0));
+	if (UV.x > 0.02 && UV.x < 0.98) inner *= 1.0 - 0.45 * clamp(tick, 0.0, 1.0);
+	vec3 bronze = mix(vec3(0.75, 0.55, 0.25), vec3(0.3, 0.2, 0.08), UV.y);
+	vec3 c2 = inner;
+	if (d > -0.16) c2 = bronze;
+	if (d > -0.035) c2 = vec3(0.05, 0.03, 0.02);
+	ALBEDO = pow(c2, vec3(2.2));
 }
 """
 
@@ -154,12 +175,14 @@ func setup(k: String, t: int, g) -> void:
 	# полоска здоровья
 	bar = MeshInstance3D.new()
 	var q := QuadMesh.new()
-	q.size = Vector2(1.5 if (is_hero or is_boss) else 1.1, 0.16)
+	q.size = Vector2(1.6 if (is_hero or is_boss) else 1.2, 0.2)
 	bar.mesh = q
 	bar.position.y = 1.95 * d["scale"] + 0.2
 	var sm := ShaderMaterial.new()
 	sm.shader = bar_shader
 	sm.set_shader_parameter("col", Color(0.3, 0.85, 0.35) if team == 0 else Color(0.9, 0.3, 0.25))
+	sm.set_shader_parameter("aspect", q.size.x / q.size.y)
+	sm.set_shader_parameter("foe", 0.0 if team == 0 else 1.0)
 	bar.material_override = sm
 	add_child(bar)
 	home = position
@@ -288,7 +311,10 @@ func _tick_logic(dt: float) -> void:
 	if taunt_t > 0.0: taunt_t -= dt
 	if buff_t > 0.0: buff_t -= dt
 	if guard_t > 0.0: guard_t -= dt
-	(bar.material_override as ShaderMaterial).set_shader_parameter("ratio", clampf(hp / max_hp, 0.0, 1.0))
+	var hpr := clampf(hp / max_hp, 0.0, 1.0)
+	hp_trail = maxf(hpr, hp_trail - dt * 0.4)
+	(bar.material_override as ShaderMaterial).set_shader_parameter("ratio", hpr)
+	(bar.material_override as ShaderMaterial).set_shader_parameter("trail", hp_trail)
 	poise_t += dt
 	combo_t += dt
 	if combo_t > 3.5:
@@ -610,7 +636,7 @@ func equip(main: String, off := "") -> void:
 
 ## Хват под клипы Mixamo (подобран стендом scripts/grip_test.gd): поворот предмета в кости руки, градусы.
 const GRIPS_MX := {
-	"sword": Vector3(0, 90, 270), "sword_short": Vector3(0, 0, 270), "saber": Vector3(0, 0, 270),
+	"sword": Vector3(0, 90, 0), "sword_short": Vector3(0, 0, 270), "saber": Vector3(0, 0, 270),
 	"shield_rect": Vector3(0, 0, 90), "shield_tower": Vector3(0, 0, 90), "shield_sun": Vector3(0, 0, 90),
 	"bow": Vector3(0, 0, 0), "crossbow": Vector3(0, 0, 0), "axe2": Vector3(0, 0, 0),
 }
@@ -620,11 +646,12 @@ const GRIP_OFF := {
 	"shield_rect": Vector3(0, 0, -0.11), "shield_tower": Vector3(0, 0, -0.11), "shield_sun": Vector3(0, 0, -0.11),
 }
 static var test_off := {}
+static var test_grip := {}
 
 
 func _grip_for(w: String, right: bool) -> Basis:
-	if use_mx_grip and GRIPS_MX.has(w):
-		var e: Vector3 = GRIPS_MX[w]
+	if use_mx_grip and (GRIPS_MX.has(w) or test_grip.has(w)):
+		var e: Vector3 = test_grip.get(w, GRIPS_MX.get(w, Vector3.ZERO))
 		return Basis.from_euler(Vector3(deg_to_rad(e.x), deg_to_rad(e.y), deg_to_rad(e.z)))
 	return _grip(right)
 

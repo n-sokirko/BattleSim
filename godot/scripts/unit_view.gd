@@ -18,6 +18,9 @@ func _ready() -> void:
 			var p := a.substr(7).split(",")
 			Unit.test_off["shield_rect"] = Vector3(float(p[0]), float(p[1]), float(p[2]))
 			Unit.test_off["shield_tower"] = Unit.test_off["shield_rect"]
+		if a.begins_with("--grip="):
+			var g := a.substr(7).split(",")
+			Unit.test_grip["sword"] = Vector3(float(g[0]), float(g[1]), float(g[2]))
 		if a.begins_with("--roff="):
 			var q := a.substr(7).split(",")
 			Unit.test_off["sword_short"] = Vector3(float(q[0]), float(q[1]), float(q[2]))

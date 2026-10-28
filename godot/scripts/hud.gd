@@ -490,6 +490,8 @@ func _make_portrait(kind: String, close: bool) -> SubViewport:
 	u.setup(kind, 0, game)
 	u.ring.visible = false
 	u.bar.visible = false
+	if close and u.off_weapon.begins_with("shield") and u.gear_nodes.size() > 1:
+		(u.gear_nodes[1] as Node3D).visible = false      # лицо без щита перед ним
 	u.rotation.y = deg_to_rad(-16.0)
 	vp.add_child(u)
 	# стойка туда-обратно: у клипа края не совпадают, и цикл дёргался на стыке
