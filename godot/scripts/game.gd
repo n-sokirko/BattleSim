@@ -403,18 +403,27 @@ func _camp_props(pos: Vector3, is_boss: bool, tower := false) -> void:
 	for i in n:
 		var a := i * (TAU / n) + 0.4
 		var rr := 8.5 if ring[i % ring.size()] == "tent" else 6.5
-		_hex(ring[i % ring.size()], pos + Vector3(cos(a) * rr, 0, sin(a) * rr), S, -a + PI / 2)
+		var at := pos + Vector3(cos(a) * rr, 0, sin(a) * rr)
+		if ring[i % ring.size()] == "tent" and _gen("yurt", at, -a + PI / 2, 1.0, 3.2) != null:
+			continue
+		_hex(ring[i % ring.size()], at, S, -a + PI / 2)
 	_hex("flag_red", pos + Vector3(2.8, 0, -2.8), S * 1.4, 0.0, false)
 	if tower and not is_boss:
-		_hex("building_tower_A_red", pos + Vector3(-9, 0, 5), 3.0, 0.6)
+		if _gen("tower", pos + Vector3(-9, 0, 5), 0.6, 1.0, 2.0) == null:
+			_hex("building_tower_A_red", pos + Vector3(-9, 0, 5), 3.0, 0.6)
 	if is_boss:
-		_hex("building_tower_A_red", pos + Vector3(-11, 0, 4), 3.2, 0.6)
-		_hex("fence_wood_straight", pos + Vector3(0, 0, 13), 3.0)
-		_hex("fence_wood_straight", pos + Vector3(7, 0, 12), 3.0)
+		if _gen("tower", pos + Vector3(-11, 0, 4), 0.6, 1.25, 2.0) == null:
+			_hex("building_tower_A_red", pos + Vector3(-11, 0, 4), 3.2, 0.6)
+		# частокол с севера и востока стана
+		var pal := [Vector3(-6, 0, 13), Vector3(0, 0, 14), Vector3(6, 0, 13), Vector3(12, 0, 9)]
+		for i in pal.size():
+			if _gen("palisade", pos + pal[i], 0.15 * i, 0.9, 2.4) == null:
+				_hex("fence_wood_straight", pos + pal[i], 3.0)
 
 
 func _build_party() -> void:
 	var start := ground(start_pos)
+	_gen("banner", start + Vector3(5, 0, -3), 0.4, 1.0, 0.5)
 	hero = Unit.new()
 	hero.setup("hero", 0, self)
 	hero.position = ground(start + Vector3(0, 0, 3))
@@ -1058,6 +1067,22 @@ func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator, blo
 	fog.register(n, n.position)
 	if block != 0.0:
 		nav.add_circle(n.position, block if block > 0.0 else _footprint(n))
+	return n
+
+
+## Декорация, сделанная в Hunyuan3D (res://assets/props_gen/<имя>.glb, размер уже в метрах): block — радиус непроходимого круга.
+func _gen(name: String, p: Vector3, yaw := 0.0, scale_k := 1.0, block := 0.0) -> Node3D:
+	var path := "res://assets/props_gen/%s.glb" % name
+	if not ResourceLoader.exists(path):
+		return null
+	var n := (load(path) as PackedScene).instantiate() as Node3D
+	n.position = ground(p)
+	n.rotation.y = yaw
+	n.scale = Vector3.ONE * scale_k
+	add_child(n)
+	fog.register(n, n.position)
+	if block > 0.0:
+		nav.add_circle(n.position, block * scale_k)
 	return n
 
 
