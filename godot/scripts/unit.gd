@@ -283,6 +283,7 @@ func _tick_logic(dt: float) -> void:
 				game.units.erase(self)
 				queue_free()
 		return
+	global_position.y = game.terrain.height(global_position.x, global_position.z)
 	cd -= dt
 	if taunt_t > 0.0: taunt_t -= dt
 	if buff_t > 0.0: buff_t -= dt
@@ -416,8 +417,10 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 		if l < min_d and l > 0.001:
 			push += dd / l * (min_d - l) * 2.2
 	var v := (dir + push).limit_length(1.0) * speed
+	if game.terrain.is_deep(global_position.x, global_position.z):
+		v *= 0.6            # глубокая вода замедляет, брод — нет
 	global_position += v * dt
-	global_position.y = 0.0
+	global_position.y = game.terrain.height(global_position.x, global_position.z)
 	_face(global_position + v, dt)
 	play(a_run, false, clampf(speed / 4.6, 0.8, 1.4))
 

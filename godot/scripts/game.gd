@@ -4,6 +4,8 @@ extends Node3D
 ## WASD/края экрана — камера, колесо — масштаб, Пробел — к герою, Ctrl+A — выбрать всех.
 
 const FIELD := 110.0
+const CAMP_POS := [Vector2(-0.35, -0.30), Vector2(0.45, -0.05), Vector2(-0.45, 0.25), Vector2(0.35, 0.45), Vector2(-0.05, 0.80)]
+const CHEST_POS := [Vector2(0.62, -0.45), Vector2(-0.62, 0.55)]
 const ABILITY_NAMES := ["Боевой клич", "Удар о землю", "Вызов", "Непоколебимые"]
 const ABILITY_KEYS := ["Q", "W", "E", "R"]
 const ABILITY_LEVEL := [1, 2, 3, 4]
@@ -66,6 +68,7 @@ func _ready() -> void:
 		elif a.begins_with("--speed="):
 			Engine.time_scale = float(a.substr(8))
 	seed(7)
+	_make_terrain()
 	_build_camps()
 	_build_world()
 	_build_party()
@@ -102,63 +105,9 @@ func _build_world() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
 	add_child(sun)
-	# земля
-	var ground := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(FIELD * 2.6, FIELD * 2.6)
-	ground.mesh = pm
-	var noise := FastNoiseLite.new()
-	noise.frequency = 0.012
-	noise.fractal_octaves = 4
-	var grad := Gradient.new()
-	grad.colors = PackedColorArray([Color(0.30, 0.42, 0.18), Color(0.42, 0.5, 0.2), Color(0.55, 0.5, 0.26), Color(0.36, 0.45, 0.2)])
-	grad.offsets = PackedFloat32Array([0.0, 0.4, 0.7, 1.0])
-	var nt := NoiseTexture2D.new()
-	nt.noise = noise
-	nt.color_ramp = grad
-	nt.width = 1024; nt.height = 1024
-	var gm := StandardMaterial3D.new()
-	gm.albedo_texture = nt
-	gm.uv1_scale = Vector3(1, 1, 1)
-	gm.roughness = 1.0
-	ground.material_override = gm
-	add_child(ground)
-	# деревья, кусты, камни, цветы и трава (Quaternius, CC0)
-	var rng := RandomNumberGenerator.new(); rng.seed = 11
-	var trees := _scenes(["pine_tree_1", "pine_tree_2", "pine_tree_3", "pine_tree_4", "pine_tree_5", "normal_tree_1", "normal_tree_2", "normal_tree_3", "normal_tree_4", "birch_tree_1", "birch_tree_2", "birch_tree_3", "maple_tree_1", "maple_tree_2"])
-	var dead := _scenes(["dead_tree_1", "dead_tree_2", "dead_tree_3", "dead_tree_4"])
-	var bushes := _scenes(["bush", "bush_large", "bush_small", "bush_flowers", "bush_large_flowers"])
-	var rocks := _scenes(["rock_1", "rock_2", "rock_3", "rock_4", "rock_5"])
-	var flowers := _scenes(["flower_1_clump", "flower_2_clump", "flower_3_clump", "flower_4_clump", "flower_5_clump", "plant_1", "plant_2"])
-	var grass := _scenes(["grass_large", "grass_small"])
-	var woods: Array[Vector3] = []
-	for i in 16:
-		var c := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if not _near_poi(c, 28.0):
-			woods.append(c)
-	for w in woods:
-		for j in 26:
-			var a := rng.randf() * TAU
-			var r := sqrt(rng.randf()) * 17.0
-			var p := w + Vector3(cos(a) * r, 0, sin(a) * r)
-			if _near_poi(p, 14.0) or absf(p.x) > FIELD or absf(p.z) > FIELD:
-				continue
-			_put(trees[rng.randi() % trees.size()], p, rng.randf_range(1.0, 1.7), rng)
-	for i in 40:
-		var p1 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if not _near_poi(p1, 14.0):
-			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, rng.randf_range(1.0, 1.6), rng)
-	for i in 120:
-		var p2 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if not _near_poi(p2, 8.0):
-			_put(bushes[rng.randi() % bushes.size()], p2, rng.randf_range(1.0, 1.6), rng)
-	for i in 70:
-		var p3 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		if not _near_poi(p3, 9.0):
-			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6), rng)
-	for i in 260:
-		var p4 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
-		_put(flowers[rng.randi() % flowers.size()] if i % 3 == 0 else grass[rng.randi() % grass.size()], p4, rng.randf_range(1.2, 2.2), rng)
+	# земля, река, дороги
+	terrain.build_nodes(self)
+	_scatter()
 	# камера
 	pivot = Node3D.new()
 	add_child(pivot)
@@ -169,7 +118,103 @@ func _build_world() -> void:
 	_apply_cam()
 
 
+## Расстановка растительности и камней по правилам: не на воде, не на дорогах, не на лагерях, склоны — камни.
+func _scatter() -> void:
+	var rng := RandomNumberGenerator.new(); rng.seed = 11
+	var trees := _scenes(["pine_tree_1", "pine_tree_2", "pine_tree_3", "pine_tree_4", "pine_tree_5", "normal_tree_1", "normal_tree_2", "normal_tree_3", "normal_tree_4", "birch_tree_1", "birch_tree_2", "birch_tree_3", "maple_tree_1", "maple_tree_2"])
+	var dead := _scenes(["dead_tree_1", "dead_tree_2", "dead_tree_3", "dead_tree_4"])
+	var bushes := _scenes(["bush", "bush_large", "bush_small", "bush_flowers", "bush_large_flowers"])
+	var rocks := _scenes(["rock_1", "rock_2", "rock_3", "rock_4", "rock_5"])
+	var flowers := _scenes(["flower_1_clump", "flower_2_clump", "flower_3_clump", "flower_4_clump", "flower_5_clump", "plant_1", "plant_2"])
+	var grass := _scenes(["grass_large", "grass_small"])
+	# рощи
+	var woods: Array[Vector3] = []
+	var tries := 0
+	while woods.size() < 20 and tries < 400:
+		tries += 1
+		var c := Vector3(rng.randf_range(-FIELD * 0.92, FIELD * 0.92), 0, rng.randf_range(-FIELD * 0.92, FIELD * 0.92))
+		if _near_poi(c, 26.0) or terrain.river_dist(c.x, c.z) < 14.0 or terrain.road_dist(c.x, c.z) < 9.0:
+			continue
+		woods.append(c)
+	for w in woods:
+		for j in 28:
+			var a := rng.randf() * TAU
+			var r := sqrt(rng.randf()) * 16.0
+			var p := w + Vector3(cos(a) * r, 0, sin(a) * r)
+			if _prop_ok(p, 13.0, 0.18):
+				_put(trees[rng.randi() % trees.size()], p, rng.randf_range(1.0, 1.7), rng)
+	for i in 50:
+		var p1 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if _prop_ok(p1, 14.0, 0.2):
+			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, rng.randf_range(1.0, 1.6), rng)
+	for i in 140:
+		var p2 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if _prop_ok(p2, 8.0, 0.25):
+			_put(bushes[rng.randi() % bushes.size()], p2, rng.randf_range(1.0, 1.6), rng)
+	# камни: больше на склонах
+	for i in 220:
+		var p3 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		var sl := terrain.slope(p3.x, p3.z)
+		if _prop_ok(p3, 9.0, 1.0) and (sl > 0.09 or rng.randf() < 0.18):
+			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6) * (1.0 + sl * 3.0), rng)
+	# скалы по краям карты
+	for i in 90:
+		var e := rng.randf_range(0.9, 1.15) * FIELD
+		var t := rng.randf_range(-1.15, 1.15) * FIELD
+		var pr := Vector3(e, 0, t) if i % 4 == 0 else (Vector3(-e, 0, t) if i % 4 == 1 else (Vector3(t, 0, e) if i % 4 == 2 else Vector3(t, 0, -e)))
+		_put(rocks[rng.randi() % rocks.size()], pr, rng.randf_range(3.0, 7.0), rng)
+	# берег реки: кусты, камыш и трава
+	for i in 150:
+		var x := rng.randf_range(-FIELD, FIELD)
+		var side := 1.0 if rng.randf() < 0.5 else -1.0
+		var pz := Vector3(x, 0, terrain.river_z(x) + side * (terrain.river_w(x) + rng.randf_range(0.8, 5.5)))
+		if _prop_ok(pz, 8.0, 0.4):
+			_put(grass[rng.randi() % grass.size()] if i % 3 != 0 else bushes[rng.randi() % bushes.size()], pz, rng.randf_range(1.2, 2.2), rng)
+	for i in 520:
+		var p4 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		if _prop_ok(p4, 5.0, 0.3):
+			_put(flowers[rng.randi() % flowers.size()] if i % 3 == 0 else grass[rng.randi() % grass.size()], p4, rng.randf_range(1.2, 2.2), rng)
+
+
+func _prop_ok(p: Vector3, poi_r: float, max_slope: float) -> bool:
+	if absf(p.x) > FIELD * 1.02 or absf(p.z) > FIELD * 1.02:
+		return false
+	if _near_poi(p, poi_r):
+		return false
+	if terrain.height(p.x, p.z) < Terrain.WATER_Y + 0.5:
+		return false
+	if terrain.road_dist(p.x, p.z) < 3.4:
+		return false
+	return terrain.slope(p.x, p.z) < max_slope
+
+
+## Точка на земле: подставляет высоту ландшафта.
+func ground(p: Vector3) -> Vector3:
+	return Vector3(p.x, terrain.height(p.x, p.z), p.z)
+
+
+var terrain: Terrain
 var pois: Array = []
+
+
+## Ландшафт строится до лагерей: ему нужны поляны под лагеря, сундуки и дороги между ними.
+func _make_terrain() -> void:
+	terrain = Terrain.new()
+	var pl: Array = []
+	var start := Vector3(0, 0, -FIELD * 0.78)
+	pl.append([start, 10.0])
+	var cp: Array = []
+	for i in CAMP_POS.size():
+		var q := Vector3(CAMP_POS[i].x * FIELD, 0, CAMP_POS[i].y * FIELD)
+		cp.append(q)
+		pl.append([q, 14.0 if i == CAMP_POS.size() - 1 else 11.0])
+	for c in CHEST_POS:
+		pl.append([Vector3(c.x * FIELD, 0, c.y * FIELD), 5.0])
+	var ford := Vector3(0, 0, -58)
+	var mid := Vector3(0, 0, -22)
+	var roads: Array = [[start, ford], [ford, mid], [mid, cp[0]], [mid, cp[1]], [mid, cp[2]], [cp[1], cp[3]], [cp[3], cp[4]], [cp[2], cp[4]]]
+	terrain.setup(FIELD, pl, roads)
+
 
 func _near_poi(p: Vector3, r: float) -> bool:
 	for q in pois:
@@ -189,18 +234,18 @@ func _apply_cam() -> void:
 func _build_camps() -> void:
 	# имя, позиция (доли поля), состав, вожак, опыт за лагерь
 	var defs := [
-		["Дозорные", Vector2(-0.35, -0.30), {"raider": 3}, false, 15.0],
-		["Лучники у камней", Vector2(0.45, -0.05), {"rarcher": 3}, false, 20.0],
-		["Конный разъезд", Vector2(-0.45, 0.25), {"rider": 3}, false, 25.0],
-		["Лагерь погонщиков", Vector2(0.35, 0.45), {"raider": 3, "rarcher": 2}, false, 40.0],
-		["Стан Кобека", Vector2(-0.05, 0.80), {"raider": 4, "rarcher": 2, "rider": 2, "boss": 1}, true, 0.0],
+		["Дозорные", CAMP_POS[0], {"raider": 3}, false, 15.0],
+		["Лучники у камней", CAMP_POS[1], {"rarcher": 3}, false, 20.0],
+		["Конный разъезд", CAMP_POS[2], {"rider": 3}, false, 25.0],
+		["Лагерь погонщиков", CAMP_POS[3], {"raider": 3, "rarcher": 2}, false, 40.0],
+		["Стан Кобека", CAMP_POS[4], {"raider": 4, "rarcher": 2, "rider": 2, "boss": 1}, true, 0.0],
 	]
 	pois.append(Vector3(0, 0, -FIELD * 0.78))
 	for d in defs:
-		var pos := Vector3(d[1].x * FIELD, 0, d[1].y * FIELD)
+		var pos := ground(Vector3(d[1].x * FIELD, 0, d[1].y * FIELD))
 		pois.append(pos)
 	for d in defs:
-		var pos := Vector3(d[1].x * FIELD, 0, d[1].y * FIELD)
+		var pos := ground(Vector3(d[1].x * FIELD, 0, d[1].y * FIELD))
 		var camp := {"name": d[0], "pos": pos, "units": [], "awake": false, "cleared": false, "boss": d[3], "xp": d[4]}
 		var k := 0
 		for kind in d[2]:
@@ -209,7 +254,7 @@ func _build_camps() -> void:
 				var r := 2.0 + (k % 3) * 1.4
 				var u := Unit.new()
 				u.setup(kind, 1, self)
-				u.position = pos + Vector3(cos(a) * r, 0, sin(a) * r)
+				u.position = ground(pos + Vector3(cos(a) * r, 0, sin(a) * r))
 				u.rotation.y = a + PI
 				u.home = u.position
 				u.asleep = true
@@ -222,9 +267,9 @@ func _build_camps() -> void:
 				k += 1
 		_camp_props(pos, d[3])
 		camps.append(camp)
-	var cdefs := [["Брошенный обоз", Vector2(0.62, -0.45), 30.0], ["Тайник у холма", Vector2(-0.62, 0.55), 40.0]]
+	var cdefs := [["Брошенный обоз", CHEST_POS[0], 30.0], ["Тайник у холма", CHEST_POS[1], 40.0]]
 	for c in cdefs:
-		var pos := Vector3(c[1].x * FIELD, 0, c[1].y * FIELD)
+		var pos := ground(Vector3(c[1].x * FIELD, 0, c[1].y * FIELD))
 		var node := Node3D.new()
 		node.position = pos
 		var crate := (load("res://assets/hex/crate_open.gltf") as PackedScene).instantiate()
@@ -263,10 +308,10 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 
 
 func _build_party() -> void:
-	var start := Vector3(0, 0, -FIELD * 0.78)
+	var start := ground(Vector3(0, 0, -FIELD * 0.78))
 	hero = Unit.new()
 	hero.setup("hero", 0, self)
-	hero.position = start + Vector3(0, 0, 3)
+	hero.position = ground(start + Vector3(0, 0, 3))
 	add_child(hero); units.append(hero)
 	var kinds := ["footman", "footman", "footman", "footman", "footman", "footman", "archer", "archer", "archer"]
 	for i in kinds.size():
@@ -274,7 +319,7 @@ func _build_party() -> void:
 		u.setup(kinds[i], 0, self)
 		var row := i / 5
 		var col := i % 5
-		u.position = start + Vector3((col - 2) * 2.0, 0, -row * 2.2 - (2.5 if kinds[i] == "archer" else 0.0))
+		u.position = ground(start + Vector3((col - 2) * 2.0, 0, -row * 2.2 - (2.5 if kinds[i] == "archer" else 0.0)))
 		add_child(u); units.append(u)
 	pivot.position = hero.position
 	selection.append(hero)
@@ -432,7 +477,13 @@ func _screen_ground(pos: Vector2) -> Variant:
 	var t := -o.y / d.y
 	if t < 0.0:
 		return null
-	return o + d * t
+	var p := o + d * t
+	# уточняем по рельефу: пересечение луча с плоскостью на высоте земли в найденной точке
+	for i in 4:
+		var h := terrain.height(p.x, p.z)
+		t = (h - o.y) / d.y
+		p = o + d * t
+	return p
 
 
 func _unit_at(pos: Vector2, team: int) -> Unit:
@@ -640,6 +691,7 @@ func _process(dt: float) -> void:
 		pivot.position = pivot.position.lerp(hero.global_position, 0.2)
 	pivot.position.x = clampf(pivot.position.x, -FIELD, FIELD)
 	pivot.position.z = clampf(pivot.position.z, -FIELD, FIELD)
+	pivot.position.y = lerpf(pivot.position.y, terrain.height(pivot.position.x, pivot.position.z), 0.12)
 	cam.position = cam.position.lerp(Vector3(0, sin(deg_to_rad(55.0)) * cam_zoom, cos(deg_to_rad(55.0)) * cam_zoom), 0.2)
 	pivot.rotation.y = cam_yaw
 	# бойцы
@@ -852,7 +904,7 @@ func _scenes(names: Array) -> Array:
 
 func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator) -> Node3D:
 	var n := ps.instantiate() as Node3D
-	n.position = p
+	n.position = ground(p)
 	n.rotation.y = rng.randf() * TAU
 	n.scale = Vector3.ONE * s
 	add_child(n)
@@ -861,7 +913,7 @@ func _put(ps: PackedScene, p: Vector3, s: float, rng: RandomNumberGenerator) -> 
 
 func _hex(name: String, p: Vector3, s: float, yaw := 0.0) -> Node3D:
 	var n := (load("res://assets/hex/%s.gltf" % name) as PackedScene).instantiate() as Node3D
-	n.position = p
+	n.position = ground(p)
 	n.rotation.y = yaw
 	n.scale = Vector3.ONE * s
 	add_child(n)
