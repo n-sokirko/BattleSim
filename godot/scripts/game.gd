@@ -803,56 +803,47 @@ var cur_cursor := "?"
 var cursor_tex := {}
 
 
-## Курсор из значка: цветной силуэт с тёмной обводкой.
-func _cursor_for(icon: String, col: Color) -> ImageTexture:
-	var key := icon + str(col)
-	if cursor_tex.has(key):
-		return cursor_tex[key]
-	var src: Image = (load("res://assets/ui/icons/%s.svg" % icon) as Texture2D).get_image()
-	src.convert(Image.FORMAT_RGBA8)
-	src.resize(32, 32, Image.INTERPOLATE_LANCZOS)
-	var out := Image.create(36, 36, false, Image.FORMAT_RGBA8)
-	for x in 32:
-		for y in 32:
-			if src.get_pixel(x, y).a > 0.25:
-				for dx in [-1, 0, 1, 2, 3]:
-					for dy in [-1, 0, 1, 2, 3]:
-						out.set_pixel(x + dx, y + dy, Color(0.05, 0.03, 0.02, 0.95))
-	for x in 32:
-		for y in 32:
-			var a := src.get_pixel(x, y).a
-			if a > 0.05:
-				var under := out.get_pixel(x + 2, y + 2)
-				out.set_pixel(x + 2, y + 2, under.lerp(Color(col, 1.0), a))
-	var t := ImageTexture.create_from_image(out)
-	cursor_tex[key] = t
-	return t
+## Курсоры нарисованного набора (res://assets/ui/gen/c_*.png), остриё берётся из cursor_hotspots.json.
+var cursor_hot := {}
+
+
+func _cursor_tex(name: String) -> Texture2D:
+	if not cursor_tex.has(name):
+		if cursor_hot.is_empty():
+			cursor_hot = JSON.parse_string(FileAccess.get_file_as_string("res://assets/ui/gen/cursor_hotspots.json"))
+		cursor_tex[name] = load("res://assets/ui/gen/%s.png" % name)
+	return cursor_tex[name]
+
+
+func _set_cursor(name: String) -> void:
+	var t := _cursor_tex(name)
+	var h: Array = cursor_hot.get(name, [20, 20])
+	Input.set_custom_mouse_cursor(t, Input.CURSOR_ARROW, Vector2(h[0], h[1]))
 
 
 func _update_cursor(mp: Vector2) -> void:
-	var want := ""
+	var want := "c_arrow"
 	if not ui.over_ui(mp) and not finished:
+		var g = _screen_ground(mp)
 		if cmd_mode == "attack":
-			want = "attack"
+			want = "c_attackmove"
 		elif cmd_mode == "move":
-			want = "move"
+			want = "c_move"
 		elif not selection.is_empty() and _unit_at(mp, 1) != null:
-			want = "attack"
-		else:
-			var g = _screen_ground(mp)
-			if g != null and not selection.is_empty():
-				for c in chests:
-					if not c["opened"] and Vector2(g.x - c["pos"].x, g.z - c["pos"].z).length() < 2.2:
-						want = "pickup"
-						break
+			want = "c_enemy"
+		elif _unit_at(mp, 0) != null:
+			want = "c_friend"
+		elif g != null and not selection.is_empty():
+			for c in chests:
+				if not c["opened"] and fog.explored(c["pos"]) and Vector2(g.x - c["pos"].x, g.z - c["pos"].z).length() < 2.2:
+					want = "c_pickup"
+					break
+			if want == "c_arrow" and nav.is_blocked(g.x, g.z) and fog.explored(g):
+				want = "c_blocked"
 	if want == cur_cursor:
 		return
 	cur_cursor = want
-	match want:
-		"attack": Input.set_custom_mouse_cursor(_cursor_for("attack", Color(1.0, 0.35, 0.3)), Input.CURSOR_ARROW, Vector2(18, 18))
-		"move": Input.set_custom_mouse_cursor(_cursor_for("move", Color(0.45, 1.0, 0.5)), Input.CURSOR_ARROW, Vector2(18, 18))
-		"pickup": Input.set_custom_mouse_cursor(_cursor_for("chest", Color(1.0, 0.85, 0.3)), Input.CURSOR_ARROW, Vector2(18, 18))
-		_: Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	_set_cursor(want)
 
 
 func _chests_tick() -> void:
