@@ -459,6 +459,9 @@ func _make_portrait(kind: String, close: bool) -> SubViewport:
 	u.bar.visible = false
 	u.rotation.y = deg_to_rad(-16.0)
 	vp.add_child(u)
+	# стойка туда-обратно: у клипа края не совпадают, и цикл дёргался на стыке
+	if u.anim != null and u.anim.has_animation(u.a_idle):
+		u.anim.get_animation(u.a_idle).loop_mode = Animation.LOOP_PINGPONG
 	u.play(u.a_idle, true)
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-32, -38, 0)
@@ -504,8 +507,8 @@ func _frame_face(u: Unit, cam: Camera3D, close: bool) -> void:
 		if bn.ends_with("head") and not bn.contains("top"):
 			var hp: Vector3 = sk.global_transform * sk.get_bone_global_pose(i).origin
 			var hh := (hp.y - u.global_position.y) / 0.93
-			var d2 := hh * (0.36 if close else 0.52) * 0.5 / tan(deg_to_rad(cam.fov * 0.5))
-			cam.position = Vector3(hp.x, hp.y + hh * (0.03 if close else -0.10), hp.z + d2)
+			var d2 := hh * (0.36 if close else 0.56) * 0.5 / tan(deg_to_rad(cam.fov * 0.5))
+			cam.position = Vector3(hp.x, hp.y + hh * (0.03 if close else 0.03), hp.z + d2)
 			return
 
 
