@@ -112,8 +112,11 @@ func setup(k: String, t: int, g) -> void:
 				anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
 		# удары мечом: клипы KayKit, перенесённые на этот скелет (scripts/retarget_a.gd); движение, урон и смерть — Hunyuan
 		anim.add_animation_library("kk", load("res://assets/hy/anims_%s.res" % cfg["file"]) as AnimationLibrary)
+		anim.add_animation_library("mx", load("res://assets/hy/mx_pro_sns_%s.res" % cfg["file"]) as AnimationLibrary)
 		equip(cfg["main"], "")
 		a_idle = "idle"; a_run = "run"; a_hit = "hit"; a_die = "death"
+		a_attacks = ["mx/sword_and_shield_slash", "mx/sword_and_shield_slash_3", "mx/sword_and_shield_attack_4", "mx/sword_and_shield_slash_2"]
+		atk_speed = 1.5
 		cur = ""
 		play(a_idle)
 	else:
@@ -295,7 +298,7 @@ func _tick_logic(dt: float) -> void:
 			if cd <= 0.0:
 				cd = cooldown * randf_range(0.9, 1.1)
 				swing = 0.0
-				play(a_attack(), true)
+				play(a_attack(), true, atk_speed)
 				cur = "atk"
 			elif cur != "atk":
 				play(a_idle)
@@ -376,6 +379,7 @@ func _walk_to(p: Vector3, dt: float, stop: float) -> void:
 	play(a_run, false, clampf(speed / 4.6, 0.8, 1.4))
 
 
+var atk_speed := 1.0
 var a_idle := "kk/Idle"
 var a_run := "kk/Running_A"
 var a_hit := "kk/Hit_A"

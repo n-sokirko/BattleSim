@@ -32,6 +32,8 @@ func _ready() -> void:
 		m.add_child(ap)
 	if ResourceLoader.exists("res://assets/hy/anims_%s.res" % ch):
 		ap.add_animation_library("kk", load("res://assets/hy/anims_%s.res" % ch))
+	if ResourceLoader.exists("res://assets/hy/mx_pro_sns_%s.res" % ch):
+		ap.add_animation_library("mx", load("res://assets/hy/mx_pro_sns_%s.res" % ch))
 	var vp := get_viewport()
 	var tw := 300
 	var th := 360
