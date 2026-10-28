@@ -1,11 +1,15 @@
+class_name Campaign
 extends Node3D
 ## Поход в духе Warcraft 3: герой и небольшой отряд, спящие лагеря врага, сундуки, вожак.
 ## ПК: ЛКМ — выбрать/рамка, ПКМ — идти/бить, A+ЛКМ — атака с движением, Q W E R — способности героя,
 ## WASD/края экрана — камера, колесо — масштаб, Пробел — к герою, Ctrl+A — выбрать всех.
 
 const FIELD := 110.0
-const CAMP_POS := [Vector2(-0.35, -0.30), Vector2(0.45, -0.05), Vector2(-0.45, 0.25), Vector2(0.35, 0.45), Vector2(-0.05, 0.80)]
-const CHEST_POS := [Vector2(0.62, -0.45), Vector2(-0.62, 0.55)]
+## зерно и биом следующей карты (-1 / "" — случайные); сохраняются между перезапусками сцены
+static var next_seed := -1
+static var next_biome := ""
+static var regen_count := 0
+static var args_done := false
 const ABILITY_NAMES := ["Боевой клич", "Удар о землю", "Вызов", "Непоколебимые"]
 const ABILITY_KEYS := ["Q", "W", "E", "R"]
 const ABILITY_LEVEL := [1, 2, 3, 4]
@@ -46,6 +50,9 @@ var no_edge := false
 var auto := false
 var shake := 0.0
 var fx_test := false
+var overview := false
+var spec := {}
+var start_pos := Vector3.ZERO
 var fx_i := 0
 var fx_clock := 0.0
 var sel_all_test := false
@@ -58,6 +65,8 @@ var auto_t := 0.0
 func _ready() -> void:
 	Unit.load_shared()
 	for a in OS.get_cmdline_user_args():
+		if args_done and (a.begins_with("--seed=") or a.begins_with("--biome=")):
+			continue
 		if a.begins_with("--shot="):
 			shot_dir = a.substr(7)
 		elif a.begins_with("--handl="):
@@ -76,27 +85,84 @@ func _ready() -> void:
 			sel_all_test = true
 		elif a.begins_with("--speed="):
 			Engine.time_scale = float(a.substr(8))
+		elif a.begins_with("--seed="):
+			next_seed = int(a.substr(7))
+		elif a.begins_with("--biome="):
+			next_biome = a.substr(8)
+		elif a == "--overview":
+			overview = true
+	args_done = true
 	seed(7)
 	_make_terrain()
 	_build_camps()
 	_build_world()
 	_build_party()
 	_build_hud()
+	if not _validate():
+		return
 	fog.update(0.0, true)
 	if sel_all_test:
 		_select_all()
-	_toast("Каэл со своим отрядом. ПКМ — идти и бить. Q W E R — способности. Лагеря спят, пока не подойдёшь.", 8.0)
+	_toast("%s (зерно %d). ПКМ — идти и бить, Q W E R — способности. F5 — новая карта." % [spec["b"]["name"], spec["seed"]], 8.0)
+	if overview:
+		fog.update(0.0, true)
+		_overview_cam()
 
 
 # ---------------------------------------------------------------- мир
+
+## Проверка: от старта можно дойти до каждого лагеря и сундука. Иначе берём следующее зерно.
+func _validate() -> bool:
+	var s := nav.nearest_free(nav.cell_of(Vector2(start_pos.x, start_pos.z)))
+	var targets: Array = []
+	for c in camps:
+		targets.append(c["pos"])
+	for c in chests:
+		targets.append(c["pos"])
+	var ok := true
+	for t in targets:
+		var e := nav.nearest_free(nav.cell_of(Vector2(t.x, t.z)))
+		var path := nav.astar.get_id_path(s, e)
+		if path.is_empty() or Vector2i(path[path.size() - 1]) != e:
+			var fs := 0
+			var ft := 0
+			for dx in range(-8, 9):
+				for dy in range(-8, 9):
+					if not nav.is_blocked(start_pos.x + dx, start_pos.z + dy): fs += 1
+					if not nav.is_blocked(t.x + dx, t.z + dy): ft += 1
+			print("MAP fail target ", t, " cell ", e, " start ", s, " path ", path.size())
+			ok = false
+			break
+	if ok:
+		regen_count = 0
+		return true
+	regen_count += 1
+	print("MAP unreachable seed ", spec["seed"], " (", spec["biome"], ")")
+	if regen_count < 12:
+		next_seed = int(spec["seed"]) + 1
+		next_biome = str(spec["biome"])
+		call_deferred("_reload")
+		return false
+	return true
+
+
+func _reload() -> void:
+	get_tree().reload_current_scene()
+
+
+func _overview_cam() -> void:
+	fog.all_visible = true
+	fog.update(0.0, true)
+
 
 func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	var sky := Sky.new()
 	var psm := ProceduralSkyMaterial.new()
-	psm.sky_top_color = Color(0.35, 0.55, 0.85)
-	psm.sky_horizon_color = Color(0.75, 0.82, 0.9)
+	var bm: Dictionary = spec["b"]
+	psm.sky_top_color = bm["sky_top"]
+	psm.sky_horizon_color = bm["sky_hor"]
 	psm.ground_horizon_color = Color(0.62, 0.66, 0.6)
 	sky.sky_material = psm
 	e.background_mode = Environment.BG_SKY
@@ -105,15 +171,15 @@ func _build_world() -> void:
 	e.ambient_light_energy = 0.95
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	e.fog_enabled = true
-	e.fog_light_color = Color(0.75, 0.82, 0.9)
-	e.fog_density = 0.0012
+	e.fog_light_color = bm["sky_hor"]
+	e.fog_density = bm["fog"]
 	e.ssao_enabled = true
 	e.glow_enabled = true
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52, 35, 0)
-	sun.light_energy = 1.35
+	sun.light_energy = bm["sun"]
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 90.0
 	add_child(sun)
@@ -131,61 +197,71 @@ func _build_world() -> void:
 	_apply_cam()
 
 
-## Расстановка растительности и камней по правилам: не на воде, не на дорогах, не на лагерях, склоны — камни.
+## Расстановка по правилам биома: лес по шуму (чащи и поляны), одиночные деревья, кусты, камни на склонах, камыш у воды.
+## Ничего не растёт на воде, дорогах и лагерях.
 func _scatter() -> void:
-	var rng := RandomNumberGenerator.new(); rng.seed = 11
-	var trees := _scenes(["pine_tree_1", "pine_tree_2", "pine_tree_3", "pine_tree_4", "pine_tree_5", "normal_tree_1", "normal_tree_2", "normal_tree_3", "normal_tree_4", "birch_tree_1", "birch_tree_2", "birch_tree_3", "maple_tree_1", "maple_tree_2"])
-	var dead := _scenes(["dead_tree_1", "dead_tree_2", "dead_tree_3", "dead_tree_4"])
+	var b: Dictionary = spec["b"]
+	var rng := RandomNumberGenerator.new(); rng.seed = int(spec["seed"]) + 11
+	var trees := _scenes(b["trees"])
+	var dead := _scenes(b["dead"])
 	var bushes := _scenes(["bush", "bush_large", "bush_small", "bush_flowers", "bush_large_flowers"])
 	var rocks := _scenes(["rock_1", "rock_2", "rock_3", "rock_4", "rock_5"])
 	var flowers := _scenes(["flower_1_clump", "flower_2_clump", "flower_3_clump", "flower_4_clump", "flower_5_clump", "plant_1", "plant_2"])
 	var grass := _scenes(["grass_large", "grass_small"])
-	# рощи
-	var woods: Array[Vector3] = []
+	var wood := FastNoiseLite.new()
+	wood.seed = int(spec["seed"]) + 77
+	wood.frequency = 0.022
+	wood.fractal_octaves = 2
+	var thr: float = b["wood_thr"]
+	var taken := {}
+	var placed := 0
 	var tries := 0
-	while woods.size() < 20 and tries < 400:
+	while placed < int(b["wood_n"]) and tries < int(b["wood_n"]) * 9:
 		tries += 1
-		var c := Vector3(rng.randf_range(-FIELD * 0.92, FIELD * 0.92), 0, rng.randf_range(-FIELD * 0.92, FIELD * 0.92))
-		if _near_poi(c, 26.0) or terrain.river_dist(c.x, c.z) < 14.0 or terrain.road_dist(c.x, c.z) < 9.0:
+		var p := Vector3(rng.randf_range(-FIELD * 0.98, FIELD * 0.98), 0, rng.randf_range(-FIELD * 0.98, FIELD * 0.98))
+		var w := wood.get_noise_2d(p.x, p.z) * 0.5 + 0.5
+		if w < thr or rng.randf() > smoothstep(thr, thr + 0.16, w):
 			continue
-		woods.append(c)
-	for w in woods:
-		for j in 28:
-			var a := rng.randf() * TAU
-			var r := sqrt(rng.randf()) * 16.0
-			var p := w + Vector3(cos(a) * r, 0, sin(a) * r)
-			if _prop_ok(p, 13.0, 0.18):
-				var ts := rng.randf_range(1.0, 1.7)
-				_put(trees[rng.randi() % trees.size()], p, ts, rng, 0.3 * ts)
-	for i in 50:
+		var key := Vector2i(int(floor(p.x / 2.2)), int(floor(p.z / 2.2)))
+		if taken.has(key) or not _prop_ok(p, 12.0, 0.2):
+			continue
+		taken[key] = true
+		var ts := rng.randf_range(1.0, 1.7)
+		var pool: Array = dead if rng.randf() < 0.07 else trees
+		_put(pool[rng.randi() % pool.size()], p, ts, rng, 0.3 * ts)
+		placed += 1
+	for i in int(b["tree_free"]):
 		var p1 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		if _prop_ok(p1, 14.0, 0.2):
 			var ts1 := rng.randf_range(1.0, 1.6)
 			_put(trees[rng.randi() % trees.size()] if i % 6 != 0 else dead[rng.randi() % dead.size()], p1, ts1, rng, 0.3 * ts1)
-	for i in 140:
+	for i in int(b["bush"]):
 		var p2 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		if _prop_ok(p2, 8.0, 0.25):
 			_put(bushes[rng.randi() % bushes.size()], p2, rng.randf_range(1.0, 1.6), rng)
-	# камни: больше на склонах
-	for i in 220:
+	for i in int(b["rock"]):
 		var p3 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		var sl := terrain.slope(p3.x, p3.z)
 		if _prop_ok(p3, 9.0, 1.0) and (sl > 0.09 or rng.randf() < 0.18):
 			_put(rocks[rng.randi() % rocks.size()], p3, rng.randf_range(1.0, 2.6) * (1.0 + sl * 3.0), rng, -1.0)
-	# скалы по краям карты
 	for i in 90:
 		var e := rng.randf_range(0.9, 1.15) * FIELD
 		var t := rng.randf_range(-1.15, 1.15) * FIELD
 		var pr := Vector3(e, 0, t) if i % 4 == 0 else (Vector3(-e, 0, t) if i % 4 == 1 else (Vector3(t, 0, e) if i % 4 == 2 else Vector3(t, 0, -e)))
 		_put(rocks[rng.randi() % rocks.size()], pr, rng.randf_range(3.0, 7.0), rng, -1.0)
-	# берег реки: кусты, камыш и трава
-	for i in 150:
-		var x := rng.randf_range(-FIELD, FIELD)
-		var side := 1.0 if rng.randf() < 0.5 else -1.0
-		var pz := Vector3(x, 0, terrain.river_z(x) + side * (terrain.river_w(x) + rng.randf_range(0.8, 5.5)))
+	# берег: камыш, трава и кусты по кромке воды
+	var reeds := 0
+	tries = 0
+	while reeds < int(b["reed"]) and tries < int(b["reed"]) * 25:
+		tries += 1
+		var pz := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
+		var wd := terrain.river_dist(pz.x, pz.z)
+		if wd < 0.8 or wd > 5.5:
+			continue
 		if _prop_ok(pz, 8.0, 0.4):
-			_put(grass[rng.randi() % grass.size()] if i % 3 != 0 else bushes[rng.randi() % bushes.size()], pz, rng.randf_range(1.2, 2.2), rng)
-	for i in 520:
+			_put(grass[rng.randi() % grass.size()] if reeds % 3 != 0 else bushes[rng.randi() % bushes.size()], pz, rng.randf_range(1.2, 2.2), rng)
+			reeds += 1
+	for i in int(b["flower"]):
 		var p4 := Vector3(rng.randf_range(-FIELD, FIELD), 0, rng.randf_range(-FIELD, FIELD))
 		if _prop_ok(p4, 5.0, 0.3):
 			_put(flowers[rng.randi() % flowers.size()] if i % 3 == 0 else grass[rng.randi() % grass.size()], p4, rng.randf_range(1.2, 2.2), rng)
@@ -227,27 +303,26 @@ func _footprint(n: Node3D) -> float:
 	return clampf(0.38 * maxf(box.size.x, box.size.z), 0.4, 4.0)
 
 
-## Ландшафт строится до лагерей: ему нужны поляны под лагеря, сундуки и дороги между ними.
+## Карта: каркас от генератора (маршрут, реки, хребты, лагеря), затем рельеф по нему.
 func _make_terrain() -> void:
+	var seed_v := next_seed if next_seed >= 0 else int(Time.get_ticks_usec() % 1000000)
+	var keys: Array = MapGen.BIOMES.keys()
+	var biome := next_biome if MapGen.BIOMES.has(next_biome) else str(keys[seed_v % keys.size()])
+	next_seed = -1
+	next_biome = ""
+	spec = MapGen.new().generate(seed_v, biome, FIELD)
+	start_pos = Vector3(spec["start"].x, 0, spec["start"].y)
+	var pl: Array = [[start_pos, 10.0]]
+	for c in spec["camps"]:
+		pl.append([Vector3(c["pos"].x, 0, c["pos"].y), c["r"]])
+	for c in spec["chests"]:
+		pl.append([Vector3(c["pos"].x, 0, c["pos"].y), 5.0])
 	terrain = Terrain.new()
-	var pl: Array = []
-	var start := Vector3(0, 0, -FIELD * 0.78)
-	pl.append([start, 10.0])
-	var cp: Array = []
-	for i in CAMP_POS.size():
-		var q := Vector3(CAMP_POS[i].x * FIELD, 0, CAMP_POS[i].y * FIELD)
-		cp.append(q)
-		pl.append([q, 14.0 if i == CAMP_POS.size() - 1 else 11.0])
-	for c in CHEST_POS:
-		pl.append([Vector3(c.x * FIELD, 0, c.y * FIELD), 5.0])
-	var ford := Vector3(0, 0, -58)
-	var mid := Vector3(0, 0, -22)
-	var roads: Array = [[start, ford], [ford, mid], [mid, cp[0]], [mid, cp[1]], [mid, cp[2]], [cp[1], cp[3]], [cp[3], cp[4]], [cp[2], cp[4]]]
-	terrain.setup(FIELD, pl, roads)
 	nav = Nav.new()
 	fog = Fog.new()
 	fog.setup(self, terrain)
 	terrain.fog = fog
+	terrain.setup(FIELD, spec, pl)
 
 
 func _near_poi(p: Vector3, r: float) -> bool:
@@ -266,24 +341,15 @@ func _apply_cam() -> void:
 # ---------------------------------------------------------------- лагеря и отряд
 
 func _build_camps() -> void:
-	# имя, позиция (доли поля), состав, вожак, опыт за лагерь
-	var defs := [
-		["Дозорные", CAMP_POS[0], {"raider": 3}, false, 15.0],
-		["Лучники у камней", CAMP_POS[1], {"rarcher": 3}, false, 20.0],
-		["Конный разъезд", CAMP_POS[2], {"rider": 3}, false, 25.0],
-		["Лагерь погонщиков", CAMP_POS[3], {"raider": 3, "rarcher": 2}, false, 40.0],
-		["Стан Кобека", CAMP_POS[4], {"raider": 4, "rarcher": 2, "rider": 2, "boss": 1}, true, 0.0],
-	]
-	pois.append(Vector3(0, 0, -FIELD * 0.78))
-	for d in defs:
-		var pos := ground(Vector3(d[1].x * FIELD, 0, d[1].y * FIELD))
-		pois.append(pos)
-	for d in defs:
-		var pos := ground(Vector3(d[1].x * FIELD, 0, d[1].y * FIELD))
-		var camp := {"name": d[0], "pos": pos, "units": [], "awake": false, "cleared": false, "boss": d[3], "xp": d[4]}
+	pois.append(start_pos)
+	for d in spec["camps"]:
+		pois.append(ground(Vector3(d["pos"].x, 0, d["pos"].y)))
+	for d in spec["camps"]:
+		var pos := ground(Vector3(d["pos"].x, 0, d["pos"].y))
+		var camp := {"name": d["name"], "pos": pos, "units": [], "awake": false, "cleared": false, "boss": d["boss"], "xp": d["xp"]}
 		var k := 0
-		for kind in d[2]:
-			for i in d[2][kind]:
+		for kind in d["comp"]:
+			for i in d["comp"][kind]:
 				var a := k * 2.4 + 0.5
 				var r := 2.0 + (k % 3) * 1.4
 				var u := Unit.new()
@@ -299,11 +365,13 @@ func _build_camps() -> void:
 				if kind == "boss":
 					boss = u
 				k += 1
-		_camp_props(pos, d[3])
+		_camp_props(pos, d["boss"], d["tower"])
 		camps.append(camp)
-	var cdefs := [["Брошенный обоз", CHEST_POS[0], 30.0], ["Тайник у холма", CHEST_POS[1], 40.0]]
+	var cdefs: Array = []
+	for c in spec["chests"]:
+		cdefs.append([c["name"], c["pos"], c["xp"]])
 	for c in cdefs:
-		var pos := ground(Vector3(c[1].x * FIELD, 0, c[1].y * FIELD))
+		var pos := ground(Vector3(c[1].x, 0, c[1].y))
 		var node := Node3D.new()
 		node.position = pos
 		var crate := (load("res://assets/hex/crate_open.gltf") as PackedScene).instantiate()
@@ -317,7 +385,7 @@ func _build_camps() -> void:
 		pois.append(pos)
 
 
-func _camp_props(pos: Vector3, is_boss: bool) -> void:
+func _camp_props(pos: Vector3, is_boss: bool, tower := false) -> void:
 	var fire := OmniLight3D.new()
 	fire.light_color = Color(1.0, 0.6, 0.25); fire.light_energy = 2.2; fire.omni_range = 9.0
 	fire.position = pos + Vector3(0, 1.2, 0)
@@ -337,6 +405,8 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 		var rr := 8.5 if ring[i % ring.size()] == "tent" else 6.5
 		_hex(ring[i % ring.size()], pos + Vector3(cos(a) * rr, 0, sin(a) * rr), S, -a + PI / 2)
 	_hex("flag_red", pos + Vector3(2.8, 0, -2.8), S * 1.4, 0.0, false)
+	if tower and not is_boss:
+		_hex("building_tower_A_red", pos + Vector3(-9, 0, 5), 3.0, 0.6)
 	if is_boss:
 		_hex("building_tower_A_red", pos + Vector3(-11, 0, 4), 3.2, 0.6)
 		_hex("fence_wood_straight", pos + Vector3(0, 0, 13), 3.0)
@@ -344,7 +414,7 @@ func _camp_props(pos: Vector3, is_boss: bool) -> void:
 
 
 func _build_party() -> void:
-	var start := ground(Vector3(0, 0, -FIELD * 0.78))
+	var start := ground(start_pos)
 	hero = Unit.new()
 	hero.setup("hero", 0, self)
 	hero.position = ground(start + Vector3(0, 0, 3))
@@ -598,6 +668,10 @@ func _input(ev: InputEvent) -> void:
 			KEY_M: cmd_mode = "move"
 			KEY_H: order_hold()
 			KEY_ESCAPE: cmd_mode = ""
+			KEY_F5:
+				if ev.shift_pressed:
+					next_seed = int(spec["seed"]); next_biome = str(spec["biome"])
+				get_tree().reload_current_scene()
 
 
 func _click_select(pos: Vector2) -> void:
@@ -754,7 +828,7 @@ func _process(dt: float) -> void:
 	_update_hud(dt)
 	if not auto:
 		_update_cursor(mp)
-	if auto and hero.state != Unit.S.DEAD:
+	if auto and not overview and hero.state != Unit.S.DEAD:
 		pivot.position = pivot.position.lerp(hero.global_position, 0.08)
 	if auto:
 		_auto_tick(dt)

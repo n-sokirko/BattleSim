@@ -42,6 +42,7 @@ uniform sampler2D vis_tex : filter_linear, repeat_disable;
 uniform sampler2D exp_tex : filter_linear, repeat_disable;
 uniform vec2 org;
 uniform float span;
+uniform vec3 wcol : source_color = vec3(0.16, 0.38, 0.5);
 varying vec3 wpos;
 float soft(sampler2D t, vec2 uv) {
 	vec2 px = vec2(1.0) / vec2(textureSize(t, 0));
@@ -57,7 +58,7 @@ void fragment() {
 	vec2 fuv = (wpos.xz - org + 0.5) / span;
 	float v = soft(vis_tex, fuv);
 	float e = soft(exp_tex, fuv);
-	ALBEDO = vec3(0.16, 0.38, 0.5) * mix(0.42, 1.0, v);
+	ALBEDO = wcol * mix(0.42, 1.0, v);
 	ALPHA = 0.68 * e;
 	ROUGHNESS = 0.06;
 	METALLIC = 0.25;
@@ -74,6 +75,7 @@ var tex_v: ImageTexture
 var tex_e: ImageTexture
 var props: Array = []        # [Node3D, индекс ячейки]
 var t := 0.0
+var all_visible := false     # проверка карты: всё открыто
 
 
 func setup(g: Node3D, tr: Terrain) -> void:
@@ -105,8 +107,10 @@ func ground_material(detail: Texture2D) -> ShaderMaterial:
 	return m
 
 
-func water_material() -> ShaderMaterial:
-	return _material(WATER_SHADER)
+func water_material(col: Color) -> ShaderMaterial:
+	var m := _material(WATER_SHADER)
+	m.set_shader_parameter("wcol", col)
+	return m
 
 
 func _idx(p: Vector3) -> int:
@@ -165,15 +169,37 @@ func _see(u: Unit) -> void:
 				max_s = g
 
 
+## Затемнение для миникарты: не разведано — почти чёрное, разведано — полупрозрачное, в обзоре — прозрачное.
+func minimap_overlay(px: int) -> Image:
+	var img := Image.create(px, px, false, Image.FORMAT_RGBA8)
+	var span := float(n)
+	for y in px:
+		var j := clampi(int((y + 0.5) / px * span), 0, n - 1)
+		for x in px:
+			var i := clampi(int((x + 0.5) / px * span), 0, n - 1)
+			var k := j * n + i
+			var a := 0.0
+			if expl[k] < 100:
+				a = 0.92
+			elif vis[k] == 0:
+				a = 0.38
+			img.set_pixel(x, y, Color(0.02, 0.03, 0.05, a))
+	return img
+
+
 func update(dt: float, force := false) -> void:
 	t -= dt
 	if t > 0.0 and not force:
 		return
 	t = UPDATE_EVERY
 	vis.fill(0)
-	for u in game.units:
-		if u.team == 0 and u.state != Unit.S.DEAD:
-			_see(u)
+	if all_visible:
+		vis.fill(255)
+		expl.fill(255)
+	else:
+		for u in game.units:
+			if u.team == 0 and u.state != Unit.S.DEAD:
+				_see(u)
 	tex_v.update(Image.create_from_data(n, n, false, Image.FORMAT_R8, vis))
 	tex_e.update(Image.create_from_data(n, n, false, Image.FORMAT_R8, expl))
 	for pr in props:

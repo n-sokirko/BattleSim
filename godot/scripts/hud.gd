@@ -35,6 +35,7 @@ var inv_box: Control
 var cmd_buttons := {}
 var toasts: Array = []
 var shown_kind := ""
+var mini_t := 0.0
 
 class SelBox extends Control:
 	var a := Vector2.ZERO
@@ -123,6 +124,8 @@ class GBar extends Control:
 
 class Mini extends Control:
 	var game
+	var base_tex: Texture2D
+	var fog_tex: ImageTexture
 	func _gui_input(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.pressed:
 			var w = _to_world(ev.position)
@@ -140,7 +143,11 @@ class Mini extends Control:
 		var f: float = game.FIELD
 		return Vector2((x / f * 0.5 + 0.5) * size.x, (z / f * 0.5 + 0.5) * size.y)
 	func _draw() -> void:
-		draw_rect(Rect2(Vector2.ZERO, size), Color(0.16, 0.22, 0.1))
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.06, 0.07))
+		if base_tex != null:
+			draw_texture_rect(base_tex, Rect2(Vector2.ZERO, size), false)
+		if fog_tex != null:
+			draw_texture_rect(fog_tex, Rect2(Vector2.ZERO, size), false)
 		for c in game.chests:
 			if not c["opened"] and game.fog.explored(c["pos"]):
 				draw_rect(Rect2(_pt(c["pos"].x, c["pos"].z) - Vector2(3, 3), Vector2(6, 6)), Color(1, 0.85, 0.3))
@@ -293,6 +300,7 @@ func _build_panel() -> void:
 	panel.add_child(mf)
 	minimap = Mini.new()
 	minimap.game = game
+	minimap.base_tex = ImageTexture.create_from_image(game.terrain.render_map(160))
 	minimap.position = Vector2(15, 15)
 	minimap.size = Vector2(156, 156)
 	mf.add_child(minimap)
@@ -593,6 +601,14 @@ func refresh(dt: float) -> void:
 	for c in game.chests:
 		if c["opened"]: chests_open += 1
 	lbl_goal.text = "Победить хана Кобека\nЛагерей: %d из %d" % [game.camps.size() - left, game.camps.size()] + "\nСундуков: %d из %d" % [chests_open, game.chests.size()]
+	mini_t -= dt
+	if mini_t <= 0.0:
+		mini_t = 0.4
+		var fi: Image = game.fog.minimap_overlay(64)
+		if minimap.fog_tex == null:
+			minimap.fog_tex = ImageTexture.create_from_image(fi)
+		else:
+			minimap.fog_tex.update(fi)
 	minimap.queue_redraw()
 	var sel: Array = game.selection
 	var first: Unit = sel[0] if sel.size() > 0 else null
