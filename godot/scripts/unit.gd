@@ -135,7 +135,10 @@ func setup(k: String, t: int, g) -> void:
 			if n in ["Idle", "2H_Melee_Idle", "Walking_A", "Running_A", "Running_B"]:
 				al.get_animation(n).loop_mode = Animation.LOOP_LINEAR
 		anim.add_animation_library("kk", al)
+		use_mx_grip = cfg.has("mx")
 		_equip_default()
+		if cfg.has("mx"):
+			_apply_mx(cfg["mx"], cfg["file"])
 	# кольцо под ногами: цвет армии
 	ring = MeshInstance3D.new()
 	var tm := TorusMesh.new()
@@ -469,14 +472,28 @@ const ANIM_SETS := {
 }
 
 ## Внешний вид и снаряжение по умолчанию: файл модели, оружие в правой и левой руке.
+## Клипы Mixamo по типам оружия (переносятся на скелет Hunyuan: scripts/retarget_mx.gd). Имена: <библиотека>/<клип>.
+const MX_SNS := {"packs": ["pro_sns"], "idle": "mx_pro_sns/sword_and_shield_idle", "run": "mx_pro_sns/sword_and_shield_run",
+	"hit": "mx_pro_sns/sword_and_shield_impact", "die": "mx_pro_sns/sword_and_shield_death", "speed": 1.5,
+	"attacks": ["mx_pro_sns/sword_and_shield_slash", "mx_pro_sns/sword_and_shield_slash_2", "mx_pro_sns/sword_and_shield_slash_3", "mx_pro_sns/sword_and_shield_attack_4"]}
+const MX_GREAT := {"packs": ["great_sword"], "idle": "mx_great_sword/great_sword_idle", "run": "mx_great_sword/great_sword_run",
+	"hit": "mx_great_sword/great_sword_impact", "die": "mx_great_sword/two_handed_sword_death", "speed": 1.3,
+	"attacks": ["mx_great_sword/great_sword_slash", "mx_great_sword/great_sword_slash_2", "mx_great_sword/great_sword_attack"]}
+const MX_BOW := {"packs": ["longbow"], "idle": "mx_longbow/standing_idle_01", "run": "mx_longbow/standing_run_forward",
+	"hit": "mx_longbow/standing_react_small_from_front", "die": "mx_longbow/standing_death_forward_01", "speed": 1.3,
+	"attacks": ["mx_longbow/standing_aim_recoil"]}
+const MX_RIFLE := {"packs": ["rifle", "longbow"], "idle": "mx_rifle/idle", "run": "mx_rifle/run_forward",
+	"hit": "mx_longbow/standing_react_small_from_front", "die": "mx_rifle/death_from_the_front", "speed": 1.3,
+	"attacks": ["mx_rifle/firing_rifle"]}
+
 const LOOKS := {
 	"hero":    {"file": "armed_kael",     "main": "sword",       "off": "shield_tower", "baked": true},
-	"footman": {"file": "erland_militia", "main": "sword_short", "off": "shield_rect"},
-	"archer":  {"file": "erland_archer",  "main": "crossbow",    "off": ""},
-	"raider":  {"file": "nomad_raider",   "main": "saber",       "off": "shield_sun"},
-	"rarcher": {"file": "nomad_archer",   "main": "bow",         "off": ""},
-	"rider":   {"file": "nomad_archer",   "main": "bow",         "off": ""},
-	"boss":    {"file": "nomad_khan",     "main": "axe2",        "off": ""},
+	"footman": {"file": "erland_militia", "main": "sword_short", "off": "shield_rect", "mx": MX_SNS},
+	"archer":  {"file": "erland_archer",  "main": "crossbow",    "off": "", "mx": MX_RIFLE},
+	"raider":  {"file": "nomad_raider",   "main": "saber",       "off": "shield_sun", "mx": MX_SNS},
+	"rarcher": {"file": "nomad_archer",   "main": "bow",         "off": "", "mx": MX_BOW},
+	"rider":   {"file": "nomad_archer",   "main": "bow",         "off": "", "mx": MX_BOW},
+	"boss":    {"file": "nomad_khan",     "main": "axe2",        "off": "", "mx": MX_GREAT},
 }
 
 var gear_nodes: Array = []
@@ -514,7 +531,7 @@ func equip(main: String, off := "") -> void:
 				sk *= (n as Node3D).scale.x
 			n = n.get_parent()
 		prop.scale = Vector3.ONE / maxf(sk, 0.0001)
-		prop.transform = Transform3D(_grip(wd["hand"] == "RightHand"), Vector3.ZERO) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
+		prop.transform = Transform3D(_grip_for(w, wd["hand"] == "RightHand"), Vector3.ZERO) * Transform3D(Basis.from_scale(prop.scale), Vector3.ZERO)
 		att.add_child(prop)
 		gear_nodes.append(att)
 	var set_name := "unarmed"
@@ -535,6 +552,22 @@ func equip(main: String, off := "") -> void:
 	play(a_idle)
 
 
+## Хват под клипы Mixamo (подобран стендом scripts/grip_test.gd): поворот предмета в кости руки, градусы.
+const GRIPS_MX := {
+	"sword": Vector3(0, 0, 270), "sword_short": Vector3(0, 0, 270), "saber": Vector3(0, 0, 270),
+	"shield_rect": Vector3(0, 0, 90), "shield_tower": Vector3(0, 0, 90), "shield_sun": Vector3(0, 0, 90),
+	"bow": Vector3(0, 0, 0), "crossbow": Vector3(0, 0, 0), "axe2": Vector3(0, 0, 0),
+}
+var use_mx_grip := false
+
+
+func _grip_for(w: String, right: bool) -> Basis:
+	if use_mx_grip and GRIPS_MX.has(w):
+		var e: Vector3 = GRIPS_MX[w]
+		return Basis.from_euler(Vector3(deg_to_rad(e.x), deg_to_rad(e.y), deg_to_rad(e.z)))
+	return _grip(right)
+
+
 ## Поворот предмета в кисти (клинок/щит относительно кости руки). Подбирается один раз под скелет Hunyuan.
 func _grip(right: bool) -> Basis:
 	var src := hand_test if right else hand_test_l
@@ -545,6 +578,24 @@ func _grip(right: bool) -> Basis:
 	else:
 		e = GRIP_R if right else GRIP_L
 	return Basis.from_euler(Vector3(deg_to_rad(e.x), deg_to_rad(e.y), deg_to_rad(e.z)))
+
+
+## Подключить клипы Mixamo для этого персонажа: простой, бег, урон, смерть и набор ударов.
+func _apply_mx(mx: Dictionary, file: String) -> void:
+	for pk in mx["packs"]:
+		var path := "res://assets/hy/mx_%s_%s.res" % [pk, file]
+		if ResourceLoader.exists(path):
+			anim.add_animation_library("mx_" + pk, load(path) as AnimationLibrary)
+	for n in [mx["idle"], mx["run"]]:
+		if anim.has_animation(n):
+			anim.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+	a_idle = mx["idle"]; a_run = mx["run"]; a_hit = mx["hit"]; a_die = mx["die"]
+	a_attacks = []
+	for a in mx["attacks"]:
+		a_attacks.append(a)
+	atk_speed = mx["speed"]
+	cur = ""
+	play(a_idle)
 
 
 func _equip_default() -> void:
