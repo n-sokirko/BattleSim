@@ -320,6 +320,11 @@ func fx_hit(p: Vector3) -> void:
 	tw.tween_callback(m.queue_free)
 
 
+## Сбитая цель: короткая светлая вспышка у ног.
+func fx_stagger(p: Vector3) -> void:
+	fx_ring(p, 1.1, Color(1.0, 0.95, 0.6))
+
+
 func fx_ring(p: Vector3, r: float, c: Color) -> void:
 	var m := MeshInstance3D.new()
 	var t := TorusMesh.new(); t.inner_radius = r * 0.92; t.outer_radius = r
@@ -398,10 +403,10 @@ func cast(i: int) -> void:
 		1:
 			for u in units:
 				if u.team == 1 and u.state != Unit.S.DEAD and u.global_position.distance_to(hp) < 7.0:
-					u.stun = 2.0
 					var away := (u.global_position - hp).normalized() * 1.8
 					u.global_position += Vector3(away.x, 0, away.z)
-					u.hurt(30.0, hero)
+					u.hurt(30.0, hero, 0.0)
+					u.stagger(1.6)
 			fx_ring(hp, 7.0, Color(1, 0.4, 0.2))
 		2:
 			for u in units:
@@ -645,6 +650,8 @@ func _process(dt: float) -> void:
 		_projectiles_tick(dt)
 		_chests_tick()
 	_update_hud(dt)
+	if not auto:
+		_update_cursor(mp)
 	if auto and hero.state != Unit.S.DEAD:
 		pivot.position = pivot.position.lerp(hero.global_position, 0.08)
 	if auto:
@@ -664,7 +671,7 @@ func _projectiles_tick(dt: float) -> void:
 		if to.length() > 0.01:
 			m.look_at(m.position + to, Vector3.UP)
 		if to.length() <= step:
-			tg.hurt(p["dmg"] * randf_range(0.85, 1.15), p["src"])
+			tg.hurt(p["dmg"] * randf_range(0.85, 1.15), p["src"], 6.0)
 			m.queue_free(); projectiles.erase(p)
 		else:
 			m.position += to.normalized() * step
@@ -708,6 +715,64 @@ func _camps_tick(_dt: float) -> void:
 				if is_instance_valid(u) and u.state != Unit.S.DEAD:
 					u.asleep = true; u.target = null; u.forced = false
 					u.order_move(u.home); u.hp = u.max_hp
+
+
+# ---------------------------------------------------------------- курсор
+
+var cur_cursor := "?"
+var cursor_tex := {}
+
+
+## Курсор из значка: цветной силуэт с тёмной обводкой.
+func _cursor_for(icon: String, col: Color) -> ImageTexture:
+	var key := icon + str(col)
+	if cursor_tex.has(key):
+		return cursor_tex[key]
+	var src: Image = (load("res://assets/ui/icons/%s.svg" % icon) as Texture2D).get_image()
+	src.convert(Image.FORMAT_RGBA8)
+	src.resize(32, 32, Image.INTERPOLATE_LANCZOS)
+	var out := Image.create(36, 36, false, Image.FORMAT_RGBA8)
+	for x in 32:
+		for y in 32:
+			if src.get_pixel(x, y).a > 0.25:
+				for dx in [-1, 0, 1, 2, 3]:
+					for dy in [-1, 0, 1, 2, 3]:
+						out.set_pixel(x + dx, y + dy, Color(0.05, 0.03, 0.02, 0.95))
+	for x in 32:
+		for y in 32:
+			var a := src.get_pixel(x, y).a
+			if a > 0.05:
+				var under := out.get_pixel(x + 2, y + 2)
+				out.set_pixel(x + 2, y + 2, under.lerp(Color(col, 1.0), a))
+	var t := ImageTexture.create_from_image(out)
+	cursor_tex[key] = t
+	return t
+
+
+func _update_cursor(mp: Vector2) -> void:
+	var want := ""
+	if not ui.over_ui(mp) and not finished:
+		if cmd_mode == "attack":
+			want = "attack"
+		elif cmd_mode == "move":
+			want = "move"
+		elif not selection.is_empty() and _unit_at(mp, 1) != null:
+			want = "attack"
+		else:
+			var g = _screen_ground(mp)
+			if g != null and not selection.is_empty():
+				for c in chests:
+					if not c["opened"] and Vector2(g.x - c["pos"].x, g.z - c["pos"].z).length() < 2.2:
+						want = "pickup"
+						break
+	if want == cur_cursor:
+		return
+	cur_cursor = want
+	match want:
+		"attack": Input.set_custom_mouse_cursor(_cursor_for("attack", Color(1.0, 0.35, 0.3)), Input.CURSOR_ARROW, Vector2(18, 18))
+		"move": Input.set_custom_mouse_cursor(_cursor_for("move", Color(0.45, 1.0, 0.5)), Input.CURSOR_ARROW, Vector2(18, 18))
+		"pickup": Input.set_custom_mouse_cursor(_cursor_for("chest", Color(1.0, 0.85, 0.3)), Input.CURSOR_ARROW, Vector2(18, 18))
+		_: Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 
 
 func _chests_tick() -> void:

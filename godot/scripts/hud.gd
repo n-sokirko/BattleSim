@@ -26,6 +26,11 @@ var hp_bar: ColorRect
 var hp_back: ColorRect
 var hp_text: Label
 var xp_bar: ColorRect
+var xp_back: ColorRect
+var stat_rows := {}
+var lbl_level: Label
+var lbl_buff: Label
+var hero_only: Array = []
 var group_box: GridContainer
 var group_cells: Array = []
 var inv_box: Control
@@ -40,6 +45,13 @@ class SelBox extends Control:
 		var r := Rect2(a, b - a).abs()
 		draw_rect(r, Color(0.3, 1, 0.4, 0.12), true)
 		draw_rect(r, Color(0.3, 1, 0.4, 0.9), false, 2.0)
+
+## Иконка: рисует текстуру ровно в свой квадрат (цвет задаётся через modulate).
+class Ico extends Control:
+	var tex: Texture2D
+	func _draw() -> void:
+		if tex != null:
+			draw_texture_rect(tex, Rect2(Vector2.ZERO, size), false)
 
 class Mini extends Control:
 	var game
@@ -103,6 +115,23 @@ func _label(parent: Node, text: String, size := 16, col := INK) -> Label:
 	return l
 
 
+static var _icons := {}
+
+
+## Иконка из набора res://assets/ui/icons (белый силуэт; цвет задаётся через modulate).
+func _icon(parent: Node, name: String, px: float, col := INK) -> Control:
+	if not _icons.has(name):
+		_icons[name] = load("res://assets/ui/icons/%s.svg" % name)
+	var t := Ico.new()
+	t.tex = _icons[name]
+	t.custom_minimum_size = Vector2(px, px)
+	t.size = Vector2(px, px)
+	t.modulate = col
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(t)
+	return t
+
+
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -123,13 +152,19 @@ func over_ui(p: Vector2) -> bool:
 
 func _build_top() -> void:
 	var box := Panel.new()
-	box.add_theme_stylebox_override("panel", _style(Color(DARK, 0.88), BRASS))
+	box.add_theme_stylebox_override("panel", _style(Color(DARK, 0.9), BRASS))
 	box.position = Vector2(12, 12)
-	box.size = Vector2(330, 62)
+	box.size = Vector2(300, 92)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(box)
+	# три строки: главная цель, лагеря, сундуки
+	var rows := [["goal", Color(0.95, 0.45, 0.35)], ["camp", BRASS_HI], ["chest", Color(1.0, 0.85, 0.35)]]
+	for i in rows.size():
+		var ic := _icon(box, rows[i][0], 24, rows[i][1])
+		ic.position = Vector2(10, 7 + i * 28)
 	lbl_goal = _label(box, "", 16)
-	lbl_goal.position = Vector2(12, 6)
+	lbl_goal.position = Vector2(42, 6)
+	lbl_goal.add_theme_constant_override("line_spacing", 6)
 	lbl_msg = _label(self, "", 20)
 	lbl_msg.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	lbl_msg.position = Vector2(-500, 90)
@@ -197,9 +232,33 @@ func _build_panel() -> void:
 	cf.position = Vector2(378, 14)
 	cf.size = Vector2(430, 186)
 	panel.add_child(cf)
-	lbl_stats = _label(cf, "", 15)
-	lbl_stats.position = Vector2(12, 8)
-	lbl_stats.size = Vector2(250, 170)
+	lbl_stats = _label(cf, "", 18, BRASS_HI)
+	lbl_stats.position = Vector2(14, 8)
+	lbl_stats.size = Vector2(250, 26)
+	# характеристики: значок и число
+	for i in 3:
+		var key: String = ["dmg", "speed", "hp"][i]
+		var ic := _icon(cf, key, 24, Color(0.85, 0.7, 0.35) if key != "hp" else Color(0.9, 0.35, 0.3))
+		ic.position = Vector2(14, 42 + i * 28)
+		var lb := _label(cf, "", 17)
+		lb.position = Vector2(46, 40 + i * 28)
+		stat_rows[key] = [ic, lb]
+	var lv_ic := _icon(cf, "level", 24, Color(0.55, 0.85, 0.7))
+	lv_ic.position = Vector2(14, 126)
+	lbl_level = _label(cf, "", 17)
+	lbl_level.position = Vector2(46, 124)
+	xp_back = ColorRect.new(); xp_back.color = Color(0.02, 0.02, 0.02)
+	xp_back.position = Vector2(46, 154); xp_back.size = Vector2(190, 12)
+	cf.add_child(xp_back)
+	xp_bar = ColorRect.new(); xp_bar.color = Color(0.4, 0.75, 0.95)
+	xp_bar.position = Vector2(47, 155); xp_bar.size = Vector2(188, 10)
+	cf.add_child(xp_bar)
+	var xp_ic := _icon(cf, "xp", 18, Color(0.5, 0.8, 1.0))
+	xp_ic.position = Vector2(24, 152)
+	lbl_buff = _label(cf, "", 13, Color(0.6, 0.85, 0.7))
+	lbl_buff.position = Vector2(14, 168)
+	lbl_buff.size = Vector2(250, 18)
+	hero_only = [lv_ic, lbl_level, xp_back, xp_bar, xp_ic]
 	group_box = GridContainer.new()
 	group_box.columns = 6
 	group_box.position = Vector2(12, 10)
@@ -217,6 +276,8 @@ func _build_panel() -> void:
 		slot.position = Vector2((i % 2) * 74, 20 + (i / 2) * 50)
 		slot.size = Vector2(68, 46)
 		inv_box.add_child(slot)
+		var si := _icon(slot, "slot", 30, Color(0.5, 0.42, 0.25, 0.28))
+		si.position = Vector2(19, 8)
 	# карта команд
 	var kf := Panel.new()
 	kf.add_theme_stylebox_override("panel", _style(DARKER, BRASS, 3, 2))
@@ -244,9 +305,29 @@ func _build_panel() -> void:
 		b.add_theme_color_override("font_disabled_color", Color(0.5, 0.46, 0.4))
 		b.pressed.connect(_on_cmd.bind(cmds[i][0]))
 		b.tooltip_text = "%s (%s)" % [cmds[i][1].replace("\n", " "), cmds[i][2]]
-		b.text = "%s\n[%s]" % [cmds[i][1], cmds[i][2]]
 		kf.add_child(b)
 		cmd_buttons[cmds[i][0]] = b
+		# значок, горячая клавиша, подпись, шторка перезарядки
+		var ic := _icon(b, cmds[i][0], 30, INK)
+		ic.position = Vector2(21, 3)
+		var hk := _label(b, cmds[i][2], 12, BRASS_HI)
+		hk.position = Vector2(5, 1)
+		hk.add_theme_constant_override("outline_size", 3)
+		var nm := _label(b, cmds[i][1], 11, Color(0.8, 0.75, 0.65))
+		nm.position = Vector2(0, 36)
+		nm.size = Vector2(72, 16)
+		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nm.add_theme_constant_override("outline_size", 3)
+		var cd := ColorRect.new()
+		cd.color = Color(0, 0, 0, 0.66)
+		cd.position = Vector2(2, 2); cd.size = Vector2(68, 50)
+		cd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cd.visible = false
+		b.add_child(cd)
+		var cl := _label(b, "", 20, Color(1, 0.92, 0.7))
+		cl.position = Vector2(0, 12); cl.size = Vector2(72, 28)
+		cl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.set_meta("ic", ic); b.set_meta("cd", cd); b.set_meta("cdl", cl)
 	var hint := _label(kf, "Бойцы: ПКМ — идти/бить", 11, Color(0.6, 0.55, 0.45))
 	hint.position = Vector2(8, 138)
 	var hint2 := _label(kf, "Рамка — выбрать, Ctrl+A — все", 11, Color(0.6, 0.55, 0.45))
@@ -316,7 +397,10 @@ func refresh(dt: float) -> void:
 	var left := 0
 	for c in game.camps:
 		if not c["cleared"]: left += 1
-	lbl_goal.text = "Задача: победить хана Кобека\nЛагерей осталось: %d из %d" % [left, game.camps.size()]
+	var chests_open := 0
+	for c in game.chests:
+		if c["opened"]: chests_open += 1
+	lbl_goal.text = "Победить хана Кобека\nЛагерей: %d из %d" % [game.camps.size() - left, game.camps.size()] + "\nСундуков: %d из %d" % [chests_open, game.chests.size()]
 	minimap.queue_redraw()
 	var sel: Array = game.selection
 	var first: Unit = sel[0] if sel.size() > 0 else null
@@ -341,37 +425,61 @@ func refresh(dt: float) -> void:
 	group_box.visible = sel.size() > 1
 	lbl_stats.visible = sel.size() <= 1
 	inv_box.visible = first != null and first.is_hero and sel.size() == 1
-	if sel.size() <= 1 and first != null:
-		var s := "%s\n" % first.title
+	var show_stats := sel.size() <= 1 and first != null
+	for k in stat_rows:
+		(stat_rows[k][0] as Control).visible = show_stats
+		(stat_rows[k][1] as Control).visible = show_stats
+	lbl_buff.visible = show_stats
+	for n in hero_only:
+		(n as Control).visible = show_stats and first.is_hero
+	if show_stats:
+		lbl_stats.text = first.title
+		stat_rows["dmg"][1].text = "%d%s" % [first.dmg * (1.0 + 0.1 * (first.level - 1)), "  дальний бой" if first.ranged else ""]
+		stat_rows["speed"][1].text = "%.1f" % first.speed
+		stat_rows["hp"][1].text = "%d / %d" % [first.hp, first.max_hp]
 		if first.is_hero:
 			var nxt: float = game.XP_AT[first.level] if first.level < game.XP_AT.size() else first.xp
-			s += "Уровень %d   опыт %d / %d\n" % [first.level, first.xp, nxt]
-		s += "Урон: %d%s\n" % [first.dmg * (1.0 + 0.1 * (first.level - 1)), "   (дальний бой)" if first.ranged else ""]
-		s += "Скорость: %.1f\n" % first.speed
-		s += "Здоровье: %d / %d" % [first.hp, first.max_hp]
-		if first.buff_t > 0.0: s += "\nКлич: +25% урона"
-		if first.guard_t > 0.0: s += "\nСтойкость: −30% урона"
-		lbl_stats.text = s
+			var prev: float = game.XP_AT[first.level - 1]
+			lbl_level.text = "Уровень %d      %d / %d" % [first.level, first.xp, nxt]
+			xp_bar.size.x = 188.0 * clampf((first.xp - prev) / maxf(nxt - prev, 1.0), 0.0, 1.0)
+		var buffs := ""
+		if first.buff_t > 0.0: buffs += "Клич: +25% урона   "
+		if first.guard_t > 0.0: buffs += "Стена: −30% урона"
+		lbl_buff.text = buffs
 	elif sel.size() > 1:
+		lbl_stats.text = ""
 		_rebuild_group(sel)
+	else:
+		lbl_stats.text = ""
 	# команды
 	var has_sel := sel.size() > 0
 	for k in ["move", "stop", "hold", "attack"]:
 		cmd_buttons[k].disabled = not has_sel
+		(cmd_buttons[k].get_meta("ic") as Control).modulate = INK if has_sel else Color(INK, 0.3)
 	for i in 4:
 		var b: Button = cmd_buttons["a%d" % i]
 		var open: bool = game.hero.level >= game.ABILITY_LEVEL[i]
 		var cdl: float = maxf(0.0, game.ab_ready[i] - game.t_game)
-		var nm: String = ["Клич", "Удар", "Вызов", "Стена"][i]
+		var cdr: ColorRect = b.get_meta("cd")
+		var cdt: Label = b.get_meta("cdl")
+		var aic: Control = b.get_meta("ic")
 		if not open:
-			b.text = "%s\nур. %d" % [nm.replace("\n", " "), game.ABILITY_LEVEL[i]]
 			b.disabled = true
+			cdr.visible = true; cdr.size.y = 50.0
+			cdt.text = "ур. %d" % game.ABILITY_LEVEL[i]
+			cdt.add_theme_font_size_override("font_size", 14)
+			aic.modulate = Color(INK, 0.3)
 		elif cdl > 0.0:
-			b.text = "%s\n%d с" % [nm.replace("\n", " "), ceili(cdl)]
 			b.disabled = true
+			cdr.visible = true; cdr.size.y = 50.0 * cdl / maxf(game.ABILITY_CD[i], 0.1)
+			cdt.text = str(ceili(cdl))
+			cdt.add_theme_font_size_override("font_size", 20)
+			aic.modulate = Color(INK, 0.55)
 		else:
-			b.text = "%s\n[%s]" % [nm, game.ABILITY_KEYS[i]]
 			b.disabled = false
+			cdr.visible = false
+			cdt.text = ""
+			aic.modulate = Color(1.0, 0.9, 0.55)
 	# сообщения
 	if toasts.size() > 0:
 		toasts[0][1] -= dt
@@ -407,7 +515,8 @@ func _rebuild_group(sel: Array) -> void:
 		cell.add_theme_stylebox_override("normal", _style(Color(0.12, 0.1, 0.08), BRASS, 2, 2))
 		cell.add_theme_stylebox_override("hover", _style(Color(0.25, 0.2, 0.1), BRASS_HI, 2, 2))
 		cell.add_theme_font_size_override("font_size", 13)
-		cell.text = {"hero": "Г", "footman": "М", "archer": "С"}.get(u.kind, "?")
+		var cic := _icon(cell, u.kind if u.kind != "" else "footman", 28, Color(1.0, 0.88, 0.5) if u.is_hero else INK)
+		cic.position = Vector2(8, 3)
 		cell.pressed.connect(game.select_only.bind(u))
 		var back := ColorRect.new(); back.color = Color(0, 0, 0)
 		back.position = Vector2(3, 36); back.size = Vector2(38, 5); back.mouse_filter = Control.MOUSE_FILTER_IGNORE

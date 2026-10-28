@@ -44,6 +44,11 @@ var asleep := false
 var camp = null
 var home := Vector3.ZERO
 var stun := 0.0
+var poise := 100.0
+var poise_max := 100.0
+var poise_t := 0.0
+var combo := 0
+var combo_t := 0.0
 var taunt_by: Unit = null
 var taunt_t := 0.0
 var buff_t := 0.0
@@ -98,6 +103,8 @@ func setup(k: String, t: int, g) -> void:
 	speed = d["speed"]; cooldown = d["cd"]
 	is_hero = k == "hero"
 	is_boss = k == "boss"
+	poise_max = 160.0 if is_hero else (320.0 if is_boss else 100.0)
+	poise = poise_max
 	load_shared()
 	var cfg: Dictionary = LOOKS[k]
 	model = (load("res://assets/hy/%s.glb" % cfg["file"]) as PackedScene).instantiate()
@@ -210,7 +217,8 @@ func order_stop() -> void:
 
 # ---------------------------------------------------------------- урон
 
-func hurt(amount: float, src: Unit) -> void:
+## poise_dmg: сколько стойкости снимает удар. Когда стойкость кончается, цель сбита: атака прервана, играет анимация урона.
+func hurt(amount: float, src: Unit, poise_dmg := 14.0) -> void:
 	if state == S.DEAD:
 		return
 	if guard_t > 0.0:
@@ -224,9 +232,24 @@ func hurt(amount: float, src: Unit) -> void:
 		return
 	if src != null and not forced and not has_goal and target == null and not asleep:
 		target = src
-	if state == S.IDLE and swing < 0.0 and stun <= 0.0 and randf() < 0.35:
-		play(a_hit, true)
-		cur = "hit"
+	poise_t = 0.0
+	if guard_t <= 0.0 and poise_dmg > 0.0:
+		poise -= poise_dmg
+		if poise <= 0.0:
+			stagger(0.8 if poise_dmg >= 50.0 else 0.55)
+
+
+## Сбить цель: прервать замах, сыграть анимацию урона, отложить следующий удар.
+func stagger(dur: float) -> void:
+	if state == S.DEAD:
+		return
+	poise = poise_max
+	stun = maxf(stun, dur)
+	swing = -1.0
+	cd = maxf(cd, dur + 0.25)
+	cur = "hit"
+	play(a_hit, true)
+	game.fx_stagger(global_position)
 
 
 func die(src: Unit) -> void:
@@ -262,10 +285,21 @@ func _tick_logic(dt: float) -> void:
 	if buff_t > 0.0: buff_t -= dt
 	if guard_t > 0.0: guard_t -= dt
 	(bar.material_override as ShaderMaterial).set_shader_parameter("ratio", clampf(hp / max_hp, 0.0, 1.0))
+	poise_t += dt
+	combo_t += dt
+	if combo_t > 3.5:
+		combo = 0
+	if poise_t > 2.0:
+		poise = minf(poise_max, poise + 30.0 * dt)
 	if stun > 0.0:
 		stun -= dt
-		play(a_idle)
+		if cur == "hit" and anim != null and not anim.is_playing():
+			cur = ""
+		if cur != "hit":
+			play(a_idle)
 		return
+	if cur == "hit" and anim != null and not anim.is_playing():
+		cur = ""
 	# атака в разгаре: ждём момента удара
 	if swing >= 0.0:
 		swing += dt
@@ -338,7 +372,13 @@ func _strike() -> void:
 	if ranged:
 		game.shoot(self, target, m)
 	elif _dist(target) <= reach + target.radius + 1.0:
-		target.hurt(m * randf_range(0.85, 1.15), self)
+		# каждый третий удар подряд — комбо-финиш: сильнее и надёжно сбивает цель
+		combo += 1
+		combo_t = 0.0
+		var heavy := combo % 3 == 0
+		if heavy:
+			m *= 1.4
+		target.hurt(m * randf_range(0.85, 1.15), self, 70.0 if heavy else 14.0)
 	cur = ""
 
 
