@@ -19,6 +19,7 @@ var panel: Panel
 var minimap: Control
 var portrait_rect: TextureRect
 var portrait_vp := {}
+var face_vp := {}
 var portrait_kind := ""
 var lbl_name: Label
 var lbl_stats: Label
@@ -52,6 +53,41 @@ class Ico extends Control:
 	func _draw() -> void:
 		if tex != null:
 			draw_texture_rect(tex, Rect2(Vector2.ZERO, size), false)
+
+## Кнопка команды с подробной подсказкой: название, клавиша, перезарядка, описание.
+class CmdButton extends Button:
+	var tip := {}
+	func _make_custom_tooltip(_for_text: String) -> Object:
+		var pc := PanelContainer.new()
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.07, 0.055, 0.04, 0.96)
+		sb.border_color = Color(0.85, 0.65, 0.3)
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(4)
+		sb.set_content_margin_all(10)
+		pc.add_theme_stylebox_override("panel", sb)
+		var vb := VBoxContainer.new()
+		vb.add_theme_constant_override("separation", 4)
+		pc.add_child(vb)
+		var head := Label.new()
+		head.text = "%s  [%s]" % [tip.get("name", ""), tip.get("key", "")]
+		head.add_theme_font_size_override("font_size", 17)
+		head.add_theme_color_override("font_color", Color(0.98, 0.82, 0.42))
+		vb.add_child(head)
+		if tip.has("meta"):
+			var meta := Label.new()
+			meta.text = tip["meta"]
+			meta.add_theme_font_size_override("font_size", 13)
+			meta.add_theme_color_override("font_color", Color(0.6, 0.8, 0.95))
+			vb.add_child(meta)
+		var body := Label.new()
+		body.text = tip.get("text", "")
+		body.custom_minimum_size = Vector2(270, 0)
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.add_theme_font_size_override("font_size", 14)
+		body.add_theme_color_override("font_color", Color(0.93, 0.89, 0.8))
+		vb.add_child(body)
+		return pc
 
 class Mini extends Control:
 	var game
@@ -240,6 +276,9 @@ func _build_panel() -> void:
 	portrait_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait_rect.stretch_mode = TextureRect.STRETCH_SCALE
 	pf.add_child(portrait_rect)
+	var vg := _vignette()
+	vg.position = portrait_rect.position; vg.size = portrait_rect.size
+	pf.add_child(vg)
 	lbl_name = _label(pf, "", 15, BRASS_HI)
 	lbl_name.position = Vector2(6, 137)
 	lbl_name.size = Vector2(138, 20)
@@ -319,7 +358,7 @@ func _build_panel() -> void:
 		["a0", "Клич", "Q"], ["a1", "Удар", "W"], ["a2", "Вызов", "E"], ["a3", "Стена", "R"],
 	]
 	for i in cmds.size():
-		var b := Button.new()
+		var b := CmdButton.new()
 		b.focus_mode = Control.FOCUS_NONE
 		b.size = Vector2(68, 66)
 		b.position = Vector2(16 + (i % 4) * 73, 12 + (i / 4) * 70)
@@ -331,7 +370,8 @@ func _build_panel() -> void:
 		b.add_theme_color_override("font_color", INK)
 		b.add_theme_color_override("font_disabled_color", Color(0.5, 0.46, 0.4))
 		b.pressed.connect(_on_cmd.bind(cmds[i][0]))
-		b.tooltip_text = "%s (%s)" % [cmds[i][1].replace("\n", " "), cmds[i][2]]
+		b.tip = _tip_for(cmds[i][0], cmds[i][2])
+		b.tooltip_text = b.tip["name"]
 		kf.add_child(b)
 		cmd_buttons[cmds[i][0]] = b
 		# значок, горячая клавиша, подпись, шторка перезарядки
@@ -359,6 +399,26 @@ func _build_panel() -> void:
 	hint.position = Vector2(16, 154)
 
 
+func _tip_for(id: String, key: String) -> Dictionary:
+	var d := {
+		"move": ["Идти", "Отряд идёт в точку и не ввязывается в бой, пока не отдан другой приказ."],
+		"stop": ["Стоять", "Прекратить текущий приказ. Бойцы сами отвечают тем, кто подошёл вплотную."],
+		"hold": ["Держать позицию", "Не покидать место: бить только тех, кто в досягаемости. Хорошо для лучников за спиной щитов."],
+		"attack": ["Атака с движением", "Идти в точку и атаковать каждого врага по пути."],
+	}
+	if d.has(id):
+		return {"name": d[id][0], "key": key, "text": d[id][1]}
+	var i := int(id.substr(1))
+	var info: Array = [
+		["радиус 20 м, длится 10 с", "Герой трубит в рог: все союзники рядом бьют на 25% сильнее."],
+		["радиус 7 м, урон 30", "Удар о землю отбрасывает врагов, наносит урон и сбивает их на 1,6 с: они не могут атаковать."],
+		["радиус 15 м, длится 5 с", "Враги вокруг (кроме вожаков) бросаются на героя, а он получает на 30% меньше урона. Отряд бьёт их с боков."],
+		["радиус 22 м, длится 10 с", "Союзники рядом становятся стеной: получают на 30% меньше урона."],
+	][i]
+	var names: Array = game.ABILITY_NAMES
+	return {"name": names[i], "key": key, "meta": "Уровень %d · перезарядка %d с · %s" % [game.ABILITY_LEVEL[i], game.ABILITY_CD[i], info[0]], "text": info[1]}
+
+
 func _on_cmd(id: String) -> void:
 	match id:
 		"move": game.cmd_mode = "move"
@@ -373,42 +433,111 @@ func _on_cmd(id: String) -> void:
 
 # ---------------------------------------------------------------- портрет
 
+## Живой портрет: настоящий боец (с оружием) в своей маленькой сцене, дышит в стойке, свет — тёплый сверху и холодный контровой.
+## close = лицо крупно (для значков группы), иначе по грудь в три четверти.
+func _make_portrait(kind: String, close: bool) -> SubViewport:
+	var vp := SubViewport.new()
+	vp.size = Vector2i(128, 128) if close else Vector2i(256, 256)
+	vp.own_world_3d = true
+	vp.transparent_bg = false
+	vp.msaa_3d = Viewport.MSAA_4X
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	var env := WorldEnvironment.new()
+	var e := Environment.new()
+	e.background_mode = Environment.BG_COLOR
+	e.background_color = Color(0.07, 0.12, 0.13)
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.55, 0.62, 0.7)
+	e.ambient_light_energy = 0.55
+	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.glow_enabled = true
+	env.environment = e
+	vp.add_child(env)
+	var u := Unit.new()
+	u.setup(kind, 0, game)
+	u.ring.visible = false
+	u.bar.visible = false
+	u.rotation.y = deg_to_rad(-16.0)
+	vp.add_child(u)
+	u.play(u.a_idle, true)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-32, -38, 0)
+	key.light_color = Color(1.0, 0.92, 0.8)
+	key.light_energy = 1.7
+	vp.add_child(key)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-18, 150, 0)
+	rim.light_color = Color(0.55, 0.75, 1.0)
+	rim.light_energy = 1.3
+	vp.add_child(rim)
+	var cam := Camera3D.new()
+	cam.fov = 30.0
+	vp.add_child(cam)
+	add_child(vp)
+	var box := _aabb(u.model, u)
+	var sc: float = u.model.scale.y
+	var h := box.size.y * sc
+	if h < 0.1:
+		h = 1.8
+	var cy := h * 0.72
+	var ext := h * 0.64
+	var dist := ext * 0.5 / tan(deg_to_rad(cam.fov * 0.5))
+	cam.position = Vector3(0.0, cy, dist)
+	cam.rotation_degrees = Vector3(-3, 0, 0)
+	# кадр по кости головы в живой позе (оружие и гребни искажают габариты), поэтому чуть позже
+	for t in [0.15, 0.3, 0.42]:
+		get_tree().create_timer(t).timeout.connect(_frame_face.bind(u, cam, close))
+	if close:
+		# значок группы рисуется один раз, когда боец уже встал в стойку
+		get_tree().create_timer(0.5).timeout.connect(func(): vp.render_target_update_mode = SubViewport.UPDATE_DISABLED)
+	return vp
+
+
+func _frame_face(u: Unit, cam: Camera3D, close: bool) -> void:
+	if not is_instance_valid(u) or not is_instance_valid(cam):
+		return
+	var sk := u.model.find_child("Skeleton3D", true, false) as Skeleton3D
+	if sk == null:
+		return
+	for i in sk.get_bone_count():
+		var bn := sk.get_bone_name(i).to_lower()
+		if bn.ends_with("head") and not bn.contains("top"):
+			var hp: Vector3 = sk.global_transform * sk.get_bone_global_pose(i).origin
+			var hh := (hp.y - u.global_position.y) / 0.93
+			var d2 := hh * (0.36 if close else 0.52) * 0.5 / tan(deg_to_rad(cam.fov * 0.5))
+			cam.position = Vector3(hp.x, hp.y + hh * (0.03 if close else -0.10), hp.z + d2)
+			return
+
+
 func _portrait(kind: String) -> Texture2D:
 	if not portrait_vp.has(kind):
-		var vp := SubViewport.new()
-		vp.size = Vector2i(256, 256)
-		vp.own_world_3d = true
-		vp.transparent_bg = false
-		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-		var env := WorldEnvironment.new()
-		var e := Environment.new()
-		e.background_mode = Environment.BG_COLOR
-		e.background_color = Color(0.16, 0.14, 0.12)
-		e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		e.ambient_light_color = Color(0.7, 0.7, 0.75)
-		e.ambient_light_energy = 0.8
-		env.environment = e
-		vp.add_child(env)
-		var m := Unit.make_model(kind)
-		vp.add_child(m)
-		var light := DirectionalLight3D.new()
-		light.rotation_degrees = Vector3(-30, 30, 0)
-		vp.add_child(light)
-		var cam := Camera3D.new()
-		cam.position = Vector3(0, 1.55, 1.7)
-		cam.rotation_degrees = Vector3(-6, 0, 0)
-		cam.fov = 38.0
-		vp.add_child(cam)
-		add_child(vp)
-		var box := _aabb(m, vp)
-		if box.size.y > 0.1:
-			var cx := box.position.x + box.size.x * 0.5
-			var top := box.position.y + box.size.y
-			cam.position = Vector3(cx, top - box.size.y * 0.24, box.size.y * 1.05 + 0.4)
-			cam.rotation_degrees = Vector3(-4, 0, 0)
-			cam.fov = 34.0
-		portrait_vp[kind] = vp
+		portrait_vp[kind] = _make_portrait(kind, false)
 	return portrait_vp[kind].get_texture()
+
+
+func _face(kind: String) -> Texture2D:
+	if not face_vp.has(kind):
+		face_vp[kind] = _make_portrait(kind, true)
+	return face_vp[kind].get_texture()
+
+
+## Радиальное затемнение по краям: портрет «в рамке», а не прямоугольник картинки.
+func _vignette() -> TextureRect:
+	var g := Gradient.new()
+	g.colors = PackedColorArray([Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, 0.62)])
+	g.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	gt.width = 128; gt.height = 128
+	var r := TextureRect.new()
+	r.texture = gt
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
 
 
 # ---------------------------------------------------------------- кадр
@@ -527,7 +656,7 @@ func _rebuild_group(sel: Array) -> void:
 			var c: Dictionary = group_cells[i]
 			var u: Unit = c["unit"]
 			if is_instance_valid(u):
-				c["bar"].size.x = 36.0 * clampf(u.hp / u.max_hp, 0.0, 1.0)
+				c["bar"].size.x = 48.0 * clampf(u.hp / u.max_hp, 0.0, 1.0)
 		return
 	group_box.set_meta("key", key)
 	for ch in group_box.get_children():
@@ -536,18 +665,24 @@ func _rebuild_group(sel: Array) -> void:
 	for u in sel:
 		var cell := Button.new()
 		cell.focus_mode = Control.FOCUS_NONE
-		cell.custom_minimum_size = Vector2(44, 44)
-		cell.add_theme_stylebox_override("normal", _style(Color(0.12, 0.1, 0.08), BRASS, 2, 2))
-		cell.add_theme_stylebox_override("hover", _style(Color(0.25, 0.2, 0.1), BRASS_HI, 2, 2))
-		cell.add_theme_font_size_override("font_size", 13)
-		var cic := _icon(cell, u.kind if u.kind != "" else "footman", 28, Color(1.0, 0.88, 0.5) if u.is_hero else INK)
-		cic.position = Vector2(8, 3)
+		cell.custom_minimum_size = Vector2(56, 62)
+		var edge := BRASS_HI if u.is_hero else BRASS
+		cell.add_theme_stylebox_override("normal", _style(Color(0.05, 0.045, 0.04), edge, 2, 2))
+		cell.add_theme_stylebox_override("hover", _style(Color(0.2, 0.16, 0.08), BRASS_HI, 2, 2))
+		cell.add_theme_stylebox_override("pressed", _style(Color(0.3, 0.22, 0.1), BRASS_HI, 2, 2))
+		var face := TextureRect.new()
+		face.texture = _face(u.kind)
+		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		face.stretch_mode = TextureRect.STRETCH_SCALE
+		face.position = Vector2(3, 3); face.size = Vector2(50, 48)
+		face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(face)
 		cell.pressed.connect(game.select_only.bind(u))
 		var back := ColorRect.new(); back.color = Color(0, 0, 0)
-		back.position = Vector2(3, 36); back.size = Vector2(38, 5); back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		back.position = Vector2(3, 53); back.size = Vector2(50, 6); back.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(back)
 		var bar := ColorRect.new(); bar.color = Color(0.3, 0.85, 0.35)
-		bar.position = Vector2(4, 37); bar.size = Vector2(36, 3); bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.position = Vector2(4, 54); bar.size = Vector2(48, 4); bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(bar)
 		group_box.add_child(cell)
 		group_cells.append({"unit": u, "bar": bar})

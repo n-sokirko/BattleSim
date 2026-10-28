@@ -44,6 +44,11 @@ var toasts: Array = []
 var shot_dir := ""
 var no_edge := false
 var auto := false
+var shake := 0.0
+var fx_test := false
+var fx_i := 0
+var fx_clock := 0.0
+var sel_all_test := false
 var shots_done := 0
 var next_shot := 3.0
 var log_lines: Array[String] = []
@@ -65,6 +70,10 @@ func _ready() -> void:
 			cam_zoom = float(a.substr(7))
 		elif a == "--auto":
 			auto = true
+		elif a == "--fxtest":
+			fx_test = true
+		elif a == "--selall":
+			sel_all_test = true
 		elif a.begins_with("--speed="):
 			Engine.time_scale = float(a.substr(8))
 	seed(7)
@@ -74,6 +83,8 @@ func _ready() -> void:
 	_build_party()
 	_build_hud()
 	fog.update(0.0, true)
+	if sel_all_test:
+		_select_all()
 	_toast("Каэл со своим отрядом. ПКМ — идти и бить. Q W E R — способности. Лагеря спят, пока не подойдёшь.", 8.0)
 
 
@@ -455,6 +466,10 @@ func _log(s: String) -> void:
 
 # ---------------------------------------------------------------- способности
 
+func shake_cam(a: float) -> void:
+	shake = maxf(shake, a)
+
+
 func cast(i: int) -> void:
 	if finished or hero.state == Unit.S.DEAD:
 		return
@@ -471,7 +486,8 @@ func cast(i: int) -> void:
 			for u in units:
 				if u.team == 0 and u.state != Unit.S.DEAD and u.global_position.distance_to(hp) < 20.0:
 					u.buff_t = 10.0
-			fx_ring(hp, 20.0, Color(1, 0.8, 0.3))
+					Fx.aura(self, u, Color(1.0, 0.82, 0.38), 10.0)
+			Fx.cry(self, hp, 20.0)
 		1:
 			for u in units:
 				if u.team == 1 and u.state != Unit.S.DEAD and u.global_position.distance_to(hp) < 7.0:
@@ -479,18 +495,21 @@ func cast(i: int) -> void:
 					u.global_position += Vector3(away.x, 0, away.z)
 					u.hurt(30.0, hero, 0.0)
 					u.stagger(1.6)
-			fx_ring(hp, 7.0, Color(1, 0.4, 0.2))
+					fx_hit(u.global_position + Vector3(0, 1.0, 0))
+			Fx.slam(self, hp, 7.0)
 		2:
 			for u in units:
 				if u.team == 1 and u.state != Unit.S.DEAD and not u.is_boss and u.global_position.distance_to(hp) < 15.0:
 					u.taunt_by = hero; u.taunt_t = 5.0; u.target = hero; u.forced = true
+					Fx.alert(self, u)
 			hero.guard_t = 5.0
-			fx_ring(hp, 15.0, Color(1, 0.2, 0.2))
+			Fx.taunt(self, hp, 15.0)
 		3:
 			for u in units:
 				if u.team == 0 and u.state != Unit.S.DEAD and u.global_position.distance_to(hp) < 22.0:
 					u.guard_t = 10.0
-			fx_ring(hp, 22.0, Color(0.4, 0.7, 1.0))
+					Fx.aura(self, u, Color(0.45, 0.75, 1.0), 10.0)
+			Fx.ward(self, hp, 22.0)
 	_log("cast %d" % i)
 
 
@@ -721,6 +740,9 @@ func _process(dt: float) -> void:
 	pivot.position.y = lerpf(pivot.position.y, terrain.height(pivot.position.x, pivot.position.z), 0.12)
 	cam.position = cam.position.lerp(Vector3(0, sin(deg_to_rad(55.0)) * cam_zoom, cos(deg_to_rad(55.0)) * cam_zoom), 0.2)
 	pivot.rotation.y = cam_yaw
+	shake = move_toward(shake, 0.0, dt * 1.6)
+	cam.h_offset = randf_range(-1.0, 1.0) * shake * 0.5
+	cam.v_offset = randf_range(-1.0, 1.0) * shake * 0.5
 	# бойцы
 	if not finished:
 		for u in units.duplicate():
@@ -736,8 +758,36 @@ func _process(dt: float) -> void:
 		pivot.position = pivot.position.lerp(hero.global_position, 0.08)
 	if auto:
 		_auto_tick(dt)
+	if fx_test:
+		_fx_test(dt)
 	if shot_dir != "":
 		_shots(dt)
+
+
+## Проверка эффектов способностей: каждые 3 с срабатывает следующая, снимок через 0.45 с.
+func _fx_test(dt: float) -> void:
+	fx_clock += dt
+	hero.level = 4
+	var step := fx_clock - 1.0
+	if step < 0.0 or fx_i >= 4:
+		if fx_i >= 4 and fx_clock > 14.5:
+			get_tree().quit()
+		return
+	var phase := fmod(step, 3.0)
+	var idx := int(step / 3.0)
+	if idx != fx_i:
+		return
+	if phase < 0.1 and ab_ready[idx] <= t_game:
+		cast(idx)
+		fx_shot_at = fx_clock + 0.45
+	if fx_shot_at > 0.0 and fx_clock >= fx_shot_at:
+		fx_shot_at = -1.0
+		DirAccess.make_dir_recursive_absolute(shot_dir)
+		get_viewport().get_texture().get_image().save_png("%s/fx_%d.png" % [shot_dir, idx])
+		fx_i += 1
+
+
+var fx_shot_at := -1.0
 
 
 func _projectiles_tick(dt: float) -> void:
@@ -811,7 +861,9 @@ func _cursor_tex(name: String) -> Texture2D:
 	if not cursor_tex.has(name):
 		if cursor_hot.is_empty():
 			cursor_hot = JSON.parse_string(FileAccess.get_file_as_string("res://assets/ui/gen/cursor_hotspots.json"))
-		cursor_tex[name] = load("res://assets/ui/gen/%s.png" % name)
+		var img: Image = (load("res://assets/ui/gen/%s.png" % name) as Texture2D).get_image()
+		img.convert(Image.FORMAT_RGBA8)
+		cursor_tex[name] = ImageTexture.create_from_image(img)
 	return cursor_tex[name]
 
 
@@ -819,6 +871,7 @@ func _set_cursor(name: String) -> void:
 	var t := _cursor_tex(name)
 	var h: Array = cursor_hot.get(name, [20, 20])
 	Input.set_custom_mouse_cursor(t, Input.CURSOR_ARROW, Vector2(h[0], h[1]))
+	Input.set_custom_mouse_cursor(t, Input.CURSOR_POINTING_HAND, Vector2(h[0], h[1]))
 
 
 func _update_cursor(mp: Vector2) -> void:
